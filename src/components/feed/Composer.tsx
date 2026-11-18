@@ -31,7 +31,7 @@ import { MAX_CONTENT_LENGTH, MAX_MEDIA_FILES } from "./types";
 import { LinkCard } from "./LinkCard";
 import { Toast, useToastState } from "./Toast";
 
-type ComposerType = "text" | "image" | "video" | "link" | "project" | "music" | "poll";
+export type ComposerType = "text" | "image" | "video" | "link" | "project" | "music" | "poll";
 
 const TYPE_BUTTONS: { id: ComposerType; label: string; icon: typeof Type }[] = [
   { id: "text", label: "Text", icon: Type },
@@ -77,9 +77,18 @@ interface PendingFile {
 export function Composer({
   onPosted,
   compact = false,
+  focusRequest,
 }: {
   onPosted: (post: PostDTO) => void;
   compact?: boolean;
+  /**
+   * External entry point used by page chrome (Discover hero quick
+   * actions, sidebar promo): each new request object switches the
+   * composer to the requested mode and focuses the text input. It
+   * only replays what clicking the type buttons does — draft,
+   * upload and submit semantics are untouched.
+   */
+  focusRequest?: { mode: ComposerType; nonce: number } | null;
 }) {
   const { tokens } = useTheme();
   const { isSignedIn, isLoaded } = useClerkAuth();
@@ -124,6 +133,13 @@ export function Composer({
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   }, [content]);
+
+  // Honor external focus requests (see the focusRequest prop).
+  useEffect(() => {
+    if (!focusRequest) return;
+    setKind(focusRequest.mode);
+    textareaRef.current?.focus();
+  }, [focusRequest]);
 
   // Close visibility dropdown on outside click.
   useEffect(() => {

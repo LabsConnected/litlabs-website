@@ -99,7 +99,7 @@ interface RawDashboardData {
   installations: Array<{ installation_id: number; created_at: string }>;
 }
 
-const SETTINGS_CONNECTIONS = "/settings?section=connections&returnTo=/dashboard";
+const SETTINGS_CONNECTIONS = "/settings?section=connections&returnTo=/studio";
 const STUDIO_GITHUB = "/studio/github";
 
 export function resolveGitHub(data: RawDashboardData): WorkspaceConnection {
@@ -366,8 +366,8 @@ export function _clearAiHealthCache(): void {
 export async function resolveAiProviders(): Promise<AiProviderHealth[]> {
   const [gemini, openrouter] = await Promise.all([probeGemini(), probeOpenRouter()]);
   return [
-    { ...gemini, label: "Gemini", category: "AI", action: { label: "Models", href: "/settings?section=ai-models&returnTo=/dashboard" } },
-    { ...openrouter, label: "OpenRouter", category: "AI", action: { label: "Models", href: "/settings?section=ai-models&returnTo=/dashboard" } },
+    { ...gemini, label: "Gemini", category: "AI", action: { label: "Models", href: "/settings?section=ai-models&returnTo=/studio" } },
+    { ...openrouter, label: "OpenRouter", category: "AI", action: { label: "Models", href: "/settings?section=ai-models&returnTo=/studio" } },
   ];
 }
 

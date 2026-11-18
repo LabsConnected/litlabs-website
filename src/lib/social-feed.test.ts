@@ -5,6 +5,9 @@ import {
   decodeCursor,
   isPostVisibleTo,
   listPosts,
+  normalizeProjectRef,
+  parseProjectRef,
+  serializeProjectRef,
 } from "./social-feed";
 
 vi.mock("@/lib/supabase-admin", () => ({
@@ -235,5 +238,100 @@ describe("listPosts", () => {
     await expect(
       listPosts({ viewerDbId: null, tab: "trending", limit: 10 }),
     ).rejects.toThrow(/Failed to load trending posts: db down/);
+  });
+});
+
+describe("projectRef contract", () => {
+  const canonical = {
+    projectId: "studio-proj-1",
+    name: "Dune Brew",
+    url: "https://litlabs.net/studio/dune-brew",
+  };
+
+  it("normalizeProjectRef accepts the canonical object and trims fields", () => {
+    expect(
+      normalizeProjectRef({ projectId: " studio-proj-1 ", name: "  Dune Brew ", url: canonical.url }),
+    ).toEqual(canonical);
+    expect(normalizeProjectRef({ name: "Name only" })).toEqual({
+      projectId: null,
+      name: "Name only",
+      url: null,
+    });
+  });
+
+  it("normalizeProjectRef rejects non-objects and refs without a name", () => {
+    expect(normalizeProjectRef(null)).toBe(null);
+    expect(normalizeProjectRef("studio-proj-1")).toBe(null);
+    expect(normalizeProjectRef({ projectId: "x" })).toBe(null);
+    expect(normalizeProjectRef({ name: "   " })).toBe(null);
+    expect(normalizeProjectRef({ name: 42 })).toBe(null);
+  });
+
+  it("normalizeProjectRef drops a non-https url instead of rejecting the ref", () => {
+    expect(normalizeProjectRef({ name: "P", url: "http://example.com/x" })).toEqual({
+      projectId: null,
+      name: "P",
+      url: null,
+    });
+  });
+
+  it("serialize → parse round-trips the canonical object", () => {
+    const stored = serializeProjectRef(canonical);
+    expect(typeof stored).toBe("string");
+    expect(JSON.parse(stored as string)).toEqual(canonical);
+    expect(parseProjectRef(stored)).toEqual(canonical);
+    expect(serializeProjectRef(null)).toBe(null);
+  });
+
+  it("parseProjectRef returns null for empty and malformed values", () => {
+    expect(parseProjectRef(null)).toBe(null);
+    expect(parseProjectRef(undefined)).toBe(null);
+    expect(parseProjectRef("")).toBe(null);
+    expect(parseProjectRef("{not json")).toBe(null);
+    expect(parseProjectRef('{"projectId":"x"}')).toBe(null); // no name
+  });
+
+  it("parseProjectRef tolerates legacy plain-id values stored before JSON refs", () => {
+    expect(parseProjectRef("legacy-project-id-42")).toEqual({
+      projectId: "legacy-project-id-42",
+      name: "",
+      url: null,
+    });
+  });
+
+  it("listPosts DTOs carry the parsed object, for JSON and legacy rows alike", async () => {
+    const base = new Date("2026-09-16T12:00:00.000Z").getTime();
+    const mkRow = (id: string, project_ref: string, offsetMs: number): MockRow => ({
+      id,
+      user_id: "db-author",
+      content: `project post ${id}`,
+      media_urls: [],
+      post_type: "project",
+      visibility: "public",
+      project_ref,
+      likes_count: 0,
+      comments_count: 0,
+      reposts_count: 0,
+      saves_count: 0,
+      shares_count: 0,
+      created_at: new Date(base + offsetMs).toISOString(),
+      updated_at: new Date(base + offsetMs).toISOString(),
+      users: { username: "author", name: "Author", avatar_url: null },
+    });
+    posts.push(mkRow("proj-json", serializeProjectRef(canonical) as string, 240000));
+    posts.push(mkRow("proj-legacy", "legacy-project-id-42", 300000));
+    try {
+      const res = await listPosts({ viewerDbId: null, tab: "for-you", limit: 25 });
+      const byId = new Map(res.posts.map((p) => [p.id, p]));
+      expect(byId.get("proj-json")?.projectRef).toEqual(canonical);
+      expect(byId.get("proj-legacy")?.projectRef).toEqual({
+        projectId: "legacy-project-id-42",
+        name: "",
+        url: null,
+      });
+    } finally {
+      posts.pop();
+      posts.pop();
+    }
   });
 });

@@ -72,8 +72,9 @@ export const VOICE_GATE_CONFIG = {
   ptt: {
     /** Push-to-talk is the default mode. Hands-free is removed. */
     defaultMode: "push_to_talk" as const,
-    /** Auto-send finalized transcript (default: false — show editable draft). */
-    autoSendDefault: false,
+    /** Auto-send finalized transcript (default: true — conversational hands-free;
+     *  users who turn it off get the editable-draft flow instead). */
+    autoSendDefault: true,
   },
 } as const;
 

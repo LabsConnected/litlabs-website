@@ -72,12 +72,18 @@ mkdirSync(SHOT_DIR, { recursive: true });
 // LITT_ACCEPTANCE_USER_ID (hard-required there). Locally, mint one inline —
 // the legacy QA fallback in resolveAcceptanceUserId is a PROD user that does
 // not exist on the Clerk TEST instance this script signs into.
+// The disposable user's email, when known: set from LITT_E2E_USER_EMAIL
+// (the workflow's create-fresh-user step minted the user and passes the
+// address it generated) or captured below when this script mints the
+// user itself. Stripe Checkout needs it — see CHECKOUT_EMAIL.
+let USER_EMAIL = process.env.LITT_E2E_USER_EMAIL || null;
 let USER_ID = process.env.LITT_ACCEPTANCE_USER_ID;
 if (!USER_ID && process.env.GITHUB_ACTIONS === "true") {
   USER_ID = resolveAcceptanceUserId({ isCI: true, envUserId: USER_ID });
 }
 if (!USER_ID) {
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  USER_EMAIL = `litt-acceptance-${stamp}@litlabs.net`;
   const resp = await fetch("https://api.clerk.com/v1/users", {
     method: "POST",
     headers: {
@@ -85,7 +91,7 @@ if (!USER_ID) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      email_address: [`litt-acceptance-${stamp}@litlabs.net`],
+      email_address: [USER_EMAIL],
       first_name: "LiTT",
       last_name: "Acceptance",
       public_metadata: { littAcceptance: true, createdAt: new Date().toISOString() },
@@ -98,6 +104,15 @@ if (!USER_ID) {
     throw new Error("fresh-user creation returned no valid user id");
   }
 }
+
+// Stripe-hosted Checkout opens with its email field EMPTY — the app's
+// checkout session creation passes no customer email, so the hosted page
+// never prefills it — and an empty email silently blocks submit (runs
+// #24–#26: the pay button was clicked, no payment_pages confirm request
+// ever fired, no navigation, no processing state). The Step 5 fill uses
+// the disposable user's own address; the STAMP-derived fallback only
+// covers a caller that minted a user without sharing the address.
+const CHECKOUT_EMAIL = USER_EMAIL || `litt-acceptance-${STAMP}@litlabs.net`;
 
 const WEBHOOK_POLL_MS = 150_000; // Stripe test-mode delivery is usually <30s; be generous.
 const RECHECK_DELAY_MS = 20_000; // second wallet read proves no double grant arrives late.
@@ -180,6 +195,14 @@ async function main() {
   const context = await browser.newContext();
   const page = await context.newPage();
 
+  // Stripe Link opens its checkout in a real popup window
+  // (checkout.link.com) — a separate Page in this same context. Track every
+  // new page from the start so a Link diversion is never invisible; the
+  // submit/recovery logic below closes Link popups and resumes the card
+  // flow instead of parking behind the "open Link window" overlay.
+  const contextPages = [];
+  context.on("page", (p) => contextPages.push(p));
+
   page.on("console", (msg) => {
     if (msg.type() === "error") verdict.consoleErrors.push(msg.text().slice(0, 400));
   });
@@ -257,39 +280,128 @@ async function main() {
     // (Payment Element). Probe the top document, then every frame.
     await page.goto(sessionUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
 
-    const emailSel = 'input[name="email"], #email';
-    await page.locator(emailSel).first()
-      .waitFor({ state: "visible", timeout: 45_000 })
-      .catch(() => {});
-    await page.locator(emailSel).first()
-      .fill(`litt-acceptance-${STAMP}@litlabs.net`)
-      .catch(() => {});
+    // The current hosted Checkout renders the contact + payment form
+    // INSIDE the cross-origin Stripe Payment Element iframe — page-level
+    // locators and page.evaluate only ever see the top document, so every
+    // interaction below must iterate browsing contexts (page first for the
+    // classic rendering, then Stripe's frames, then any remaining frame).
+    // Probe order mirrors the field probe further down.
+    const orderedContexts = () => {
+      const frames = page.frames().filter((f) => f !== page.mainFrame());
+      const stripe = frames.filter((f) => /elements-inner|js\.stripe\.com/.test(f.url()));
+      return [page, ...stripe, ...frames.filter((f) => !stripe.includes(f))];
+    };
+    // The payment form (email section + payment-method accordion + card
+    // fields) lives in the elements-inner frame flagged
+    // componentName=paymentForm; fall back to any elements-inner frame.
+    const paymentFormFrame = () =>
+      page.frames().find((f) => /elements-inner/.test(f.url()) && /componentName=paymentForm/.test(f.url()))
+      ?? page.frames().find((f) => /elements-inner/.test(f.url()));
 
-    // Some layouts gate the payment fields behind an email "Continue" step.
-    const cont = page.getByRole("button", { name: /continue|next/i }).first();
-    if (await cont.isVisible().catch(() => false)) {
-      await cont.click().catch(() => {});
-      await page.waitForTimeout(2000);
+    // The email input lives in the paymentForm frame on the current
+    // rendering (Link authentication section) — on the hosted page it
+    // sits in the main form area above the payment-method section.
+    // Manual proof (2026-11-13, human-paced staging checkout): the page
+    // opens with this field EMPTY and, once it is filled (and Link
+    // unchecked), the exact test-card payment this script attempts
+    // completes and redirects to the staging success URL. The fill this
+    // replaces never landed in runs #24–#26: it fired once on first
+    // visibility — racing Stripe's hydration re-renders — with a
+    // two-selector probe, swallowed every error, never read the value
+    // back, and was never reported in the filled step, so a wiped or
+    // failed fill was indistinguishable from success. It also filled a
+    // STAMP-derived address that was never the test user's email.
+    // Fill it the way #956 taught Name/ZIP: sweep every context with
+    // anchored label/placeholder locators (attribute selectors as
+    // fallback), poll, and read the value back — the field only counts
+    // as filled when the input actually holds the address. The hit is
+    // kept for the filled-step report and the pre-submit guard below.
+    const emailCandidates = (ctx) => [
+      ctx.getByLabel(/email/i),
+      ctx.getByPlaceholder(/you@example\.com|email/i),
+      ctx.locator('input[name="email"], #email, input[type="email"], input[autocomplete="email"]'),
+    ];
+    let emailHit = null; // { where, ctx, cand } — cand kept for the pre-submit guard
+    const emailDeadline = Date.now() + 45_000;
+    while (Date.now() < emailDeadline && !emailHit) {
+      for (const ctx of orderedContexts()) {
+        for (const cand of emailCandidates(ctx)) {
+          const el = cand.first();
+          if (!(await el.isVisible().catch(() => false))) continue;
+          await el.fill(CHECKOUT_EMAIL).catch(() => {});
+          const readBack = await el.inputValue().catch(() => "");
+          if (readBack.trim() === CHECKOUT_EMAIL) {
+            emailHit = { where: ctx === page ? "document" : "frame", ctx, cand };
+            break;
+          }
+        }
+        if (emailHit) break;
+      }
+      if (!emailHit) await page.waitForTimeout(500);
+    }
+
+    // Some layouts gate the payment fields behind an email "Continue"
+    // step — the button lives in the same context as the email field.
+    for (const ctx of emailHit ? [emailHit.ctx, page] : orderedContexts()) {
+      const cont = ctx.getByRole("button", { name: /continue|next/i }).first();
+      if (await cont.isVisible().catch(() => false)) {
+        await cont.click().catch(() => {});
+        await page.waitForTimeout(2000);
+        break;
+      }
     }
 
     // Accordion payment-method layout: the card inputs only mount after the
     // "Card" option is selected. The option's accessible name includes the
     // card-brand text, so match loosely and fall back to a text-node click
     // that bubbles into the row's handler. No-op when Card is the sole method.
+    // The accordion rows live inside the paymentForm iframe on the current
+    // rendering and are not native inputs, so search by role/text across
+    // contexts: page first (classic layouts still work), then the frames.
     let cardClicked = null;
-    for (const cand of [
-      page.getByRole("radio", { name: /card/i }),
-      page.getByRole("option", { name: /card/i }),
-      page.getByRole("button", { name: /^card$/i }),
-      page.locator('[role="radio"]:has-text("Card")'),
-      page.locator('[data-testid*="card"], [id*="card" i]'),
-      page.getByText(/^\s*Card\s*$/),
-      page.locator('label:has-text("Card")'),
-    ]) {
-      const el = cand.first();
-      if (await el.isVisible().catch(() => false)) {
-        await el.click({ timeout: 5_000 }).then(() => { cardClicked = "locator"; }).catch(() => {});
+    const clickCardIn = async (ctx) => {
+      for (const cand of [
+        ctx.getByRole("radio", { name: /card/i }),
+        ctx.getByRole("option", { name: /card/i }),
+        ctx.getByRole("button", { name: /^card$/i }),
+        // Current habanero rendering: the Card payment method is a
+        // div[role=button] whose text is "Card\nVisa\nMastercard…" —
+        // verified live 2026-11-14 (probe: card option expands the
+        // payment-numberInput/expiry/cvc fields on click).
+        ctx.locator('[role="button"]:has-text("Card")'),
+        ctx.locator('[role="radio"]:has-text("Card")'),
+        ctx.locator('[data-testid*="card"], [id*="card" i]'),
+        ctx.getByText(/^\s*Card\s*$/),
+        ctx.locator('label:has-text("Card")'),
+      ]) {
+        const el = cand.first();
+        if (await el.isVisible().catch(() => false)) {
+          const clicked = await el.click({ timeout: 5_000 }).then(() => true).catch(() => false);
+          if (clicked) return true;
+        }
+      }
+      return false;
+    };
+    for (const ctx of orderedContexts()) {
+      if (await clickCardIn(ctx)) {
+        cardClicked = ctx === page ? "locator" : "frame-locator";
         break;
+      }
+    }
+    // Evaluate fallbacks: leaf-element text click, first inside the
+    // payment form frame (where the accordion lives now), then in the top
+    // document (classic rendering).
+    if (!cardClicked) {
+      const pf = paymentFormFrame();
+      if (pf) {
+        cardClicked = await pf.evaluate(() => {
+          const els = [...document.querySelectorAll("*")].filter(
+            (e) => e.offsetParent && e.children.length === 0 && /^card$/i.test(e.textContent.trim()),
+          );
+          if (!els.length) return null;
+          els[0].click();
+          return "frame-evaluate";
+        }).catch(() => null);
       }
     }
     if (!cardClicked) {
@@ -304,20 +416,53 @@ async function main() {
     }
     await page.waitForTimeout(2000);
 
-    const cardSel = 'input[name="cardNumber"], #cardNumber';
-    const expirySel = 'input[name="cardExpiry"], #cardExpiry';
-    const cvcSel = 'input[name="cardCvc"], #cardCvc';
+    // Payment Element rendering: after the Card option expands, Stripe
+    // mounts its fields inside Stripe iframes that attach asynchronously.
+    // Wait for such an iframe to appear before polling so the field probe
+    // doesn't race the mount. (Harmless timeout on the classic rendering.)
+    await page.waitForFunction(
+      () => [...document.querySelectorAll("iframe")].some(
+        (f) => /elements-inner|js\.stripe\.com/.test(f.src || f.name || ""),
+      ),
+      null,
+      { timeout: 15_000 },
+    ).catch(() => {});
+
+    // Verify the selection actually expanded the Card section before the
+    // main probe: poll briefly for the card input to mount in any context.
+    // cardExpanded is recorded in the failure dump below, so a click that
+    // landed but never expanded is distinguishable from the run #22 mode,
+    // where the click itself never landed (cardClicked stayed null).
+    const cardSel = 'input[name="cardNumber"], #cardNumber, #Field-numberInput, input[autocomplete="cc-number"]';
+    let cardExpanded = false;
+    const expandDeadline = Date.now() + 15_000;
+    while (Date.now() < expandDeadline && !cardExpanded) {
+      for (const ctx of orderedContexts()) {
+        if (await ctx.locator(cardSel).first().isVisible().catch(() => false)) {
+          cardExpanded = true;
+          break;
+        }
+      }
+      if (!cardExpanded) await page.waitForTimeout(500);
+    }
+
+    // Stripe has shipped two hosted-Checkout renderings of the card fields:
+    // the classic inputs (name="cardNumber" / #cardNumber) and the current
+    // Payment Element inside Stripe iframes, whose inputs are
+    // #Field-numberInput / #Field-expiryInput / #Field-cvcInput with
+    // autocomplete="cc-number" / "cc-exp" / "cc-csc". Probe BOTH — the
+    // camelCase name probe alone can never match the Payment Element, which
+    // is why Step 5 timed out with "card input not found" on a healthy page.
+    const expirySel = 'input[name="cardExpiry"], #cardExpiry, #Field-expiryInput, input[autocomplete="cc-exp"]';
+    const cvcSel = 'input[name="cardCvc"], #cardCvc, #Field-cvcInput, input[autocomplete="cc-csc"]';
+    // Probe contexts in the orderedContexts() order defined above: top
+    // document first, then Stripe's own iframes, then any remaining frame.
     let cardCtx = null;
     const fieldDeadline = Date.now() + 45_000;
     while (Date.now() < fieldDeadline && !cardCtx) {
-      if (await page.locator(cardSel).first().isVisible().catch(() => false)) {
-        cardCtx = page;
-        break;
-      }
-      for (const frame of page.frames()) {
-        if (frame === page.mainFrame()) continue;
-        if (await frame.locator(cardSel).first().isVisible().catch(() => false)) {
-          cardCtx = frame;
+      for (const ctx of orderedContexts()) {
+        if (await ctx.locator(cardSel).first().isVisible().catch(() => false)) {
+          cardCtx = ctx;
           break;
         }
       }
@@ -326,12 +471,31 @@ async function main() {
     if (!cardCtx) {
       const frames = page.frames().map((f) => f.url());
       const inputs = await page.locator("input")
-        .evaluateAll((els) => els.map((e) => ({ id: e.id, name: e.name, type: e.type })))
+        .evaluateAll((els) => els.map((e) => ({ id: e.id, name: e.name, type: e.type, autocomplete: e.autocomplete })))
         .catch(() => []);
-      const radiogroup = await page.evaluate(() => {
+      // The card fields live in iframes on the current rendering, so dump
+      // every frame's inputs too — the top-document list alone cannot show
+      // what Stripe actually rendered.
+      const frameInputs = [];
+      for (const frame of page.frames()) {
+        if (frame === page.mainFrame()) continue;
+        const ins = await frame.locator("input")
+          .evaluateAll((els) => els.map((e) => ({ id: e.id, name: e.name, type: e.type, autocomplete: e.autocomplete })))
+          .catch(() => []);
+        frameInputs.push({ url: frame.url(), inputs: ins });
+      }
+      // The accordion's radiogroup (if any) renders inside the payment
+      // form frame on the current layout, so probe that frame as well as
+      // the top document — a page-only probe can never see it.
+      const radiogroupProbe = (root) => root.evaluate(() => {
         const g = document.querySelector('[role="radiogroup"],[role="listbox"]');
         return g ? g.outerHTML.slice(0, 4000) : null;
       }).catch(() => null);
+      let radiogroup = await radiogroupProbe(page);
+      if (!radiogroup) {
+        const pf = paymentFormFrame();
+        if (pf) radiogroup = await radiogroupProbe(pf);
+      }
       const paySection = await page.evaluate(() => {
         const el = [...document.querySelectorAll("div,section,fieldset,form")].find(
           (e) => e.textContent.includes("Cash App Pay") && e.textContent.length < 4000,
@@ -339,11 +503,11 @@ async function main() {
         return el ? el.outerHTML.slice(0, 6000) : document.body.innerHTML.slice(0, 6000);
       }).catch(() => null);
       writeFileSync(path.join(ARTIFACT_DIR, "checkout-dom.json"),
-        JSON.stringify({ cardClicked, frames, inputs, radiogroup, paySection }, null, 2));
+        JSON.stringify({ cardClicked, cardExpanded, frames, inputs, frameInputs, probedSelectors: { cardSel, expirySel, cvcSel }, radiogroup, paySection }, null, 2));
       writeFileSync(path.join(ARTIFACT_DIR, "checkout-body.html"),
         await page.evaluate(() => document.body.innerHTML).catch(() => ""));
       await shot(page, "stripe-checkout-no-fields");
-      throw new Error("card input not found in page or any frame (see checkout-dom.json)");
+      throw new Error(`card input not found in page or any frame — probed card=[${cardSel}] expiry=[${expirySel}] cvc=[${cvcSel}] (see checkout-dom.json)`);
     }
 
     // Informational only — the cs_test_ session gate is authoritative.
@@ -354,38 +518,500 @@ async function main() {
       testBadgeVisible ? "TEST MODE/Sandbox marker present" : "marker not detected (sessionId gate is authoritative)");
     await shot(page, "stripe-checkout");
 
+    // On the Payment Element rendering each field can live in its OWN
+    // Stripe iframe, so resolve expiry/CVC in whichever context actually
+    // holds them (falling back to the card field's context — correct for
+    // the classic single-context rendering).
+    const fieldCtx = async (sel) => {
+      for (const ctx of orderedContexts()) {
+        if (await ctx.locator(sel).first().isVisible().catch(() => false)) return ctx;
+      }
+      return cardCtx;
+    };
     await cardCtx.locator(cardSel).first().fill("4242424242424242");
-    await cardCtx.locator(expirySel).first().fill("1234");
-    await cardCtx.locator(cvcSel).first().fill("123");
-    const nameSel = 'input[name="billingName"], #billingName';
-    if (await cardCtx.locator(nameSel).first().isVisible().catch(() => false)) {
-      await cardCtx.locator(nameSel).first().fill("LiTT Acceptance");
+    await (await fieldCtx(expirySel)).locator(expirySel).first().fill("1234");
+    await (await fieldCtx(cvcSel)).locator(cvcSel).first().fill("123");
+    // Run #24 root cause: "Name on card" and "ZIP code" render in the
+    // checkout DOCUMENT context, not in the card iframe — the old probe
+    // looked only in cardCtx with classic name-attribute selectors and
+    // silently skipped both fields when they weren't there. Stripe's
+    // submit validation then blocked the payment with no error surfaced
+    // anywhere this script looks: no navigation, no processing state,
+    // and payment_success_redirect burned its full wait on the Stripe
+    // page. Sweep every context in orderedContexts() order (document
+    // first, then frames) with anchored label/placeholder locators —
+    // the classic attribute selectors stay as fallback — polling like
+    // the submit step below, and read each value back: a field only
+    // counts as filled when its input actually holds text.
+    const billingFields = [
+      {
+        name: "Name on card",
+        value: "LiTT E2E",
+        candidates: (ctx) => [
+          ctx.getByLabel(/name on card/i),
+          ctx.getByPlaceholder(/name on card/i),
+          ctx.locator('input[name="billingName"], #billingName, input[autocomplete="cc-name"]'),
+        ],
+      },
+      {
+        name: "ZIP code",
+        value: "49417",
+        candidates: (ctx) => [
+          ctx.getByLabel(/\b(zip|postal code)\b/i),
+          ctx.getByPlaceholder(/\bzip\b/i),
+          ctx.locator('input[name="billingPostalCode"], #billingPostalCode, input[autocomplete="postal-code"]'),
+        ],
+      },
+    ];
+    const filledBilling = []; // { name, where, cand } — cand kept for the pre-submit guard
+    const billingDeadline = Date.now() + 20_000;
+    for (const field of billingFields) {
+      let hit = null;
+      while (Date.now() < billingDeadline && !hit) {
+        for (const ctx of orderedContexts()) {
+          for (const cand of field.candidates(ctx)) {
+            const el = cand.first();
+            if (!(await el.isVisible().catch(() => false))) continue;
+            await el.fill(field.value).catch(() => {});
+            const readBack = await el.inputValue().catch(() => "");
+            if (readBack.trim()) {
+              hit = { name: field.name, value: field.value, where: ctx === page ? "document" : "frame", cand };
+              break;
+            }
+          }
+          if (hit) break;
+        }
+        if (!hit) await page.waitForTimeout(500);
+      }
+      if (hit) filledBilling.push(hit);
     }
-    const zipSel = 'input[name="billingPostalCode"], #billingPostalCode';
-    if (await cardCtx.locator(zipSel).first().isVisible().catch(() => false)) {
-      await cardCtx.locator(zipSel).first().fill("10001");
+    // Pre-submit guard (part 1): Email and both billing fields must be
+    // filled — never submit blind. Fail the filled step honestly, naming
+    // what is missing, instead of discovering it as a silent submit
+    // no-op (runs #24–#26 died exactly that death on the empty email).
+    const missingBilling = [
+      ...(emailHit ? [] : ["Email"]),
+      ...billingFields
+        .map((f) => f.name)
+        .filter((n) => !filledBilling.some((h) => h.name === n)),
+    ];
+    if (missingBilling.length) {
+      step("stripe_checkout_filled", false,
+        `could not fill required field(s): ${missingBilling.join(", ")} — refusing to submit blind`);
+      await shot(page, "stripe-checkout-filled");
+      throw new Error(`stripe_checkout_filled: required field(s) not filled: ${missingBilling.join(", ")}`);
+    }
+    // ── Link save-info checkbox: VERIFY it is unchecked ──
+    // Run #27 root cause, proven by that run's own screenshots: every
+    // field filled correctly, but the "Save my information for faster
+    // checkout" (Link) checkbox was still CHECKED in
+    // stripe-checkout-filled.png, so the submit click diverted into the
+    // Link popup flow — stripe-checkout-submit-noop.png and
+    // failure-state.png show the page parked behind the Link modal
+    // ("Complete your payment in the open Link window, or close Link to
+    // continue paying another way."), where no payment_pages confirm
+    // request for the card can ever fire. The human-paced manual
+    // checkout that succeeded on 2026-11-13 had simply UNCHECKED that
+    // box first. The #959 handling this replaces clicked the box once,
+    // in the first context that showed it, with no read-back and no
+    // report — Stripe's hydration re-renders silently undid or
+    // out-raced it, and because the filled step never mentioned Link,
+    // runs #24–#27 all died at submit with the real blocker invisible.
+    // So handle it the way #956/#965 taught the fills: sweep every
+    // context (document + frames, same probe order), toggle if checked,
+    // READ THE STATE BACK, and keep retrying inside the same bounded
+    // poll the fills use — the box only counts as handled when a fresh
+    // probe reads it unchecked, and the outcome is reported in the
+    // filled step below.
+    const linkCheckboxCandidates = (ctx) => [
+      ctx.getByRole("checkbox", { name: /save my information|link/i }),
+      ctx.getByLabel(/save my information for faster checkout/i),
+    ];
+    const probeLinkCheckbox = async () => {
+      for (const ctx of orderedContexts()) {
+        for (const cand of linkCheckboxCandidates(ctx)) {
+          const el = cand.first();
+          if (!(await el.isVisible().catch(() => false))) continue;
+          const checked = await el.isChecked().catch(() => null);
+          if (checked === null) continue;
+          return { el, checked, where: ctx === page ? "document" : "frame" };
+        }
+      }
+      return null;
+    };
+    const toggleLinkCheckbox = async (hit) => {
+      // Prefer the checkable element itself; Stripe styles the native
+      // input down and the visible label carries the real click target,
+      // so fall back to clicking the label text.
+      if (await hit.el.uncheck({ timeout: 3_000 }).then(() => true).catch(() => false)) return;
+      await hit.el.click({ timeout: 3_000 }).catch(() => {});
+      for (const ctx of orderedContexts()) {
+        const labelText = ctx.getByText(/save my information for faster checkout/i).first();
+        if (await labelText.isVisible().catch(() => false)) {
+          await labelText.click({ timeout: 3_000 }).catch(() => {});
+          break;
+        }
+      }
+    };
+    let linkStatus = "absent"; // → "unchecked" | "absent" | "still-checked"
+    let linkWhere = null;
+    {
+      const linkDeadline = Date.now() + 20_000;
+      const absentGrace = Date.now() + 5_000;
+      let everSeen = false;
+      while (Date.now() < linkDeadline) {
+        const hit = await probeLinkCheckbox();
+        if (!hit) {
+          // Not mounted yet — allow a short grace, then conclude the
+          // box is not on this rendering. Once seen, a transient miss
+          // is a re-render replacing the node: keep polling and let
+          // the deadline decide (an unverifiable box is reported
+          // still-checked below rather than submitted into blind).
+          if (!everSeen && Date.now() >= absentGrace) break;
+          await page.waitForTimeout(500);
+          continue;
+        }
+        everSeen = true;
+        linkWhere = hit.where;
+        if (!hit.checked) { linkStatus = "unchecked"; break; }
+        linkStatus = "still-checked";
+        await toggleLinkCheckbox(hit);
+        await page.waitForTimeout(500); // settle; the loop re-probes fresh
+      }
+      if (!everSeen) linkStatus = "absent";
+    }
+    if (linkStatus === "still-checked") {
+      step("stripe_checkout_filled", false,
+        `Link save-info checkbox still checked — submit would divert into the Link flow (last seen in ${linkWhere ?? "unknown"} context; uncheck did not hold)`);
+      await shot(page, "stripe-checkout-filled");
+      throw new Error("stripe_checkout_filled: Link save-info checkbox still checked — submit would divert into the Link flow");
     }
     step("stripe_checkout_filled", true,
-      `card fields filled in ${cardCtx === page ? "document" : "iframe"} context`);
+      `card fields filled in ${cardCtx === page ? "document" : "iframe"} context; Email: ${emailHit.where}; name+ZIP filled (${filledBilling.map((h) => `${h.name}: ${h.where}`).join(", ")}); Link: ${linkStatus === "unchecked" ? "unchecked (verified)" : "checkbox not present on this rendering"}`);
     await shot(page, "stripe-checkout-filled");
 
-    // Stripe's Link opt-in is checked by default and demands a phone number
-    // — its validation error silently blocks Subscribe. Uncheck it.
-    const linkBox = page.getByRole("checkbox", { name: /save my information|link/i }).first();
-    if (await linkBox.isChecked().catch(() => false)) {
-      await linkBox.click().catch(() => {});
-    }
-    const phoneField = page.locator('input[type="tel"], input[name*="phone" i], #phoneNumber').first();
-    if (await phoneField.isVisible().catch(() => false)) {
-      await phoneField.fill("2015550123").catch(() => {});
+    // If a phone field is shown anyway, fill it (kept from #959: with
+    // Link verifiably unchecked the field normally disappears, but a
+    // layout that still shows one must not leave it empty).
+    for (const ctx of orderedContexts()) {
+      const phoneField = ctx.locator('input[type="tel"], input[name*="phone" i], #phoneNumber').first();
+      if (await phoneField.isVisible().catch(() => false)) {
+        await phoneField.fill("2015550123").catch(() => {});
+        break;
+      }
     }
 
-    const payBtn = page.getByRole("button", { name: /subscribe|pay|complete/i }).first();
-    if (await payBtn.isVisible().catch(() => false)) {
-      await payBtn.click();
-    } else {
-      await page.locator('button[type="submit"]').first().click();
+    // Pre-submit guard (part 2): the Link/phone interactions above can
+    // re-render the form — re-read the email and billing inputs through
+    // the same locators that filled them and refuse to click submit if
+    // any was emptied, so a silent validation block can never be
+    // recorded as a "submitted" step.
+    for (const hit of [
+      ...(emailHit ? [{ name: "Email", cand: emailHit.cand }] : []),
+      ...filledBilling,
+    ]) {
+      const now = await hit.cand.first().inputValue().catch(() => "");
+      if (!now.trim()) {
+        step("stripe_checkout_filled", false,
+          `pre-submit guard: ${hit.name} is empty at submit time — refusing to submit blind`);
+        throw new Error(`stripe_checkout_filled: pre-submit guard found ${hit.name} empty`);
+      }
     }
+    // Same guard, Link edition: the phone interaction above can
+    // re-render the form, and a re-render is exactly what silently
+    // re-armed the save-info checkbox in run #27's lineage. Re-probe
+    // the box at submit time — if it is checked NOW, clicking submit
+    // would divert into the Link popup flow and no card confirm could
+    // ever fire. Fail the filled step honestly instead of clicking
+    // submit into the Link modal.
+    {
+      const linkRecheckDeadline = Date.now() + 5_000;
+      let linkRecheck = await probeLinkCheckbox();
+      while (linkRecheck?.checked && Date.now() < linkRecheckDeadline) {
+        await page.waitForTimeout(500);
+        linkRecheck = await probeLinkCheckbox();
+      }
+      if (linkRecheck?.checked) {
+        step("stripe_checkout_filled", false,
+          "pre-submit guard: Link save-info checkbox still checked — submit would divert into the Link flow");
+        throw new Error("stripe_checkout_filled: pre-submit guard — Link save-info checkbox still checked — submit would divert into the Link flow");
+      }
+    }
+
+    // ── Submit the checkout ──
+    // Run #25 diagnosis (§1a): the verdict's networkSummary filter only
+    // records URLs containing "/api/", and Stripe's hosted-Checkout
+    // confirmation call (api.stripe.com/v1/payment_pages/<id>/confirm)
+    // contains no such substring — so whether a click ever started a
+    // payment was invisible to this script. Watch requests directly for
+    // the confirm call from here on; the submit verification below uses
+    // it as ground truth for "the click actually started the payment".
+    let confirmRequestSeen = false;
+    page.on("request", (req) => {
+      const u = req.url();
+      if (u.includes("payment_pages") && u.includes("/confirm")) confirmRequestSeen = true;
+    });
+
+    // Run #23 failure mode: stripe_checkout_filled passed, then the old
+    // code sampled a page-scoped role locator with ONE instantaneous
+    // isVisible() check — the button was not visible in that instant
+    // (Stripe re-renders and validates after the last field fill and
+    // the Link interactions above), so it fell through to
+    // page.locator('button[type="submit"]'), which waited the full
+    // 30s for an element this rendering never mounts in the top
+    // document and timed out without ever clicking. The submit
+    // control is not reliably a top-document button[type="submit"]:
+    // its label varies ("Subscribe", "Pay $9.99", "Complete order"),
+    // it can live inside the payment form frame on some layouts, and
+    // it stays disabled until the form validates. So — exactly like
+    // the Step 5 interactions — search every context in
+    // orderedContexts() order and POLL for a visible AND enabled
+    // button instead of sampling once.
+    // Run #25 diagnosis (§1b): the search is CANDIDATE-major — weaker
+    // candidates are only tried after stronger ones are exhausted
+    // across ALL contexts, and the text fallback is scoped to actual
+    // button elements — never a bare text node (the order summary's
+    // "Subscribe to <product>" text node was run #25's no-op click).
+    // Run #28 root cause (proven live against staging 2026-11-14): the
+    // payment-form frame renders a persistent "Pay securely with Link"
+    // promo <button type=button> (visible text "Pay with") whose
+    // accessible name starts with "Pay" — candidate-0's
+    // /^(subscribe|pay|complete)\b/i matched it BEFORE the real
+    // <button type=submit> in DOM order, so .first() clicked Link, a
+    // checkout.link.com popup opened, and the page parked behind
+    // "Complete your payment in the open Link window, or close Link to
+    // continue paying another way." Run #28's Link save-info checkbox
+    // was verifiably UNCHECKED — that box only controls Link
+    // enrollment, never which control receives the click. The search
+    // below therefore: (1) tries button[type="submit"] FIRST —
+    // verified live: "Subscribe" is type=submit while every Link
+    // control is type=button or div[role=button]; (2) excludes
+    // Link-named controls from the role/text fallbacks via a regex
+    // lookahead AND a pre-click aria-label/text inspection; (3)
+    // iterates up to 6 matches per candidate instead of .first(),
+    // skipping any Link control it encounters.
+    const isLinkControl = (el) => el.evaluate((e) => /link/i.test(
+      `${e.getAttribute("aria-label") || ""} ${e.getAttribute("title") || ""} ${e.innerText || ""} ${e.textContent || ""}`,
+    )).catch(() => false);
+
+    const submitCandidates = (ctx) => [
+      ctx.locator('button[type="submit"], input[type="submit"]'),
+      ctx.getByRole("button", { name: /^(subscribe|pay|complete)\b(?!.*link)/i }),
+      ctx.locator("button, [role=\"button\"]").filter({ hasText: /^\s*(subscribe|pay|complete)\b/i }),
+    ];
+    const submitCandidateNames = ['button[type="submit"]', "role button (Link-excluded name)", "anchored text (button elements only)"];
+    const urlBeforeSubmit = page.url();
+
+    // Link diversion detection + bounded recovery (runs #27/#28): a
+    // diverted submit opens a checkout.link.com popup and parks the
+    // parent document behind the waiting overlay. Closing the popup
+    // clears the overlay and returns the SAME Checkout session to a
+    // usable card form — verified live 2026-11-14: every filled field
+    // survives the detour. We close the popup, re-verify the form,
+    // and resubmit — at most MAX_LINK_RECOVERIES times — never
+    // clicking "Cancel payment" (that abandons the session).
+    const openPopupPages = () => contextPages.filter((p) => p !== page && !p.isClosed());
+    const linkOverlayVisible = async () => {
+      for (const ctx of orderedContexts()) {
+        if (await ctx.getByText(/complete your payment in the open link window|close link to continue paying another way/i).first().isVisible().catch(() => false)) return true;
+      }
+      return false;
+    };
+    const reverifyFormAfterRecovery = async () => {
+      const problems = [];
+      // Stripe preserves field values across the Link detour, but
+      // hydration re-renders can still empty inputs — refill only
+      // what reads empty, through the same locators that filled it.
+      if (emailHit) {
+        const el = emailHit.cand.first();
+        if (!(await el.inputValue().catch(() => "")).trim()) {
+          await el.fill(CHECKOUT_EMAIL).catch(() => {});
+          problems.push("Email refilled");
+        }
+      }
+      for (const hit of filledBilling) {
+        const el = hit.cand.first();
+        if (!(await el.inputValue().catch(() => "")).trim()) {
+          await el.fill(hit.value).catch(() => {});
+          problems.push(`${hit.name} refilled`);
+        }
+      }
+      for (const [sel, val] of [[cardSel, "4242424242424242"], [expirySel, "1234"], [cvcSel, "123"]]) {
+        const c = await fieldCtx(sel);
+        const el = c.locator(sel).first();
+        if (await el.isVisible().catch(() => false)) {
+          const v = (await el.inputValue().catch(() => "")).replace(/\D/g, "");
+          if (!v) { await el.fill(val).catch(() => {}); problems.push("card field refilled"); }
+        }
+      }
+      // linkOptIn can silently re-check during the detour's re-renders —
+      // re-run the verified uncheck, bounded to ~6s.
+      {
+        const dl = Date.now() + 6_000;
+        while (Date.now() < dl) {
+          const hit = await probeLinkCheckbox();
+          if (!hit || !hit.checked) break;
+          await toggleLinkCheckbox(hit);
+          await page.waitForTimeout(500);
+        }
+        if ((await probeLinkCheckbox())?.checked) problems.push("linkOptIn still checked");
+      }
+      // Form-usability gate: if the card section collapsed during the
+      // detour, re-select Card once, then require the card number to be
+      // visible and non-empty — otherwise the next submit cannot work.
+      let cardCtx2 = await fieldCtx(cardSel);
+      let cardEl = cardCtx2.locator(cardSel).first();
+      if (!(await cardEl.isVisible().catch(() => false))) {
+        for (const ctx of orderedContexts()) {
+          if (await clickCardIn(ctx)) break;
+        }
+        await page.waitForTimeout(2000);
+        cardCtx2 = await fieldCtx(cardSel);
+        cardEl = cardCtx2.locator(cardSel).first();
+      }
+      const usable = await cardEl.isVisible().catch(() => false)
+        && !!(await cardEl.inputValue().catch(() => "")).replace(/\D/g, "");
+      if (!usable) problems.push("card form not usable after recovery");
+      return problems;
+    };
+
+    let submitTransition = null;
+    let anySubmitClicked = false;
+    const submitHistory = [];
+    let linkDivertions = 0;
+    const MAX_LINK_RECOVERIES = 2;
+
+    const clickSubmitOnce = async () => {
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline) {
+        for (let ci = 0; ci < submitCandidateNames.length; ci++) {
+          for (const ctx of orderedContexts()) {
+            const loc = submitCandidates(ctx)[ci];
+            const n = Math.min(await loc.count().catch(() => 0), 6);
+            for (let i = 0; i < n; i++) {
+              const el = loc.nth(i);
+              const ready = await el.isVisible().catch(() => false)
+                && await el.isEnabled().catch(() => false);
+              if (!ready || await isLinkControl(el)) continue;
+              const clicked = await el.click({ timeout: 10_000 }).then(() => true).catch(() => false);
+              if (clicked) return { where: ctx === page ? "document" : "frame", candidate: ci, index: i };
+            }
+          }
+        }
+        await page.waitForTimeout(500);
+      }
+      return null;
+    };
+
+    // Up to MAX_LINK_RECOVERIES + 1 submit attempts: each attempt clicks
+    // the (Link-excluded) submit control, then watches ~18s for the
+    // confirm request, a navigation, a processing state, or a Link
+    // diversion. A diversion is recovered (popup closed, overlay
+    // cleared, form re-verified) and retried; anything else ends the
+    // loop for the diagnostics below.
+    for (let attempt = 1; attempt <= MAX_LINK_RECOVERIES + 1 && !submitTransition; attempt++) {
+      const click = await clickSubmitOnce();
+      if (!click) {
+        submitHistory.push(`attempt ${attempt}: no enabled non-Link submit control found within 20s`);
+        break;
+      }
+      anySubmitClicked = true;
+      submitHistory.push(`attempt ${attempt}: clicked candidate-${click.candidate} (${submitCandidateNames[click.candidate]}) in ${click.where} context`);
+
+      let diverted = false;
+      const watchDeadline = Date.now() + 18_000;
+      while (Date.now() < watchDeadline && !submitTransition && !diverted) {
+        if (confirmRequestSeen) {
+          submitTransition = "payment_pages confirm request fired";
+          break;
+        }
+        const curUrl = page.url();
+        if (/link\.com|link\.app/i.test(curUrl)) { diverted = true; break; }
+        if (curUrl !== urlBeforeSubmit) {
+          submitTransition = `navigated to ${curUrl}`;
+          break;
+        }
+        if (openPopupPages().length || await linkOverlayVisible()) { diverted = true; break; }
+        for (const ctx of orderedContexts()) {
+          if (await ctx.getByText(/processing|completing|confirming/i).first().isVisible().catch(() => false)) {
+            submitTransition = "processing indicator visible";
+            break;
+          }
+        }
+        if (!submitTransition && !diverted) await page.waitForTimeout(500);
+      }
+      if (!diverted) break;
+
+      linkDivertions++;
+      const popupUrls = openPopupPages().map((p) => p.url().slice(0, 80));
+      await shot(page, `stripe-checkout-link-divert-${linkDivertions}`);
+      verdict.notes.push(`submit attempt ${attempt} diverted into the Link flow (popups: ${popupUrls.join(", ") || "none yet"}) — closing Link popup(s) and retrying the card submit`);
+      if (linkDivertions > MAX_LINK_RECOVERIES) {
+        submitHistory.push(`attempt ${attempt}: Link diversion #${linkDivertions} — recovery cap (${MAX_LINK_RECOVERIES}) reached, not retrying`);
+        break;
+      }
+      for (const p of openPopupPages()) await p.close().catch(() => {});
+      // The waiting overlay clears as soon as the Link window closes
+      // (verified live); give Stripe's JS a bounded moment to settle.
+      let cleared = false;
+      const clearDeadline = Date.now() + 10_000;
+      while (Date.now() < clearDeadline) {
+        await page.waitForTimeout(500);
+        if (!openPopupPages().length && !(await linkOverlayVisible())) { cleared = true; break; }
+      }
+      if (!cleared) {
+        submitHistory.push(`attempt ${attempt}: Link popup(s) closed but the waiting overlay did not clear within 10s — form state uncertain, stopping`);
+        break;
+      }
+      const problems = await reverifyFormAfterRecovery();
+      submitHistory.push(`attempt ${attempt}: Link popup(s) closed, overlay cleared${problems.length ? ` — recovery issues: ${problems.join(", ")}` : " — card form re-verified usable"}`);
+      if (problems.includes("card form not usable after recovery") || problems.includes("linkOptIn still checked")) break;
+      await shot(page, `stripe-checkout-link-recovered-${linkDivertions}`);
+    }
+
+    // Diagnostics (run #24 Q3): when the probe expires with no
+    // transition, sweep every context once for visible error/alert
+    // text — a silent validation block or a rendered card error is
+    // otherwise indistinguishable from "nothing happened" in the
+    // verdict. Findings are appended to the step detail; no verdict
+    // or wait changes.
+    let errorSweep = "";
+    if (!submitTransition) {
+      const texts = new Set();
+      for (const ctx of orderedContexts()) {
+        const found = await ctx.evaluate(() => {
+          const re = /declined|error|incomplete|invalid|incorrect|check your|unable|required/i;
+          const out = [];
+          for (const e of document.querySelectorAll('[role="alert"]')) {
+            const t = e.offsetParent ? e.textContent.trim() : "";
+            if (t) out.push(t.slice(0, 200));
+          }
+          for (const e of document.querySelectorAll("body *")) {
+            if (e.children.length || !e.offsetParent) continue;
+            const t = e.textContent.trim();
+            if (t && re.test(t)) out.push(t.slice(0, 200));
+          }
+          return out;
+        }).catch(() => []);
+        for (const t of found) texts.add(t);
+      }
+      if (texts.size) errorSweep = `; error sweep: ${[...texts].slice(0, 3).join(" | ")}`;
+    }
+    const historyText = submitHistory.join("; ");
+    // Honest submit verification (run #25 diagnosis §3): a click that
+    // produced NO confirmation traffic, NO navigation, and NO
+    // processing state inside the probe window did not start a payment
+    // — runs #24 and #25 both recorded such a click as "submitted" and
+    // let Step 6 burn its full wait on a page where nothing was ever
+    // going to happen. Fail THIS step with the evidence instead.
+    if (!submitTransition && !confirmRequestSeen) {
+      step("stripe_checkout_submitted", false,
+        `${historyText || "no submit attempt completed"}; no payment_pages confirm request, no navigation, and no processing state — the click(s) did not start a payment${linkDivertions ? ` (${linkDivertions} Link diversion(s))` : ""}${errorSweep}`);
+      await shot(page, anySubmitClicked ? "stripe-checkout-submit-noop" : "stripe-checkout-no-submit");
+      throw new Error(`stripe_checkout_submitted: ${historyText || "no submit attempt completed"} — no confirmation traffic, navigation, or processing state`);
+    }
+    step("stripe_checkout_submitted", true,
+      `${historyText}; transition: ${submitTransition ?? "not observed within watch window (Step 6 redirect wait still applies)"}${errorSweep}`);
 
     // ── Step 6: success redirect back to staging ──
     let redirected = false;

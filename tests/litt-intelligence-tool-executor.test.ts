@@ -501,10 +501,13 @@ describe("LiTT Tool Executor — Web Search Execution", () => {
     vi.clearAllMocks();
   });
 
-  it("returns executed=false when BRAVE_SEARCH_API_KEY is not set", async () => {
+  it("falls back to the keyless web search when BRAVE_SEARCH_API_KEY is not set", async () => {
+    // #941 contract: without a Brave key the executor no longer bails out
+    // with executed=false — it falls back to the registry's keyless
+    // web.search (agent-core), so the web_search tool still executes.
     const result = await detectAndExecuteTool("user_test1", "Search for the best pizza");
-    expect(result.executed).toBe(false);
-    expect(result.toolId).toBe("none");
+    expect(result.executed).toBe(true);
+    expect(result.toolId).toBe("web_search");
   });
 
   it("executes web search when API key is configured", async () => {

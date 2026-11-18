@@ -597,7 +597,7 @@ export const toolCreatePreview: ToolHandler = async (userId, args) => {
       projectEnv,
     });
 
-    const previewUrl = result.status === "ready" ? buildPreviewProxyUrl(workspaceId) : null;
+    const previewUrl = result.status === "ready" ? buildPreviewProxyUrl(workspaceId, { userId, projectId }) : null;
     await updateProjectRuntime(projectId, userId, {
       runtimeStatus: result.status,
       previewUrl,

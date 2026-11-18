@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
 
 /**
- * `/create` remains a compatibility entry point. Creation now lives on the
- * Dashboard so there is one prompt, one set of intents, and one state path.
+ * `/create` remains a compatibility entry point. Creation now lives in
+ * Studio (the prime landing's universal composer) so there is one prompt,
+ * one set of intents, and one state path.
  * Preserve every query parameter for old bookmarks and deep links.
  */
 export default async function CreateRedirect({
@@ -22,5 +23,5 @@ export default async function CreateRedirect({
   }
 
   const suffix = query.toString();
-  redirect(`/dashboard${suffix ? `?${suffix}` : ""}`);
+  redirect(`/studio${suffix ? `?${suffix}` : ""}`);
 }

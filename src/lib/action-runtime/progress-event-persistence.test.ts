@@ -222,3 +222,43 @@ describe("makePersistProgressEvent — persist-then-list round trip", () => {
     ).rejects.toThrow("db down");
   });
 });
+
+describe("mapProgressEventToActionEvent — route_plan", () => {
+  it("persists the run-start route plan as an agent.status row with routes + exclusions", () => {
+    const mapped = mapProgressEventToActionEvent({
+      type: "route_plan",
+      routes: [
+        { provider: "gemini", models: ["gemini-2.5-flash", "gemini-2.5-flash-lite"] },
+        { provider: "groq", models: ["openai/gpt-oss-120b"] },
+      ],
+      excluded: [
+        { provider: "groq", reason: "request_exceeds_route_token_ceiling:openai/gpt-oss-120b" },
+        { provider: "cloudflare", reason: "credential_missing" },
+      ],
+    });
+    expect(mapped?.type).toBe("agent.status");
+    expect(mapped?.payload.kind).toBe("route_plan");
+    expect(mapped?.payload.routes).toEqual([
+      { provider: "gemini", models: ["gemini-2.5-flash", "gemini-2.5-flash-lite"] },
+      { provider: "groq", models: ["openai/gpt-oss-120b"] },
+    ]);
+    expect(mapped?.payload.excluded).toEqual([
+      { provider: "groq", reason: "request_exceeds_route_token_ceiling:openai/gpt-oss-120b" },
+      { provider: "cloudflare", reason: "credential_missing" },
+    ]);
+    expect(mapped?.payload.label).toContain("gemini");
+    expect(mapped?.payload.label).toContain("groq");
+  });
+
+  it("persists an empty plan truthfully instead of dropping the event", () => {
+    const mapped = mapProgressEventToActionEvent({
+      type: "route_plan",
+      routes: [],
+      excluded: [{ provider: "gemini", reason: "credential_missing" }],
+    });
+    expect(mapped?.type).toBe("agent.status");
+    expect(mapped?.payload.kind).toBe("route_plan");
+    expect(mapped?.payload.routes).toEqual([]);
+    expect(mapped?.payload.label).toContain("none");
+  });
+});

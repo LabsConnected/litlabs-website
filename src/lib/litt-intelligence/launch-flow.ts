@@ -69,6 +69,47 @@ export interface LaunchFlowOptions {
    */
   requireProjectArtifacts?: boolean;
   /**
+   * Read-only run (kernel-classified workspace inspection): the run
+   * must NOT mutate the project, so completion is the tool lane's
+   * answer — not a mutation, an artifact, or a preview. When set, the
+   * flow returns the agent-loop result directly after phase 1: no
+   * zero-mutation reprompt (which would order the model to write
+   * files the user forbade), no build-capability guard, and no
+   * artifact/preview phases. Success requires at least one successful
+   * tool call and, when a quality session ran, its verdict.
+   */
+  readOnly?: boolean;
+  /**
+   * Exec-only run (kernel-classified shell-command execution,
+   * taskKind "exec"): the user asked for a command to run, not for
+   * files to be written. Completion semantics mirror readOnly — the
+   * phase-1 result IS the outcome: no build-capability guard (its
+   * file-writing criterion can only misread a successful command as
+   * a failed build), no zero-mutation reprompt, and no
+   * artifact/preview phases. Unlike readOnly the run MAY mutate
+   * through the command itself; terminal.execute keeps its own
+   * per-command approval policy. Success requires at least one
+   * successful tool call and, when a quality session ran, its
+   * verdict.
+   */
+  execOnly?: boolean;
+  /**
+   * Media-generation run (kernel-classified media generation,
+   * taskKind "media"): the user asked for a media file to be
+   * generated, not for a site to be built. Completion semantics
+   * mirror readOnly/execOnly — the phase-1 result IS the outcome:
+   * no build-capability guard (its file-writing criterion can only
+   * misread a successful generation as a failed build), no
+   * zero-mutation reprompt (which would order the model to write
+   * site files the user never asked for), and no artifact/preview
+   * phases. Unlike readOnly the run DOES mutate through the
+   * generation tools themselves (image.generate is a workspace-write
+   * tool); the generation tools keep their own approval policy.
+   * Success requires at least one successful tool call and, when a
+   * quality session ran, its verdict.
+   */
+  mediaOnly?: boolean;
+  /**
    * Quality-loop opt-in, passed through to the main agent-loop phase.
    * When set, the build is gated by the UNDERSTAND→VERIFY evidence stages
    * plus the visual-quality judge. (Was silently dropped before AUTO-mode
@@ -116,7 +157,12 @@ export interface LaunchFlowOptions {
 
 export interface LaunchFlowResult {
   success: boolean;
-  status: "preview_ready" | "deployed" | "failed" | "cancelled";
+  /**
+   * "completed" = a read-only run finished with the tool lane's answer
+   * (no preview/deploy phases exist for it). All other statuses keep
+   * their build-flow meanings.
+   */
+  status: "preview_ready" | "deployed" | "failed" | "cancelled" | "completed";
   previewUrl?: string | null;
   productionUrl?: string | null;
   finalText: string;
@@ -306,6 +352,13 @@ const WEBSITE_ENTRY_FILES = new Set([
   "app/page.ts",
   "app/page.jsx",
   "app/page.js",
+  // Next.js App Router under a src/ directory — the standard layout for
+  // repo-backed projects (litlabs-website itself lives here). Without
+  // these, the artifact gate could never pass for a src-dir project.
+  "src/app/page.tsx",
+  "src/app/page.ts",
+  "src/app/page.jsx",
+  "src/app/page.js",
   "pages/index.tsx",
   "pages/index.ts",
   "pages/index.jsx",
@@ -338,7 +391,20 @@ function normalizeEntryPath(p: string): string {
 
 /** True when a workspace-relative path is a runnable website entry file. */
 export function isRunnableEntryPath(path: string): boolean {
-  return WEBSITE_ENTRY_FILES.has(normalizeEntryPath(path));
+  const normalized = normalizeEntryPath(path);
+  if (WEBSITE_ENTRY_FILES.has(normalized)) return true;
+  // Next.js route groups — path segments wrapped in parentheses —
+  // organize routes WITHOUT changing the URL they serve:
+  // src/app/(marketing)/page.tsx IS the site's root page, and
+  // app/(shop)/page.tsx is app/page.tsx. Compare with group segments
+  // removed so grouped App Router projects are recognized. Only group
+  // segments are dropped — a real subdirectory (about/, assets/) still
+  // keeps the path out of the entry set.
+  const withoutGroups = normalized
+    .split("/")
+    .filter((segment) => !/^\(.*\)$/.test(segment))
+    .join("/");
+  return withoutGroups !== normalized && WEBSITE_ENTRY_FILES.has(withoutGroups);
 }
 
 /**
@@ -392,18 +458,36 @@ export async function verifyProjectArtifacts(
       visited.add(current.path);
 
       const { entries } = await transport.listFiles(current.path);
+      const childDirs: Array<{ path: string; depth: number }> = [];
       for (const entry of entries) {
         const name = String(entry.name || "").replace(/\\/g, "/");
         if (!name || name === "." || name === ".." || name.includes("/")) continue;
         const relative = current.path === "." ? name : `${current.path}/${name}`;
         if (entry.type === "folder" || entry.type === "directory") {
-          if (current.depth < 4 && !name.startsWith(".")) {
-            queue.push({ path: relative, depth: current.depth + 1 });
+          // node_modules can never hold the project's own entry file at
+          // an entry-set path, and descending into it burns the walk's
+          // file budget on dependency trees (host-installed workspaces).
+          if (current.depth < 4 && !name.startsWith(".") && name !== "node_modules") {
+            childDirs.push({ path: relative, depth: current.depth + 1 });
           }
         } else {
           files.push(relative);
         }
       }
+      // List entry-bearing directories first: the walk stops at 500
+      // files, and on a large repo an unordered breadth-first walk can
+      // exhaust that budget on bulk directories (packages/, docs/,
+      // public/) before ever listing src/app — making the entry check
+      // below a coin flip on directory order.
+      const ENTRY_DIR_PRIORITY = ["src", "app", "pages", "public"];
+      childDirs.sort((a, b) => {
+        const rank = (p: string) => {
+          const idx = ENTRY_DIR_PRIORITY.indexOf(p.split("/").pop() ?? "");
+          return idx === -1 ? ENTRY_DIR_PRIORITY.length : idx;
+        };
+        return rank(a.path) - rank(b.path);
+      });
+      queue.push(...childDirs);
     }
   } catch (error) {
     return {
@@ -413,9 +497,7 @@ export async function verifyProjectArtifacts(
     };
   }
 
-  const entryFiles = [...WEBSITE_ENTRY_FILES]
-    .map((entry) => files.find((file) => file.toLowerCase() === entry))
-    .filter((file): file is string => file !== undefined);
+  const entryFiles = files.filter((file) => isRunnableEntryPath(file));
   if (entryFiles.length === 0) {
     return {
       ok: false,
@@ -571,7 +653,11 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
   const maxRuntimeRepairAttempts = options.maxRuntimeRepairAttempts ?? 2;
   const previewUrlForProject = () => options.isStaticWorkspace
     ? `/api/preview/${encodeURIComponent(options.projectId)}/`
-    : (options.buildPreviewUrl ?? buildPreviewProxyUrl)(transport.workspaceId);
+    : (options.buildPreviewUrl ??
+      ((workspaceId: string) =>
+        buildPreviewProxyUrl(workspaceId, { userId: options.userId, projectId: options.projectId })))(
+        transport.workspaceId,
+      );
   let staticPreviewError: string | undefined;
   const preparePreview = async (pollIntervalMs: number): Promise<"ready" | "failed" | "timeout"> => {
     if (!options.isStaticWorkspace) {
@@ -650,9 +736,17 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           // consecutive steps with tool calls but zero file-writing calls
           // rules that model out for this run and switches to the next
           // registry build model — instead of burning the whole budget on
-          // a model that can read but never writes.
+          // a model that can read but never writes. Never armed for a
+          // read-only run: it never writes BY DESIGN, so the guard
+          // would only misread a correct read as incapability. Never
+          // armed for an exec-only run either: its completion is the
+          // command's output, and the guard's end-of-loop verdict
+          // failed a successful `pwd && ls` with the build sentence
+          // (Step 6 proof, 2026-11-14).
           buildCapabilityGuard:
-            options.requiresExecution === true ? { maxStepsWithoutFileWrite: 3 } : undefined,
+            options.requiresExecution === true && options.readOnly !== true && options.execOnly !== true && options.mediaOnly !== true
+              ? { maxStepsWithoutFileWrite: 3 }
+              : undefined,
           evalMetadata: options.evalMetadata,
           // A bounded reprompt continues the SAME conversation: pass the
           // previous loop's messages so a patch-recovery (validation error
@@ -741,7 +835,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
         });
       }
 
-      if (r.modelFailed) {
+      if (r.modelFailed && !r.completedWithWarning) {
         return baseResult({
           success: false,
           status: "failed",
@@ -755,6 +849,10 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           runtimeRepairAttempts,
         });
       }
+      // Round 11: a completedWithWarning result falls through — the
+      // loop already settled it completed (deliverable landed, gate
+      // passed) with the warning as its final text; the route failure
+      // is recorded in r.failureContributors, not the verdict.
 
       if (r.buildFixResult && !r.buildFixResult.allPassed) {
         return baseResult({
@@ -801,6 +899,122 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
     if (!pausedApproval) {
       const guarded = guardPhase1(agentResult);
       if (guarded) return guarded;
+
+      // Read-only inspection run: the phase-1 result IS the outcome.
+      // Zero mutations is the CORRECT end state here — the zero-mutation
+      // reprompt below exists for builds whose model announced writes it
+      // never made; for a read it would order the model to write files
+      // the user explicitly forbade, and its failure path then replaced
+      // the composed answer with a "tool execution unavailable" error
+      // (the live defect: a correct file listing never reached the
+      // chat). The artifact/preview phases likewise do not apply — a
+      // read has nothing to preview. Success = the quality verdict (when
+      // a session ran) AND at least one successful tool call; either way
+      // the agent's final text is delivered as the run's answer.
+      if (options.readOnly === true) {
+        const readAnswered = agentResult.toolCalls.some((c) => c.success);
+        const qualityOk = agentResult.qualityLoop
+          ? agentResult.qualityLoop.verdict.ok
+          : true;
+        const readSuccess = readAnswered && qualityOk;
+        emitStep(
+          progress,
+          steps,
+          readSuccess
+            ? "Inspection complete — the read tools answered the request."
+            : "Inspection did not complete — reporting what the run produced.",
+        );
+        return baseResult({
+          success: readSuccess,
+          status: readSuccess ? "completed" : "failed",
+          finalText:
+            agentResult.finalText ||
+            (readSuccess
+              ? "Inspection complete."
+              : "The inspection could not be completed."),
+          ...(readSuccess ? {} : { error: "INSPECTION_NOT_COMPLETED" }),
+          repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
+          runtimeRepairAttempts,
+        });
+      }
+
+      // Exec-only run: the phase-1 result IS the outcome, with the
+      // same completion shape as the read-only return above. Zero
+      // file writes is the CORRECT end state for a command the user
+      // asked to run — the zero-mutation reprompt below exists for
+      // builds whose model announced writes it never made; for an
+      // exec it would order the model to write files the user never
+      // asked for, and the artifact/preview phases do not apply to a
+      // command's output. Success = the quality verdict (when a
+      // session ran) AND at least one successful tool call; either
+      // way the agent's final text — which carries the command
+      // output — is delivered as the run's answer.
+      if (options.execOnly === true) {
+        const execAnswered = agentResult.toolCalls.some((c) => c.success);
+        const qualityOk = agentResult.qualityLoop
+          ? agentResult.qualityLoop.verdict.ok
+          : true;
+        const execSuccess = execAnswered && qualityOk;
+        emitStep(
+          progress,
+          steps,
+          execSuccess
+            ? "Command complete — the terminal answered the request."
+            : "Command did not complete — reporting what the run produced.",
+        );
+        return baseResult({
+          success: execSuccess,
+          status: execSuccess ? "completed" : "failed",
+          finalText:
+            agentResult.finalText ||
+            (execSuccess
+              ? "Command complete."
+              : "The command could not be completed."),
+          ...(execSuccess ? {} : { error: "EXEC_NOT_COMPLETED" }),
+          repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
+          runtimeRepairAttempts,
+        });
+      }
+
+      // Media-generation run: the phase-1 result IS the outcome, with
+      // the same completion shape as the read-only/exec returns above.
+      // The generation tool's own workspace write (the auto-inserted
+      // asset file) is the deliverable — the zero-mutation reprompt
+      // below exists for builds whose model announced site writes it
+      // never made; for a media ask it would order the model to write
+      // site files the user never asked for, and the artifact/preview
+      // phases would then fail the run on a website entry file that
+      // was never part of the request (the live lion defect,
+      // LION-RUN-DIAGNOSIS-2026-11-16 Q1). Success = the quality
+      // verdict (when a session ran) AND at least one successful tool
+      // call; either way the agent's final text — which carries the
+      // generated media result — is delivered as the run's answer.
+      if (options.mediaOnly === true) {
+        const mediaAnswered = agentResult.toolCalls.some((c) => c.success);
+        const qualityOk = agentResult.qualityLoop
+          ? agentResult.qualityLoop.verdict.ok
+          : true;
+        const mediaSuccess = mediaAnswered && qualityOk;
+        emitStep(
+          progress,
+          steps,
+          mediaSuccess
+            ? "Media complete — the generation tools produced the requested media."
+            : "Media generation did not complete — reporting what the run produced.",
+        );
+        return baseResult({
+          success: mediaSuccess,
+          status: mediaSuccess ? "completed" : "failed",
+          finalText:
+            agentResult.finalText ||
+            (mediaSuccess
+              ? "Media generation complete."
+              : "The media generation could not be completed."),
+          ...(mediaSuccess ? {} : { error: "MEDIA_NOT_COMPLETED" }),
+          repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
+          runtimeRepairAttempts,
+        });
+      }
 
       // An execution request that ended with zero workspace mutations almost
       // always means a weak model closed its turn after announcing writes it

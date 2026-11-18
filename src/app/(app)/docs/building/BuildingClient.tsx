@@ -183,9 +183,10 @@ export default function BuildingClient() {
             which commands ran, in order.
           </>,
           <>
-            <strong>Terminal</strong>{" "}— run your own checks.{" "}
-            <InlineCode>litt check</InlineCode>-style verification from the
-            CLI works on the same project files.
+            <strong>Terminal</strong>{" "}— run your own checks. The
+            CLI&apos;s{" "}
+            <InlineCode>litt check</InlineCode>{" "}verification works on the
+            same project files.
           </>,
         ]}
       />

@@ -1,13 +1,23 @@
 /**
  * AppShell navigation regression tests.
  *
- * Verifies the ONE canonical authenticated global nav:
- *   Main: Home · Studio · Assets · Agents · Missions · More
- *   More: Projects · Discover · Marketplace · Showcase · Games · CLI ·
+ * Verifies the ONE canonical authenticated global nav (issue #627 —
+ * Studio Merge, 2026-11-12, superseding the prior Assets/Agents/Missions
+ * pill layout this file used to encode):
+ *   Main: Studio · Discover · Projects · Marketplace · Games · CLI ·
  *         Deployments · Docs
+ *   More: GONE — emptied and removed (Larry, 2026-11-16); the five
+ *         destinations it held are visible Main items now.
+ *   Settings moved out of Main into the account menu
+ *   (Studio Finish Spec, Larry 2026-11-14).
  *
- * Assets/Agents/Missions are Studio destinations (?tool=…) and must light
- * up independently of the bare-Studio pill (isAppNavActive).
+ * Studio is the prime signed-in surface — there is no Home item and no
+ * /dashboard destination (the route only redirects into Studio).
+ *
+ * Assets/Agents/Missions/Create are internal Studio surfaces now
+ * (?tool=…), reached from inside Studio itself — they have no nav pill
+ * of their own anymore, so the bare Studio pill is active across the
+ * whole /studio tree regardless of which internal tool is open.
  */
 
 import { describe, it, expect } from "vitest";
@@ -24,23 +34,39 @@ describe("AppShell Navigation", () => {
     it("has exactly the canonical destinations in order", () => {
       const labels = APP_NAV_MAIN.map((i) => i.label);
       expect(labels).toEqual([
-        "Home",
         "Studio",
-        "Assets",
-        "Agents",
-        "Missions",
+        "Discover",
+        "Projects",
+        "Marketplace",
+        "Games",
+        "CLI",
+        "Deployments",
+        "Docs",
       ]);
     });
 
     it("every main item resolves to a real route", () => {
       const hrefs = APP_NAV_MAIN.map((i) => i.href);
       expect(hrefs).toEqual([
-        "/dashboard",
         "/studio",
-        "/studio?tool=assets",
-        "/studio?tool=agents",
-        "/studio?tool=workflows",
+        "/discover",
+        "/projects",
+        "/marketplace",
+        "/games",
+        "/cli",
+        "/deployments",
+        "/docs",
       ]);
+    });
+
+    it("has no Home item and no /dashboard destination (Studio is prime)", () => {
+      expect(APP_NAV_MAIN.some((i) => i.label === "Home")).toBe(false);
+      const allHrefs = [
+        ...APP_NAV_MAIN.map((i) => i.href),
+        ...APP_NAV_MORE.map((i) => i.href),
+        ...APP_NAV_SECONDARY.flatMap((s) => s.items.map((i) => i.href)),
+      ];
+      expect(allHrefs).not.toContain("/dashboard");
     });
 
     it("does not link to the dead short aliases (issue #602)", () => {
@@ -56,34 +82,27 @@ describe("AppShell Navigation", () => {
 
     it("no competing legacy nav bars remain (single flat main list)", () => {
       // One source of truth — no sectioned groups duplicating the bar.
-      expect(APP_NAV_MAIN.length).toBe(5);
+      expect(APP_NAV_MAIN.length).toBe(8);
       expect(getVisibleMainNav()).toEqual(APP_NAV_MAIN);
     });
   });
 
-  describe("More menu", () => {
-    it("carries every secondary destination", () => {
-      const labels = APP_NAV_MORE.map((i) => i.label);
-      expect(labels).toEqual([
-        "Projects",
-        "Discover",
-        "Marketplace",
-        "Showcase",
-        "Games",
-        "CLI",
-        "Deployments",
-        "Docs",
-      ]);
+  describe("More menu (removed — Larry, 2026-11-16)", () => {
+    it("is empty: every destination it held was promoted to Main", () => {
+      expect(APP_NAV_MORE).toEqual([]);
     });
 
-    it("all More items have real hrefs", () => {
-      APP_NAV_MORE.forEach((item) => {
-        expect(item.href).toMatch(/^\//);
-      });
+    it("the five promoted destinations are Main items with their exact More hrefs", () => {
+      const byLabel = new Map(APP_NAV_MAIN.map((i) => [i.label, i.href]));
+      expect(byLabel.get("Marketplace")).toBe("/marketplace");
+      expect(byLabel.get("Games")).toBe("/games");
+      expect(byLabel.get("CLI")).toBe("/cli");
+      expect(byLabel.get("Deployments")).toBe("/deployments");
+      expect(byLabel.get("Docs")).toBe("/docs");
     });
 
-    it("CLI is reachable from nav (Developer tooling)", () => {
-      const cli = APP_NAV_MORE.find((i) => i.label === "CLI");
+    it("CLI is reachable from the main nav (Developer tooling)", () => {
+      const cli = APP_NAV_MAIN.find((i) => i.label === "CLI");
       expect(cli?.href).toBe("/cli");
     });
   });
@@ -94,7 +113,7 @@ describe("AppShell Navigation", () => {
       expect(ids).toEqual(["library", "devtools"]);
       const hrefs = APP_NAV_SECONDARY.flatMap((s) => s.items.map((i) => i.href));
       // Account menu keeps Files / Saved / Connections. Product resources
-      // such as Docs stay in More, not the personal account menu.
+      // such as Docs are Main nav items, not personal account menu items.
       expect(hrefs).toEqual([
         "/library/files",
         "/library/saved",
@@ -103,10 +122,12 @@ describe("AppShell Navigation", () => {
     });
   });
 
-  it("does not duplicate account destinations in More", () => {
-    const moreLabels = APP_NAV_MORE.map((item) => item.label);
-    expect(moreLabels).not.toEqual(expect.arrayContaining(["Profile", "Wallet", "Settings"]));
-    expect(moreLabels).toEqual(expect.arrayContaining(["Docs", "Deployments"]));
+  it("does not duplicate account destinations in the main nav", () => {
+    const mainLabels = APP_NAV_MAIN.map((item) => item.label);
+    expect(mainLabels).not.toEqual(expect.arrayContaining(["Profile", "Wallet", "Settings"]));
+    expect(mainLabels).toEqual(expect.arrayContaining(["Docs", "Deployments"]));
+    // And nothing at all is left hiding in a More menu.
+    expect(APP_NAV_MORE.map((item) => item.label)).toEqual([]);
   });
 
   // Regression: /hire is permanently retired — the page always redirects
@@ -119,15 +140,6 @@ describe("AppShell Navigation", () => {
   describe("Active route detection (isAppNavActive)", () => {
     const search = new URLSearchParams();
 
-    it("Home is active on /dashboard", () => {
-      expect(isAppNavActive("/dashboard", search, "/dashboard")).toBe(true);
-    });
-
-    it("Home is NOT active when ?app= is present", () => {
-      const s = new URLSearchParams("app=music");
-      expect(isAppNavActive("/dashboard", s, "/dashboard")).toBe(false);
-    });
-
     it("Studio is active on /studio and default surfaces", () => {
       expect(isAppNavActive("/studio", search, "/studio")).toBe(true);
       expect(isAppNavActive("/studio/image", search, "/studio")).toBe(true);
@@ -139,50 +151,35 @@ describe("AppShell Navigation", () => {
       ).toBe(true);
     });
 
-    it("Studio is NOT active while a sibling destination owns the URL", () => {
-      for (const tool of ["assets", "agents", "workflows"]) {
+    it("Studio stays active for any internal tool — no sibling nav item to carve out against anymore", () => {
+      // Assets/Agents/Missions/Create lost their own nav pills in the
+      // Studio Merge (issue #627) — they are internal Studio surfaces
+      // now, so the bare Studio pill owns the whole /studio tree
+      // regardless of ?tool=.
+      for (const tool of ["assets", "agents", "workflows", "chat", "build"]) {
         expect(
           isAppNavActive("/studio", new URLSearchParams(`tool=${tool}`), "/studio"),
-        ).toBe(false);
+        ).toBe(true);
       }
-    });
-
-    it("Assets/Agents/Missions light up only on their own tool param", () => {
-      expect(
-        isAppNavActive("/studio", new URLSearchParams("tool=assets"), "/studio?tool=assets"),
-      ).toBe(true);
-      expect(
-        isAppNavActive("/studio", new URLSearchParams("tool=agents"), "/studio?tool=agents"),
-      ).toBe(true);
-      expect(
-        isAppNavActive("/studio", new URLSearchParams("tool=workflows"), "/studio?tool=workflows"),
-      ).toBe(true);
-      // Wrong tool → not active
-      expect(
-        isAppNavActive("/studio", new URLSearchParams("tool=chat"), "/studio?tool=assets"),
-      ).toBe(false);
-      expect(
-        isAppNavActive("/studio", new URLSearchParams("tool=assets"), "/studio?tool=agents"),
-      ).toBe(false);
       // Not on /studio at all → not active
       expect(
-        isAppNavActive("/dashboard", new URLSearchParams("tool=assets"), "/studio?tool=assets"),
+        isAppNavActive("/projects", new URLSearchParams("tool=assets"), "/studio"),
       ).toBe(false);
     });
 
-    it("Dashboard owns creation and /create is no longer a nav destination", () => {
+    it("Studio owns creation and /create is no longer a nav destination", () => {
       expect(APP_NAV_MAIN.some((item) => item.label === "Create")).toBe(false);
-      expect(isAppNavActive("/dashboard", search, "/dashboard")).toBe(true);
-      expect(isAppNavActive("/create", search, "/dashboard")).toBe(false);
+      expect(isAppNavActive("/studio", search, "/studio")).toBe(true);
+      expect(isAppNavActive("/create", search, "/studio")).toBe(false);
     });
 
-    it("Settings is active on /settings and /settings/*", () => {
+    it("the Settings route still resolves active state for its account-menu link", () => {
       expect(isAppNavActive("/settings", search, "/settings")).toBe(true);
       expect(isAppNavActive("/settings/connections", search, "/settings")).toBe(true);
     });
 
     it("null pathname returns false", () => {
-      expect(isAppNavActive(null, search, "/dashboard")).toBe(false);
+      expect(isAppNavActive(null, search, "/studio")).toBe(false);
     });
   });
 

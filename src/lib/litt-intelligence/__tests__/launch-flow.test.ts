@@ -1094,6 +1094,106 @@ describe("Launch Flow: artifact gate honors workspace-change evidence (#551)", (
   });
 });
 
+describe("Launch Flow: artifact gate recognizes src-dir App Router repos (round 6)", () => {
+  // The litlabs-website repo's own layout — the shape that failed the
+  // production approved-write proof on 2026-11-15: a Next.js App Router
+  // project under src/, whose root page lives inside a route group
+  // (src/app/(marketing)/page.tsx serves "/"). Before the fix the entry
+  // set held no src/app/page.* at all and exact-path matching could not
+  // see through the route group, so the gate reported "No runnable
+  // website entry file" for a workspace that plainly has one — and the
+  // approvals route failed the whole resumed run over it, even for an
+  // unrelated root .md write.
+  function treeTransport(
+    tree: Record<string, Array<{ name: string; type: string }>>,
+    contents: Record<string, string> = {},
+  ): WorkspaceTransport {
+    return createMockTransport({
+      listFiles: vi.fn().mockImplementation(async (path: string) => ({
+        entries: tree[path] ?? [],
+      })),
+      readFile: vi.fn().mockImplementation(async (path: string) => {
+        const content = contents[path];
+        if (content === undefined) throw new Error(`no such file: ${path}`);
+        return { content, size: content.length };
+      }),
+    });
+  }
+
+  const REPO_TREE: Record<string, Array<{ name: string; type: string }>> = {
+    ".": [
+      { name: "PROOF-2026-11-15.md", type: "file" },
+      { name: "PRODUCTION_READY_CHECKLIST.md", type: "file" },
+      { name: "package.json", type: "file" },
+      { name: "src", type: "folder" },
+    ],
+    src: [
+      { name: "app", type: "folder" },
+      { name: "lib", type: "folder" },
+    ],
+    "src/app": [
+      { name: "(marketing)", type: "folder" },
+      { name: "layout.tsx", type: "file" },
+    ],
+    "src/app/(marketing)": [{ name: "page.tsx", type: "file" }],
+    "src/lib": [{ name: "utils.ts", type: "file" }],
+  };
+
+  it("passes for a src/app project whose root page sits in a route group", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const transport = treeTransport(REPO_TREE, {
+      "src/app/(marketing)/page.tsx": "export default function Home() { return <main>LiTT</main>; }",
+    });
+    const check = await verifyProjectArtifacts(transport);
+    expect(check.ok).toBe(true);
+    expect(check.files).toContain("PROOF-2026-11-15.md");
+  });
+
+  it("passes for a plain src/app/page.tsx project (no route group)", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const transport = treeTransport(
+      {
+        ".": [{ name: "src", type: "folder" }],
+        src: [{ name: "app", type: "folder" }],
+        "src/app": [{ name: "page.tsx", type: "file" }],
+      },
+      { "src/app/page.tsx": "export default function Home() { return null; }" },
+    );
+    const check = await verifyProjectArtifacts(transport);
+    expect(check.ok).toBe(true);
+  });
+
+  it("still fails when the only grouped page is a subroute, not the root page", async () => {
+    const { verifyProjectArtifacts } = await import("@/lib/litt-intelligence/launch-flow");
+    const transport = treeTransport(
+      {
+        ".": [
+          { name: "notes.md", type: "file" },
+          { name: "src", type: "folder" },
+        ],
+        src: [{ name: "app", type: "folder" }],
+        "src/app": [{ name: "(app)", type: "folder" }],
+        "src/app/(app)": [{ name: "about", type: "folder" }],
+        "src/app/(app)/about": [{ name: "page.tsx", type: "file" }],
+      },
+      { "src/app/(app)/about/page.tsx": "export default function About() { return null; }" },
+    );
+    const check = await verifyProjectArtifacts(transport);
+    expect(check.ok).toBe(false);
+    expect(check.error).toContain("No runnable website entry file");
+  });
+
+  it("isRunnableEntryPath: grouped root pages match, subroutes and nested index files do not", async () => {
+    const { isRunnableEntryPath } = await import("@/lib/litt-intelligence/launch-flow");
+    expect(isRunnableEntryPath("src/app/(marketing)/page.tsx")).toBe(true);
+    expect(isRunnableEntryPath("app/(shop)/page.tsx")).toBe(true);
+    expect(isRunnableEntryPath("src/app/page.tsx")).toBe(true);
+    expect(isRunnableEntryPath("src/app/(app)/about/page.tsx")).toBe(false);
+    expect(isRunnableEntryPath("assets/index.html")).toBe(false);
+    expect(isRunnableEntryPath("PROOF-2026-11-15.md")).toBe(false);
+  });
+});
+
 // ─── Tests: honest loop failure propagation ─────────────────────────
 
 describe("Launch Flow: honest loop failure", () => {
@@ -1378,5 +1478,278 @@ describe("Launch Flow: entitled paid fallback (real runLaunchFlow path)", () => 
     expect(transport.writeFile).not.toHaveBeenCalled();
     expect(result.status).toBe("failed");
     expect(result.error).toBeTruthy();
+  });
+});
+
+// ─── Tests: read-only inspection runs (ART-20261111-041) ────────
+//
+// Live defect: a kernel-classified inspection turn ("List the files…")
+// executed correctly in the tool lane, but this flow then treated the
+// absence of file WRITES as a failed build: it re-prompted the model
+// to write files and ended with TOOL_EXECUTION_UNAVAILABLE, discarding
+// the composed answer. A read-only run is complete when the tool lane
+// answers — no reprompt, no artifact/preview phases, and the agent's
+// text is the result. Mutation runs keep every existing guard.
+
+describe("Launch Flow: read-only inspection runs", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  const LISTING_TEXT = "The project contains the following files: 1. index.html 2. litt-probe.txt";
+
+  function inspectionAgentResult(overrides: Partial<AgentLoopResult> = {}): AgentLoopResult {
+    return successAgentResult({
+      finalText: LISTING_TEXT,
+      stepsUsed: 2,
+      toolCalls: [{ toolId: "files.list", success: true, summary: "listed 2 files", mutating: false }],
+      buildFixResult: undefined,
+      ...overrides,
+    });
+  }
+
+  it("completes a read-only run in one pass and delivers the agent's answer verbatim", async () => {
+    const transport = createMockTransport();
+    const runAgentLoop = vi.fn().mockResolvedValue(inspectionAgentResult());
+    const options = makeOptions({
+      userMessage: "List the files in the project I'm currently viewing. Just list them, don't change anything.",
+      transport,
+      runAgentLoop,
+      requiresExecution: true,
+      readOnly: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+    expect(runAgentLoop.mock.calls[0][2]).toMatchObject({ requireToolCallOnFirstStep: true });
+    expect(runAgentLoop.mock.calls[0][2].buildCapabilityGuard).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.status).toBe("completed");
+    expect(result.finalText).toBe(LISTING_TEXT);
+    // No build machinery: no artifact/preview phase was entered.
+    expect(transport.startPreview).not.toHaveBeenCalled();
+  });
+
+  it("delivers the answer even when the run's quality verdict fails — never the discarded-answer failure text", async () => {
+    const gatedText = `${LISTING_TEXT}\n\nQuality check — cannot declare success (task scope: standard)`;
+    const runAgentLoop = vi.fn().mockResolvedValue(inspectionAgentResult({
+      finalText: gatedText,
+      qualityLoop: {
+        verdict: { ok: false, missing: ["build", "test"], reason: "Cannot declare success (task scope: standard)" },
+        stages: [],
+        designPasses: 0,
+      },
+    }));
+    const options = makeOptions({
+      userMessage: "List the files in the project I'm currently viewing.",
+      runAgentLoop,
+      requiresExecution: true,
+      readOnly: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+    expect(result.finalText).toBe(gatedText);
+    expect(result.finalText).not.toContain("no available model produced a file-writing tool call");
+  });
+
+  it("does not claim success when the read produced no successful tool call", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(inspectionAgentResult({
+      finalText: "I couldn't list the files: the workspace read failed.",
+      toolCalls: [{ toolId: "files.list", success: false, summary: "read failed", mutating: false }],
+    }));
+    const options = makeOptions({
+      userMessage: "List the files in the project I'm currently viewing.",
+      runAgentLoop,
+      requiresExecution: true,
+      readOnly: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+    expect(result.finalText).toContain("couldn't list the files");
+  });
+
+  it("CONTROL: the identical agent result WITHOUT readOnly still hits the zero-mutation reprompt and its failure text", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(inspectionAgentResult());
+    const options = makeOptions({
+      userMessage: "List the files in the project I'm currently viewing.",
+      runAgentLoop,
+      requiresExecution: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(2);
+    expect(result.success).toBe(false);
+    expect(result.finalText).toContain("no available model produced a file-writing tool call");
+  });
+});
+
+// ─── Tests: exec-only runs (Step 6 proof, 2026-11-14) ───────────
+//
+// Live defect: a kernel-classified command execution ("run
+// pwd && ls") was treated as a build — the guard armed, and the run
+// ended with "The build produced no successful file-writing
+// operation" while the command's output never reached the chat. An
+// exec-only run is complete when the command runs: no build guard,
+// no zero-mutation reprompt, no artifact/preview phases, and the
+// agent's text (which carries the output) is the result. Build runs
+// keep every existing guard.
+
+describe("Launch Flow: exec-only runs", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  const EXEC_TEXT = "/workspace\nindex.html\npackage.json\nproof-marker.txt";
+
+  function execAgentResult(overrides: Partial<AgentLoopResult> = {}): AgentLoopResult {
+    return successAgentResult({
+      finalText: EXEC_TEXT,
+      stepsUsed: 2,
+      toolCalls: [{ toolId: "terminal.execute", success: true, summary: "pwd && ls", mutating: true }],
+      buildFixResult: undefined,
+      ...overrides,
+    });
+  }
+
+  it("completes an exec-only run in one pass and delivers the command output verbatim", async () => {
+    const transport = createMockTransport();
+    const runAgentLoop = vi.fn().mockResolvedValue(execAgentResult());
+    const options = makeOptions({
+      userMessage: "Run pwd && ls in the sandbox",
+      transport,
+      runAgentLoop,
+      requiresExecution: true,
+      execOnly: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+    expect(runAgentLoop.mock.calls[0][2].buildCapabilityGuard).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.status).toBe("completed");
+    expect(result.finalText).toBe(EXEC_TEXT);
+    // No build machinery: no artifact/preview phase was entered.
+    expect(transport.startPreview).not.toHaveBeenCalled();
+  });
+
+  it("does not claim success when the command produced no successful tool call", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(execAgentResult({
+      finalText: "The command failed: the sandbox was unreachable.",
+      toolCalls: [{ toolId: "terminal.execute", success: false, summary: "exec failed", mutating: true }],
+    }));
+    const options = makeOptions({
+      userMessage: "Run pwd && ls in the sandbox",
+      runAgentLoop,
+      requiresExecution: true,
+      execOnly: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("EXEC_NOT_COMPLETED");
+    expect(result.finalText).toContain("The command failed");
+  });
+
+  it("CONTROL: the identical agent result WITHOUT execOnly arms the build guard", async () => {
+    const transport = createMockTransport();
+    const runAgentLoop = vi.fn().mockResolvedValue(execAgentResult());
+    const options = makeOptions({
+      userMessage: "Run pwd && ls in the sandbox",
+      transport,
+      runAgentLoop,
+      requiresExecution: true,
+    });
+
+    await runLaunchFlow(options);
+
+    expect(runAgentLoop.mock.calls[0][2].buildCapabilityGuard).toEqual({ maxStepsWithoutFileWrite: 3 });
+  });
+});
+
+// ─── Tests: media-generation runs (lion proof, 2026-11-16) ──────
+//
+// Live defect: a kernel-classified media ask ("Need a picture of a
+// lion") generated successfully, but the launch flow treated the run
+// as a build — the artifact/preview phases demanded a website entry
+// file and the run failed with "No runnable website entry file was
+// created in the project workspace", replacing the image result. A
+// media-only run is complete when the generation delivers: no build
+// guard, no zero-mutation reprompt, no artifact/preview phases, and
+// the agent's text (which carries the image markdown) is the result.
+
+describe("Launch Flow: media-generation runs", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  const LION_TEXT = "Here is your lion: ![Need a picture of a lion](https://img.test/lion.png)";
+
+  function mediaAgentResult(overrides: Partial<AgentLoopResult> = {}): AgentLoopResult {
+    return successAgentResult({
+      finalText: LION_TEXT,
+      stepsUsed: 2,
+      toolCalls: [{ toolId: "image.generate", success: true, summary: "Image generated and saved to project", mutating: true }],
+      buildFixResult: undefined,
+      ...overrides,
+    });
+  }
+
+  it("completes a media-only run in one pass and delivers the generation result verbatim", async () => {
+    const transport = createMockTransport();
+    const runAgentLoop = vi.fn().mockResolvedValue(mediaAgentResult());
+    const options = makeOptions({
+      userMessage: "Need a picture of a lion",
+      transport,
+      runAgentLoop,
+      requiresExecution: true,
+      mediaOnly: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+    expect(runAgentLoop.mock.calls[0][2].buildCapabilityGuard).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.status).toBe("completed");
+    expect(result.finalText).toBe(LION_TEXT);
+    // No build machinery: no artifact/preview phase was entered.
+    expect(transport.startPreview).not.toHaveBeenCalled();
+  });
+
+  it("does not claim success when the generation produced no successful tool call", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(mediaAgentResult({
+      finalText: "The image provider failed.",
+      toolCalls: [{ toolId: "image.generate", success: false, summary: "provider failed", mutating: true }],
+    }));
+    const options = makeOptions({
+      userMessage: "Need a picture of a lion",
+      runAgentLoop,
+      requiresExecution: true,
+      mediaOnly: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(runAgentLoop).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("MEDIA_NOT_COMPLETED");
+    expect(result.finalText).toContain("The image provider failed");
   });
 });

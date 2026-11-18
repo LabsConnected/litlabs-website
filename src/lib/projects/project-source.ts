@@ -25,12 +25,21 @@
  */
 
 import type { CanonicalProject, ProjectSourceType, WorkspaceStatus } from "./types";
+import { extractEmbeddedErrorCode, HOST_EXECUTION_DISABLED_CODE } from "../host-execution-guard";
 
 /** Who owns the durable source. */
 export type ProjectSourceKind = "managed" | "github";
 
-/** Provisioning state of the source, independent of runtime/agent state. */
-export type ProjectSourceStatus = "provisioning" | "ready" | "error" | "needs_setup";
+/**
+ * Provisioning state of the source, independent of runtime/agent state.
+ *
+ * "unavailable" is the deliberate product gate for repo-backed projects on
+ * the hosted service: opening the repo as a live workspace is fail-closed
+ * until a verified sandbox exists, so the source is not broken ("error")
+ * and needs nothing from the user ("needs_setup") — it is simply not
+ * offered yet. Every other status keeps its existing meaning.
+ */
+export type ProjectSourceStatus = "provisioning" | "ready" | "error" | "needs_setup" | "unavailable";
 
 /** Default branch for a managed workspace — matches `git init` + initial commit. */
 export const DEFAULT_MANAGED_BRANCH = "main";
@@ -168,7 +177,19 @@ function resolveSourceStatus(
  */
 export function describeProjectSource(project: CanonicalProject): ProjectSourceView {
   const kind = resolveSourceKind(project);
-  const status = resolveSourceStatus(project.workspaceStatus, project.workspaceId);
+  const resolved = resolveSourceStatus(project.workspaceStatus, project.workspaceId);
+  // Repo-gate: a GitHub-backed project whose prepare was refused with
+  // HOST_EXECUTION_DISABLED is gated, not broken. The refusal is a
+  // deploy-time policy state (no verified sandbox on the hosted service),
+  // so reporting "error" — and surfacing the raw stored refusal as the
+  // source error — misreads a product decision as a failure. Only the
+  // coded refusal earns this; a genuine provisioning failure on a repo
+  // project still reports "error" exactly as before.
+  const hostExecRefused =
+    kind === "github" &&
+    (project.workspaceStatus === "failed" || project.workspaceStatus === "error") &&
+    extractEmbeddedErrorCode(project.workspaceError) === HOST_EXECUTION_DISABLED_CODE;
+  const status: ProjectSourceStatus = hostExecRefused ? "unavailable" : resolved;
   const ready = status === "ready";
 
   // Git exists once the workspace has been provisioned: managed
@@ -193,6 +214,16 @@ export function describeProjectSource(project: CanonicalProject): ProjectSourceV
 }
 
 /**
+ * True when a project view sits behind the repo gate: GitHub-owned source
+ * whose live workspace is unavailable on the hosted service. Surfaces use
+ * this to present the deliberate gate (no error styling, no retry, no
+ * preview-secrets dead end) instead of failure states.
+ */
+export function isRepoWorkspaceGated(source: { kind: ProjectSourceKind | null; status?: ProjectSourceStatus | null }): boolean {
+  return source.kind === "github" && source.status === "unavailable";
+}
+
+/**
  * The one-line source summary shown under a project's name.
  *
  * Replaces "No repository · —", which read as "this project is empty"
@@ -211,6 +242,7 @@ export function formatSourceSummary(source: {
   if (source.status === "provisioning") return "Preparing source…";
   if (source.status === "error") return "Source error";
   if (source.status === "needs_setup") return "Source needs setup";
+  if (source.status === "unavailable") return "Repo workspace unavailable";
 
   const parts: string[] = [];
   parts.push(source.githubRepository ?? (source.kind === "github" ? "GitHub" : "LiTT Managed"));

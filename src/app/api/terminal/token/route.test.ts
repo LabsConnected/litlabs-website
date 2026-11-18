@@ -24,7 +24,8 @@ vi.mock("@/config/feature-flags", async () => {
 import { GET } from "./route";
 import { auth } from "@/lib/auth";
 import { createTerminalToken } from "@/lib/terminal-auth";
-import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
+import { verifyProjectWorkspace, updateProjectWorkspace } from "@/lib/projects/project-repository";
+import { getWorkspaceInternal } from "@/lib/terminal-internal-client";
 import { FEATURE_FLAGS, isFeatureEnabled } from "@/config/feature-flags";
 
 const request = (query = "") =>
@@ -55,13 +56,20 @@ describe("GET /api/terminal/token", () => {
     expect(createTerminalToken).not.toHaveBeenCalled();
   });
 
-  it("blocks a non-owner before any workspace lookup or token minting", async () => {
+  it("refuses a non-owner before any workspace lookup or token minting, as a coded 200", async () => {
+    // The refusal itself is unchanged (gate first, no token minted) — but a
+    // standing policy verdict is an expected state, not a request failure,
+    // so it is answered with the fail-soft coded-200 shape (same pattern as
+    // the workspace-state route) instead of an error status the browser
+    // logs as a console error on every Studio load.
     vi.mocked(auth).mockResolvedValue({ userId: "user_public" } as never);
     const res = await GET(request("?projectId=p1"));
     const body = await res.json();
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
     expect(body.code).toBe("TERMINAL_DISABLED");
+    expect(body.terminalAvailable).toBe(false);
+    expect(body.token).toBeUndefined();
     expect(verifyProjectWorkspace).not.toHaveBeenCalled();
     expect(createTerminalToken).not.toHaveBeenCalled();
   });
@@ -72,6 +80,26 @@ describe("GET /api/terminal/token", () => {
 
     expect(res.status).toBe(200);
     expect(createTerminalToken).toHaveBeenCalledWith("user_owner");
+  });
+
+  it("reports WORKSPACE_NOT_READY on a registry miss WITHOUT demoting the project row", async () => {
+    vi.mocked(auth).mockResolvedValue({ userId: "user_owner" } as never);
+    vi.mocked(verifyProjectWorkspace).mockResolvedValue({ workspaceId: "ws-1" } as never);
+    // The terminal server's registry has lost the descriptor even
+    // though the DB row says ready.
+    vi.mocked(getWorkspaceInternal).mockResolvedValue(null as never);
+
+    const res = await GET(request("?projectId=p1"));
+    const body = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(body.code).toBe("WORKSPACE_NOT_READY");
+    // The #989 posture, aligned with the provisioning path: no
+    // "not_prepared" stamp on a liveness miss — a demoted row falls
+    // out of reach of the GitHub-mirror heal, which only engages for
+    // "ready" rows, so the failure would stick instead of healing.
+    expect(updateProjectWorkspace).not.toHaveBeenCalled();
+    expect(createTerminalToken).not.toHaveBeenCalled();
   });
 
   it("lets a non-owner through only when the flag is explicitly enabled", async () => {

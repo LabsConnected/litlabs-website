@@ -7,8 +7,10 @@ import {
   FeedTab,
   getPostDTO,
   listPosts,
+  normalizeProjectRef,
   requireAuthDbUser,
   resolveDbUser,
+  serializeProjectRef,
 } from "@/lib/social-feed";
 import { auth } from "@/lib/auth";
 
@@ -137,7 +139,11 @@ async function postHandler(req: NextRequest) {
     }
   }
 
-  const projectRef = typeof body.projectRef === "string" && body.projectRef.trim() ? body.projectRef.trim().slice(0, 200) : null;
+  // Canonical projectRef is the full object { projectId, name, url } the
+  // Composer sends. Malformed refs normalize to null (never a 400 on their
+  // own — the content/media requirement below still applies). Stored as
+  // JSON in the project_ref TEXT column; see serializeProjectRef.
+  const projectRef = normalizeProjectRef(body.projectRef);
   const music = body.music && typeof body.music === "object" ? body.music : null;
   const musicTitle = typeof music?.title === "string" ? music.title.trim().slice(0, 200) : "";
   if (postType === "music" && !musicTitle) {
@@ -175,7 +181,7 @@ async function postHandler(req: NextRequest) {
       media_urls: mediaUrls,
       post_type: postType,
       visibility,
-      project_ref: postType === "project" ? projectRef : null,
+      project_ref: postType === "project" ? serializeProjectRef(projectRef) : null,
       ...linkFields,
       ...musicFields,
     })

@@ -19,16 +19,17 @@ import { createHash, randomUUID } from "crypto";
 import { postRunCheckpointLabel } from "@/lib/studio/checkpoint-pairs";
 import { emitUsageEvent, getMeteringContext } from "@/lib/metering";
 import { calculateLlmCost } from "@/lib/llm-cost-engine";
-import type { WorkspaceTransport } from "./workspace-transport";
+import type { CheckpointInfo, WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
-import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallRequest, type ToolCallResult, type LLMMessage } from "./llm-tool-calling";
+import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallRequest, type ToolCallResult, type LLMMessage, type RoutePlanSummary } from "./llm-tool-calling";
 // Re-exported so launch-flow can seed a continued loop's messages.
 export type { LLMMessage };
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { buildPatchRecoveryMessage, existingPageOverwriteError, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
-import { computeWorkspaceChange } from "./workspace-change-producer";
+import { computeWorkspaceChange, workspaceChangeFromVolumeListing } from "./workspace-change-producer";
+import { settleRunOutcome, type RunFailureContributor } from "./run-settlement";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { recordModelFailure } from "./provider-registry";
 import {
@@ -58,6 +59,7 @@ import {
   noteToolResult,
   noteMutationReadBack,
   noteStaticArtifactCheck,
+  noteStaticVisualAudit,
   runQualityInspection,
   snapshotQualityLoopSession,
   startQualityLoopSession,
@@ -67,7 +69,9 @@ import {
   type QualityLoopSession,
   type QualityLoopSnapshot,
   formatQualityVerdictBlock,
+  stripQualityStageMarkers,
 } from "./quality-loop-flow";
+import type { QualityTaskScope } from "./quality-loop";
 // LiTT Tool Orchestrator (fix/litt-tool-orchestrator): goal → capability
 // planning, tool health, reference-match workflow, run observability.
 import { planCapabilities, buildCapabilityPlanPrompt } from "./capability-planner";
@@ -233,6 +237,15 @@ export interface AgentLoopConfig {
     userId: string;
     /** The user's original request (judge context). Falls back to the first user message. */
     userRequest?: string;
+    /**
+     * System-determined task scope from the kernel's classification
+     * (taskKind "inspection" → "inspection", taskKind "media" →
+     * "media"). Forwarded to the quality
+     * session at creation; a resume ignores it (the snapshot's scope
+     * governs). Unset = the session derives scope from the request
+     * text, exactly as before.
+     */
+    taskScope?: QualityTaskScope;
     /** Server-persisted evidence restored after an approval pause. */
     state?: QualityLoopSnapshot;
   };
@@ -381,6 +394,21 @@ export interface AgentLoopResult {
    * `modelFailed` (provider outage).
    */
   failedHonestly?: string;
+  /**
+   * Round 11: set when the run settled COMPLETED despite a model/route
+   * failure — the deliverable had already landed (successful mutation +
+   * quality gate passed) and only the closing summary call failed.
+   * Carries the honest user-facing warning text. Consumers must check
+   * this before treating `modelFailed` as the run's verdict.
+   */
+  completedWithWarning?: string;
+  /**
+   * Round 11: every failure observed during the run (failed tool calls,
+   * unknown workspace verification, honest failure, model/route
+   * failure), recorded whether or not it decided the outcome — a
+   * capacity failure must not mask a tool defect in the record.
+   */
+  failureContributors?: RunFailureContributor[];
   /** Set when the loop paused because ACT mode requires approval for a mutation */
   pendingApproval?: PendingApproval;
   /**
@@ -654,7 +682,13 @@ export function seedToolCallRecordsFromHistory(
   return records;
 }
 
-const FILE_GENERATION_TOOL_IDS = new Set([...FILE_WRITE_TOOL_IDS, "code.writeFile", "code.refactor", "files.patch"]);
+// site.compose/site.patch generate and edit the canvas page artifact
+// (compiled to index.html on save) — they ARE the file-writing path for a
+// canvas-first build, even though they never touch files.write directly.
+// Omitting them let the build-capability guard settle resumed image-first
+// builds as "no file writes" before project.deploy (staging smoke
+// 42962987371, 2026-11-11).
+const FILE_GENERATION_TOOL_IDS = new Set([...FILE_WRITE_TOOL_IDS, "code.writeFile", "code.refactor", "files.patch", "site.compose", "site.patch"]);
 export function isFileWritingTool(toolId: string): boolean { return FILE_GENERATION_TOOL_IDS.has(toolId); }
 
 /** Server-persisted tool results, not assistant completion claims. */
@@ -691,6 +725,36 @@ const CONTINUATION_MARKERS: RegExp[] = [
 
 /** How many times a run may nudge a stalled model before failing honestly. */
 const MAX_CONTINUATION_NUDGES = 2;
+
+/**
+ * How many times a run may force a recovery step after an apply_patch
+ * rejection before it may close as failed (acceptance run #36: in
+ * iteration 4 the model's patch was rejected, its next response had no
+ * tool call, and the run ended with the edit never attempted again —
+ * while iterations 2 and 3 recovered on their own). Bounded per run, so
+ * a model that keeps answering in prose still ends the run promptly.
+ */
+export const MAX_PATCH_RECOVERY_FORCES = 2;
+
+/**
+ * The corrective step injected when a response that follows an
+ * apply_patch rejection contains no tool call: hands the model the
+ * rejection detail and requires a recovery action — a corrected patch
+ * (its search text copied verbatim from the current file content the
+ * rejection feedback already carried) or the files.write fallback.
+ */
+export function buildPatchRecoveryForceMessage(rejection: { path: string; error: string }): string {
+  const path = rejection.path || "the requested file";
+  return (
+    `Your apply_patch for ${path} was rejected before execution — no file was changed. ` +
+    `Rejection detail: ${rejection.error} ` +
+    `Your last reply contained no tool call, so the requested edit is still not done and this run cannot finish yet. ` +
+    `Recover now — do not answer in prose: either (1) emit a corrected apply_patch for ${path} whose search text is copied ` +
+    `verbatim from the current file content provided in the rejection feedback (a short search string that appears exactly ` +
+    `once), re-reading the file with files.read first if you need the exact bytes, or (2) use files.write to write the ` +
+    `complete corrected contents of ${path}.`
+  );
+}
 
 export function announcesMoreWork(text: string): boolean {
   return CONTINUATION_MARKERS.some((re) => re.test(text));
@@ -1116,6 +1180,40 @@ async function pauseReasonFor(
  * to remember to create one. Never throws; a failure just means no
  * after-checkpoint (the pre-run baseline still exists for Revert).
  */
+/**
+ * Round 11: settlement workspace evidence. The git/checkpoint probe
+ * runs first, carrying the recorded checkpoint-failure reason when
+ * checkpoint creation failed (Q2a). When the probe still cannot
+ * answer, the volume-listing fallback verifies the paths the run's
+ * own successful mutations declared through the Files panel's read
+ * path (Q2b) — real file state instead of an unexplained "unknown".
+ */
+async function settleWorkspaceChangeEvidence(
+  transport: WorkspaceTransport,
+  checkpoint: CheckpointInfo | null | undefined,
+  toolCallLog: ReadonlyArray<{ success: boolean; mutating?: boolean; paths?: string[] }>,
+): Promise<WorkspaceChangeEvidence> {
+  const primary = await computeWorkspaceChange(transport, checkpoint ?? null, {
+    checkpointError: transport.lastCheckpointError ?? undefined,
+  });
+  if (primary.status !== "unknown") return primary;
+  const candidatePaths = [
+    ...new Set(
+      toolCallLog
+        .filter((c) => c.success && c.mutating)
+        .flatMap((c) => c.paths ?? []),
+    ),
+  ];
+  if (candidatePaths.length === 0) return primary;
+  return workspaceChangeFromVolumeListing(primary, {
+    candidatePaths,
+    listDir: async (dir) => {
+      const listing = await transport.listFiles(dir);
+      return listing.entries.map((e) => ({ name: e.name, type: e.type }));
+    },
+  });
+}
+
 async function createAfterRunCheckpoint(
   transport: WorkspaceTransport,
   workspaceChange: WorkspaceChangeEvidence | undefined,
@@ -1130,6 +1228,52 @@ async function createAfterRunCheckpoint(
     return after;
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Round 14 — the after-run checkpoint is time-bounded.
+ *
+ * createAfterRunCheckpoint is a sandbox transport operation. Both
+ * loop tails used to AWAIT it BEFORE emitting "finished" and
+ * returning, so a sick sandbox data path could hold a completed
+ * run's settlement hostage indefinitely — the loop simply never
+ * returned, and every downstream settlement (paused-run row,
+ * transcript writeback, action-run status) never happened. The
+ * checkpoint is best-effort by design (undefined on failure); a
+ * hang is one more failure shape, not a settlement blocker. The
+ * tails now emit "finished" first and call this bounded version;
+ * on timeout the run settles without a checkpoint.
+ *
+ * The checkpoint's progress events are gated once the race is lost
+ * so a late completion cannot emit a "checkpoint" event after the
+ * run's "finished" event already closed the stream.
+ */
+export const AFTER_RUN_CHECKPOINT_TIMEOUT_MS = 30_000;
+
+async function createAfterRunCheckpointBounded(
+  transport: WorkspaceTransport,
+  workspaceChange: WorkspaceChangeEvidence | undefined,
+  request: string | null,
+  localProgress: ProgressEmitter,
+): Promise<{ checkpointId: string; label: string; gitSha: string } | undefined> {
+  if (workspaceChange?.status !== "changed") return undefined;
+  let eventsLive = true;
+  const gatedProgress = new ProgressEmitter((event) => {
+    if (eventsLive) localProgress.emit(event);
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      createAfterRunCheckpoint(transport, workspaceChange, request, gatedProgress),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), AFTER_RUN_CHECKPOINT_TIMEOUT_MS);
+        (timer as { unref?: () => void }).unref?.();
+      }),
+    ]);
+  } finally {
+    eventsLive = false;
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -1478,6 +1622,14 @@ async function maybeEnrichStaticSiteVisuals(
     const report = await enrichStaticSiteVisuals(transport, {
       topicKeywords: qualitySession?.userRequest,
     });
+    // Feed the audit's surviving placeholder refs into the quality
+    // loop: while any remain, the run cannot earn a clean pass — the
+    // enrichment report alone never reached the gate before, so a page
+    // shipping placeholder imagery still completed "successfully"
+    // (production defect 2026-11-11).
+    if (qualitySession) {
+      noteStaticVisualAudit(qualitySession, report.unresolvedPlaceholders);
+    }
     if (report.imagesResolved > 0 || report.imagesFailed > 0 || report.filesChanged.length > 0) {
       localProgress.emit({
         type: "status",
@@ -1485,6 +1637,9 @@ async function maybeEnrichStaticSiteVisuals(
           `Visual enrichment: ${report.imagesResolved} image(s) resolved` +
           (report.imagesFailed > 0 ? `, ${report.imagesFailed} unavailable` : "") +
           (report.placeholdersUsed > 0 ? `, ${report.placeholdersUsed} placeholder fallback(s)` : "") +
+          (report.unresolvedPlaceholders.length > 0
+            ? `, ${report.unresolvedPlaceholders.length} unresolved placeholder(s): ${report.unresolvedPlaceholders.join(", ")}`
+            : "") +
           ` (${report.providersUsed.join(", ") || "no providers"}` +
           (report.providersFailed.length > 0 ? `; failed: ${report.providersFailed.join(", ")}` : "") +
           `).`,
@@ -1643,6 +1798,32 @@ function attachEventPersistence(
         });
       });
   });
+}
+
+/**
+ * Route honesty — record the run-start route plan. The router reports
+ * the plan of EVERY LLM call through onRoutePlan; a run re-plans per
+ * step as health and context change, but the post-mortem anchor is the
+ * FIRST plan — the one that decided whether the run had any live route
+ * at all (2026-11-09 Sudsy run: a hollow chain was invisible because
+ * the plan was only ever logged when it was completely empty). Emits
+ * exactly one route_plan progress event per run; the event persists
+ * into the run's action_events record via persistEvent, alongside the
+ * run's steps.
+ */
+function makeRoutePlanRecorder(
+  progress: ProgressEmitter,
+): (summary: RoutePlanSummary) => void {
+  let recorded = false;
+  return (summary) => {
+    if (recorded) return;
+    recorded = true;
+    progress.emit({
+      type: "route_plan",
+      routes: summary.routes.map((r) => ({ provider: r.provider, models: r.models })),
+      excluded: summary.excluded,
+    });
+  };
 }
 
 // ─── Canonical metering (P0) ─────────────────────────────────────
@@ -1811,6 +1992,7 @@ async function runAgentLoopV2Inner(
       userRequest: cfg.qualityLoop.userRequest ?? userMessage,
       snapshot: cfg.qualityLoop.state,
       isStaticWorkspace: cfg.isStaticWorkspace,
+      taskScope: cfg.qualityLoop.taskScope,
     });
     cfg.systemPrompt += buildQualityLoopPrompt(qualitySession.taskScope);
   }
@@ -1849,6 +2031,12 @@ async function runAgentLoopV2Inner(
   // verdict too, so a replayed claim keeps the original persisted truth.
   const executedMutations = new Map<string, ExecutedMutation>();
   const patchRecoveryAttempts = new Map<string, number>();
+  // The latest apply_patch rejection that no file-writing response has
+  // answered yet, and how many corrective forces this run has spent on
+  // post-rejection silence. Set by the pre-approval validation block;
+  // consumed by the zero-tool-call branch (MAX_PATCH_RECOVERY_FORCES).
+  let pendingPatchRejection: { path: string; error: string } | null = null;
+  let patchRecoveryForcesUsed = 0;
 
   // Collect progress events
   const localProgress = new ProgressEmitter((event) => {
@@ -1976,6 +2164,9 @@ async function runAgentLoopV2Inner(
   let baselineCheckpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
   const toolCallLog: AgentToolCallLogEntry[] = [];
   let completedDeployment: CompletedDeployment | null = null;
+  // Round 14: images generated during this run, for the inline chat
+  // render appended at the tail (readChatImageOutcome).
+  const chatImages: ChatImageOutcome[] = [];
   // Bounded recovery when the model announces more work but emits no tool
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
@@ -2002,6 +2193,10 @@ async function runAgentLoopV2Inner(
 
   // Check if any mutations have been requested (for checkpoint logic)
   let mutationBatchPending = false;
+
+  // Route honesty: the first LLM call's route plan is persisted into
+  // this run's record (see makeRoutePlanRecorder).
+  const recordRoutePlan = makeRoutePlanRecorder(localProgress);
 
   while (stepsUsed < cfg.maxSteps) {
     // Check runtime limit
@@ -2043,6 +2238,7 @@ async function runAgentLoopV2Inner(
           // P1: Server-derived paid-provider entitlement (never from client).
           allowLittPaidProviders: cfg.allowLittPaidProviders,
           allowTransientPlanRetry: true,
+          onRoutePlan: recordRoutePlan,
         },
       );
       const llmDurationMs = Date.now() - llmStartTime;
@@ -2140,6 +2336,34 @@ async function runAgentLoopV2Inner(
         continue;
       }
       const zeroCallText = llmResponse.text ?? "";
+      // Patch-rejection recovery (acceptance run #36, iteration 4): a
+      // patch was rejected earlier in this run and this response STILL
+      // contains no tool call. In a capability-guarded run that prose
+      // finish can never be a legitimate final answer — the completion
+      // guard below would fail the run for producing no successful file
+      // write — so instead of closing, force a bounded corrective step
+      // that hands the model the rejection detail and requires a
+      // corrected patch or a files.write fallback. Iterations 2 and 3
+      // of that run recovered unaided; this makes the chance structural
+      // instead of voluntary. Once the force budget is spent, the
+      // normal resolution below closes the run exactly as before.
+      // Non-guarded turns are untouched: a prose reply after a rejected
+      // patch stays a valid final answer there.
+      if (
+        pendingPatchRejection &&
+        cfg.buildCapabilityGuard != null &&
+        patchRecoveryForcesUsed < MAX_PATCH_RECOVERY_FORCES
+      ) {
+        patchRecoveryForcesUsed++;
+        localProgress.emit({
+          type: "status",
+          summary:
+            "The model's patch was rejected and its reply contained no recovery action — requiring a corrected patch or files.write...",
+        });
+        llmMessages.push({ role: "assistant", content: zeroCallText });
+        llmMessages.push({ role: "user", content: buildPatchRecoveryForceMessage(pendingPatchRejection) });
+        continue;
+      }
       const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
         // Small lane exists to mutate files: until a mutation lands, a
         // prose-only reply can never be the final answer — bounded nudges
@@ -2206,6 +2430,14 @@ async function runAgentLoopV2Inner(
     // The model emitted tool calls — the required-first-call contract is
     // satisfied and later steps run under "auto" tool choice.
     emittedToolCalls = true;
+
+    // A response carrying any file-writing call IS the model's recovery
+    // attempt for a pending patch rejection — clear the pending state.
+    // If that attempt is itself rejected, the validation block below
+    // records the fresh rejection; if it lands, the rejection is answered.
+    if (pendingPatchRejection && llmResponse.toolCalls.some((c) => isFileWritingTool(c.toolId))) {
+      pendingPatchRejection = null;
+    }
 
     // Emit a reasoning summary for tool-calling steps (what LiTT is about to do)
     if (llmResponse.text) {
@@ -2468,6 +2700,15 @@ async function runAgentLoopV2Inner(
             finalText = "I could not safely apply that change after re-reading the current file. No mutation was executed.";
             break;
           }
+          if (toolCall.toolId === "apply_patch") {
+            // A rejection the model still has to answer: if its next
+            // response contains no tool call, the zero-tool-call branch
+            // forces a bounded recovery instead of closing the run.
+            pendingPatchRejection = {
+              path: String(toolCall.inputs.path ?? ""),
+              error: writeError,
+            };
+          }
           continue;
         }
       }
@@ -2544,6 +2785,15 @@ async function runAgentLoopV2Inner(
             baselineCheckpoint: baselineCheckpoint ?? checkpoint ?? undefined,
             // Observability (Part J): the run pauses here awaiting approval.
             runObservability: finishRunObservability(runObs, "awaiting_approval"),
+            // The quality session snapshot rides at the TOP level too,
+            // not only inside pendingApproval: the messages route
+            // persists the paused run from this top-level field (the
+            // same field the final return below populates), and the
+            // pause return omitting it wrote quality_loop_state=NULL
+            // for every approval-paused run — the resume then
+            // re-derived the task scope from prose and a media run
+            // came back as "standard" (round-8 diagnosis Q1).
+            qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
             pendingApproval: {
               toolId: toolCall.toolId,
               toolCallId: toolCall.toolCallId,
@@ -2713,6 +2963,8 @@ async function runAgentLoopV2Inner(
         recordVerificationEvidence(runObs, "deployment", deploymentOutcome.publicUrl);
       }
       completedDeployment = deploymentOutcome ?? completedDeployment;
+      const chatImage = readChatImageOutcome(toolCall.toolId, result.result);
+      if (chatImage) chatImages.push(chatImage);
       if (qualitySession) {
         noteToolResult(
           qualitySession,
@@ -2849,7 +3101,33 @@ async function runAgentLoopV2Inner(
     });
   }
 
+  // The guard verdict below pronounces on file writing, but tool success
+  // flags cannot see every write: a file created through a shell command
+  // (terminal.execute), or written by a handler that reported failure
+  // after the bytes landed, leaves no successful file-writing call in
+  // the log — yet the workspace demonstrably changed (Step 6 proof,
+  // 2026-11-14: the marker file landed in the project while the run
+  // still failed with the no-write sentence, and the work log could
+  // only say "could not verify"). Before failing a run on that
+  // sentence, ask the workspace itself: a checkpoint diff reporting
+  // changes is proof a file-writing operation landed, and the sentence
+  // must not fire. The probe runs only when the flag check already
+  // failed, so verified builds pay nothing for it.
+  let guardWorkspaceEvidence: Awaited<ReturnType<typeof computeWorkspaceChange>> | undefined;
   if (cfg.buildCapabilityGuard && !cancelled && !modelFailed && !failedHonestly &&
+      !toolCallLog.some((call) => call.success && isFileWritingTool(call.toolId)) &&
+      !hasSuccessfulFileWriteInHistory(cfg.initialMessages ?? [])) {
+    const guardAttemptedMutation = toolCallLog.some((call) => call.mutating);
+    if (baselineCheckpoint || checkpoint || guardAttemptedMutation) {
+      guardWorkspaceEvidence = await computeWorkspaceChange(
+        transport,
+        baselineCheckpoint ?? checkpoint ?? null,
+      );
+    }
+  }
+
+  if (cfg.buildCapabilityGuard && !cancelled && !modelFailed && !failedHonestly &&
+      guardWorkspaceEvidence?.status !== "changed" &&
       !toolCallLog.some((call) => call.success && isFileWritingTool(call.toolId)) &&
       !hasSuccessfulFileWriteInHistory(cfg.initialMessages ?? [])) {
     failedHonestly = "The build produced no successful file-writing operation, so it is not complete.";
@@ -2891,10 +3169,24 @@ async function runAgentLoopV2Inner(
     finalText: effectiveFinalText,
     localProgress,
   });
+  // User-visible copy (chat beauty, 2026-11-11): the finalize above has
+  // already harvested the final text's QUALITY stage declarations into
+  // the ledger — they are evidence, not prose, and must not reach the
+  // persisted message the docked chat and overlay render. A reply that
+  // was ONLY declarations falls back to the factual silent-outcome
+  // description instead of persisting as an empty message.
+  const visibleFinalText = qualitySession
+    ? stripQualityStageMarkers(effectiveFinalText)
+    : effectiveFinalText;
+  const userFinalText =
+    visibleFinalText ||
+    (qualitySession
+      ? describeSilentOutcome(toolCallLog, cancelled, cancelReason)
+      : visibleFinalText);
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok
-      ? `${effectiveFinalText}${formatQualityVerdictBlock(qualityFinale)}`
-      : effectiveFinalText;
+      ? `${userFinalText}${formatQualityVerdictBlock(qualityFinale)}`
+      : userFinalText;
 
   // What did this run actually do to the files?
   //
@@ -2911,13 +3203,43 @@ async function runAgentLoopV2Inner(
   // mutation — including work a later checkpoint already committed.
   const attemptedMutation = toolCallLog.some((call) => call.mutating);
   const workspaceChange = baselineCheckpoint || checkpoint || attemptedMutation
-    ? await computeWorkspaceChange(transport, baselineCheckpoint ?? checkpoint ?? null)
+    ? await settleWorkspaceChangeEvidence(transport, baselineCheckpoint ?? checkpoint ?? null, toolCallLog)
     : undefined;
 
   if (workspaceChange) {
     localProgress.emit({ type: "workspace_change", ...workspaceChange });
   }
-  const afterCheckpoint = await createAfterRunCheckpoint(transport, workspaceChange, userMessage, localProgress);
+  // Round 11: settle from the run's evidence (run-settlement.ts). A
+  // wrap-up route failure after the deliverable landed settles
+  // completed-with-warning instead of failing work that succeeded;
+  // every failure contributor is recorded either way.
+  const settlement = settleRunOutcome({
+    cancelled,
+    modelFailed,
+    failedHonestly,
+    toolCalls: toolCallLog,
+    qualityVerdictOk: qualityFinale ? qualityFinale.verdict.ok : null,
+    workspaceChange,
+  });
+  if (settlement.completedWithWarning) {
+    localProgress.emit({ type: "status", summary: settlement.completedWithWarning });
+  }
+  // A completed deployment already produced its own honest closing
+  // text (live URL + what failed after it) — keep it over the generic
+  // warning.
+  const settledFinalText =
+    settlement.completedWithWarning && !completedDeployment
+      ? settlement.completedWithWarning
+      : gatedFinalText;
+  // Round 14: generated images render inline in the settled text —
+  // appended here, by the loop, only on a completed settlement.
+  const finalTextWithChatImages =
+    settlement.outcome === "completed"
+      ? appendChatImagesToFinalText(settledFinalText, chatImages)
+      : settledFinalText;
+  // Round 14: "finished" is emitted BEFORE the after-run checkpoint,
+  // and the checkpoint is time-bounded — settlement must never wait
+  // on a sandbox transport operation (createAfterRunCheckpointBounded).
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
     ...(cancelled
@@ -2925,12 +3247,20 @@ async function runAgentLoopV2Inner(
       : {
           totalSteps: stepsUsed,
           totalDurationMs: Date.now() - startTime,
-          success: qualityFinale ? qualityFinale.verdict.ok : true,
+          // Reconciled with the persisted outcome below: "finished"
+          // success means the run settled completed AND the quality
+          // gate passed. The two channels used to be computed from
+          // different inputs and could silently disagree (gate passed
+          // + outcome failed in the round-11 proof).
+          success:
+            settlement.outcome === "completed" &&
+            (qualityFinale ? qualityFinale.verdict.ok : true),
         }),
   } as ProgressEvent);
+  const afterCheckpoint = await createAfterRunCheckpointBounded(transport, workspaceChange, userMessage, localProgress);
 
   return {
-    finalText: gatedFinalText,
+    finalText: finalTextWithChatImages,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -2944,6 +3274,8 @@ async function runAgentLoopV2Inner(
     modelFailed,
     modelFailureText,
     failedHonestly,
+    completedWithWarning: settlement.completedWithWarning,
+    failureContributors: settlement.failureContributors,
     baselineCheckpoint,
     qualityLoop: qualityFinale
       ? {
@@ -2955,10 +3287,7 @@ async function runAgentLoopV2Inner(
     qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
     finalMessages: [...llmMessages],
     // Observability (Part J): the complete run record.
-    runObservability: finishRunObservability(
-      runObs,
-      cancelled ? "cancelled" : modelFailed || failedHonestly ? "failed" : "completed",
-    ),
+    runObservability: finishRunObservability(runObs, settlement.outcome),
   };
 }
 
@@ -3020,6 +3349,59 @@ function readDeploymentOutcome(toolId: string, result: unknown): CompletedDeploy
     deploymentId: typeof payload.deployment?.deploymentId === "string" ? payload.deployment.deploymentId : null,
     publicUrl: url,
   };
+}
+
+/** A generated image that should render inline in the chat outcome. */
+export interface ChatImageOutcome {
+  url: string;
+  prompt: string;
+}
+
+/**
+ * Round 14 — read the UI-only chatImage payload the registry
+ * preserves on a saved image.generate result
+ * (maybeAutoInsertGeneratedImage). The handler's own markdown is
+ * stripped on save success so the model never re-emits it; this
+ * payload is how the image still renders in chat — the loop
+ * collects it and appends the render markdown to the settled final
+ * text itself (appendChatImagesToFinalText), at the tail, where no
+ * model turn can mangle or drop it.
+ */
+function readChatImageOutcome(toolId: string, result: unknown): ChatImageOutcome | null {
+  if (toolId !== "image.generate" || !result || typeof result !== "object") return null;
+  const payload = result as {
+    success?: boolean;
+    chatImage?: { url?: unknown; prompt?: unknown };
+  };
+  if (payload.success !== true) return null;
+  const url = typeof payload.chatImage?.url === "string" ? payload.chatImage.url : null;
+  if (!url) return null;
+  return {
+    url,
+    prompt:
+      typeof payload.chatImage?.prompt === "string" && payload.chatImage.prompt
+        ? payload.chatImage.prompt
+        : "Generated image",
+  };
+}
+
+/**
+ * Append collected chat images to a settled final text as markdown,
+ * deduped by URL. Called only for completed settlements — a failed
+ * run's closing text stays failure-honest, with no success imagery
+ * pasted onto it.
+ */
+function appendChatImagesToFinalText(finalText: string, images: ChatImageOutcome[]): string {
+  if (images.length === 0) return finalText;
+  const seen = new Set<string>();
+  const blocks: string[] = [];
+  for (const image of images) {
+    if (seen.has(image.url)) continue;
+    seen.add(image.url);
+    blocks.push(`![${image.prompt}](${image.url})`);
+  }
+  if (blocks.length === 0) return finalText;
+  return `${finalText}\n\n${blocks.join("\n\n")}`;
 }
 
 /** Closing text when the provider failed but a deployment had succeeded. */
@@ -3140,6 +3522,8 @@ export interface DeferredToolBatchState {
   mutationBatchPending: boolean;
   batchHasMutation: boolean;
   completedDeployment: CompletedDeployment | null;
+  /** Round 14: chat images collected inside the deferred batch (shared array reference with the caller). */
+  chatImages: ChatImageOutcome[];
   /** Bounded read-loop nudges spent — shared with the resumed loop. */
   readLoopNudges?: number;
   /**
@@ -3439,6 +3823,8 @@ export async function executeDeferredToolCalls(
       persisted: mutationCheck?.verified ?? undefined,
     });
     state.completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? state.completedDeployment;
+    const deferredChatImage = readChatImageOutcome(toolCall.toolId, result.result);
+    if (deferredChatImage) state.chatImages.push(deferredChatImage);
     if (ctx.qualitySession) {
       noteToolResult(
         ctx.qualitySession,
@@ -3527,6 +3913,7 @@ async function resumeAgentLoopV2Inner(
       userRequest: cfg.qualityLoop.userRequest ?? "",
       snapshot: cfg.qualityLoop.state,
       isStaticWorkspace: cfg.isStaticWorkspace,
+      taskScope: cfg.qualityLoop.taskScope,
     });
     cfg.systemPrompt += buildQualityLoopPrompt(qualitySession.taskScope);
   }
@@ -3668,6 +4055,10 @@ async function resumeAgentLoopV2Inner(
   // just what ran after the gate.
   const toolCallLog: AgentToolCallLogEntry[] = [...(resume.priorToolCalls ?? [])];
   let completedDeployment: CompletedDeployment | null = null;
+  // Round 14: images generated during this run (the approved call,
+  // deferred batch, and main loop all collect), rendered inline in
+  // the settled text at the tail.
+  const chatImages: ChatImageOutcome[] = [];
   // NOTE: checkpoints are now created before EVERY mutation, so this flag no
   // longer gates anything. It is retained only because it is part of the
   // DeferredToolBatchState shape threaded through pause/resume records.
@@ -3792,6 +4183,8 @@ async function resumeAgentLoopV2Inner(
     });
     recordObsApproval(resumeRunObs, resume.toolId, "granted");
     completedDeployment = readDeploymentOutcome(resume.toolId, result.result) ?? completedDeployment;
+    const approvedChatImage = readChatImageOutcome(resume.toolId, result.result);
+    if (approvedChatImage) chatImages.push(approvedChatImage);
     // Acceptance 2026-09-28: the APPROVED tool — the actual edit in an
     // approval-gated run — was never fed to the quality ledger, so a
     // successful edit still reported "build (pending)". Record it like
@@ -3904,6 +4297,7 @@ async function resumeAgentLoopV2Inner(
       mutationBatchPending,
       batchHasMutation,
       completedDeployment,
+      chatImages,
       readLoopNudges,
     };
     const deferredResult = await executeDeferredToolCalls(resume.deferredToolCalls, {
@@ -3975,6 +4369,10 @@ async function resumeAgentLoopV2Inner(
     resumeZeroWriteSteps = 0;
   }
 
+  // Route honesty: record the resumed run's first route plan too —
+  // a resume is a fresh observability record for the continuation.
+  const recordRoutePlan = makeRoutePlanRecorder(localProgress);
+
   // Continue the loop
   while (stepsUsed < cfg.maxSteps && !cancelled && !failedHonestly) {
     const elapsed = Date.now() - startTime;
@@ -4007,6 +4405,7 @@ async function resumeAgentLoopV2Inner(
           // P1: Server-derived paid-provider entitlement (never from client).
           allowLittPaidProviders: cfg.allowLittPaidProviders,
           allowTransientPlanRetry: true,
+          onRoutePlan: recordRoutePlan,
         },
       );
       if (llmResponse.responseShape && llmResponse.provider) {
@@ -4260,6 +4659,11 @@ async function resumeAgentLoopV2Inner(
           events,
           checkpoint: checkpoint ?? undefined,
           baselineCheckpoint: baselineCheckpoint ?? checkpoint ?? undefined,
+          // Top-level snapshot, same as the initial loop's pause
+          // return: the approvals route reads result.qualityLoopState
+          // for the resumed run's settlement, and a nested pause must
+          // not drop the session the run has been carrying.
+          qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
           pendingApproval: {
             toolId: toolCall.toolId,
             toolCallId: toolCall.toolCallId,
@@ -4362,6 +4766,8 @@ async function resumeAgentLoopV2Inner(
         persisted: mutationCheck?.verified ?? undefined,
       });
       completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? completedDeployment;
+      const batchChatImage = readChatImageOutcome(toolCall.toolId, result.result);
+      if (batchChatImage) chatImages.push(batchChatImage);
       if (qualitySession) {
         noteToolResult(
           qualitySession,
@@ -4410,7 +4816,25 @@ async function resumeAgentLoopV2Inner(
     if (!batchHasMutation) mutationBatchPending = false;
   }
 
+  // Same evidence rule as the initial loop's guard verdict: tool flags
+  // cannot see writes that landed through a shell command or a handler
+  // that failed after writing, so a checkpoint diff reporting changes
+  // vetoes the no-write sentence before it is pronounced.
+  let resumeGuardWorkspaceEvidence: Awaited<ReturnType<typeof computeWorkspaceChange>> | undefined;
   if (cfg.buildCapabilityGuard && !cancelled && !modelFailed && !failedHonestly &&
+      !toolCallLog.some((call) => call.success && isFileWritingTool(call.toolId)) &&
+      !hasSuccessfulFileWriteInHistory(resume.pausedMessages)) {
+    const guardAttemptedMutation = toolCallLog.some((call) => call.mutating);
+    if (baselineCheckpoint || checkpoint || guardAttemptedMutation) {
+      resumeGuardWorkspaceEvidence = await computeWorkspaceChange(
+        transport,
+        baselineCheckpoint ?? checkpoint ?? null,
+      );
+    }
+  }
+
+  if (cfg.buildCapabilityGuard && !cancelled && !modelFailed && !failedHonestly &&
+      resumeGuardWorkspaceEvidence?.status !== "changed" &&
       !toolCallLog.some((call) => call.success && isFileWritingTool(call.toolId)) &&
       !hasSuccessfulFileWriteInHistory(resume.pausedMessages)) {
     failedHonestly = "The build produced no successful file-writing operation, so it is not complete.";
@@ -4487,10 +4911,22 @@ async function resumeAgentLoopV2Inner(
     finalText: effectiveFinalText,
     localProgress,
   });
+  // User-visible copy (chat beauty, 2026-11-11): same contract as the
+  // initial loop — declarations harvested above stay in the ledger,
+  // never in the persisted message; a declarations-only reply falls
+  // back to the factual silent-outcome description.
+  const visibleFinalText = qualitySession
+    ? stripQualityStageMarkers(effectiveFinalText)
+    : effectiveFinalText;
+  const userFinalText =
+    visibleFinalText ||
+    (qualitySession
+      ? describeSilentOutcome(toolCallLog, cancelled, cancelReason)
+      : visibleFinalText);
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok
-      ? `${effectiveFinalText}${formatQualityVerdictBlock(qualityFinale)}`
-      : effectiveFinalText;
+      ? `${userFinalText}${formatQualityVerdictBlock(qualityFinale)}`
+      : userFinalText;
 
   // What did this run actually do to the files?
   //
@@ -4505,18 +4941,43 @@ async function resumeAgentLoopV2Inner(
   // rather than being silently omitted.
   const attemptedMutation = toolCallLog.some((call) => call.mutating);
   const workspaceChange = baselineCheckpoint || checkpoint || attemptedMutation
-    ? await computeWorkspaceChange(transport, baselineCheckpoint ?? checkpoint ?? null)
+    ? await settleWorkspaceChangeEvidence(transport, baselineCheckpoint ?? checkpoint ?? null, toolCallLog)
     : undefined;
 
   if (workspaceChange) {
     localProgress.emit({ type: "workspace_change", ...workspaceChange });
   }
-  const afterCheckpoint = await createAfterRunCheckpoint(
-    transport,
+  // Round 11: settle from the run's evidence (run-settlement.ts) —
+  // identical rule to the initial loop. The lion proof's failed run was
+  // a resume: the deliverable (an approved, saved image generation)
+  // landed and the gate passed, then the wrap-up model call exhausted
+  // its routes and the old outcome expression failed the whole run.
+  const settlement = settleRunOutcome({
+    cancelled,
+    modelFailed,
+    failedHonestly,
+    toolCalls: toolCallLog,
+    qualityVerdictOk: qualityFinale ? qualityFinale.verdict.ok : null,
     workspaceChange,
-    cfg.qualityLoop?.userRequest ?? null,
-    localProgress,
-  );
+  });
+  if (settlement.completedWithWarning) {
+    localProgress.emit({ type: "status", summary: settlement.completedWithWarning });
+  }
+  // A completed deployment already produced its own honest closing
+  // text (live URL + what failed after it) — keep it over the generic
+  // warning.
+  const settledFinalText =
+    settlement.completedWithWarning && !completedDeployment
+      ? settlement.completedWithWarning
+      : gatedFinalText;
+  // Round 14: generated images render inline in the settled text —
+  // appended here, by the loop, only on a completed settlement.
+  const finalTextWithChatImages =
+    settlement.outcome === "completed"
+      ? appendChatImagesToFinalText(settledFinalText, chatImages)
+      : settledFinalText;
+  // Round 14: "finished" before the bounded after-run checkpoint —
+  // identical to the initial loop's tail (see there).
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
     ...(cancelled
@@ -4524,12 +4985,24 @@ async function resumeAgentLoopV2Inner(
       : {
           totalSteps: stepsUsed,
           totalDurationMs: Date.now() - startTime,
-          success: qualityFinale ? qualityFinale.verdict.ok : true,
+          // Reconciled with the persisted outcome below: "finished"
+          // success means the run settled completed AND the quality
+          // gate passed — the two channels can no longer disagree
+          // silently (round-11 diagnosis Q3).
+          success:
+            settlement.outcome === "completed" &&
+            (qualityFinale ? qualityFinale.verdict.ok : true),
         }),
   } as ProgressEvent);
+  const afterCheckpoint = await createAfterRunCheckpointBounded(
+    transport,
+    workspaceChange,
+    cfg.qualityLoop?.userRequest ?? null,
+    localProgress,
+  );
 
   return {
-    finalText: gatedFinalText,
+    finalText: finalTextWithChatImages,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -4543,6 +5016,8 @@ async function resumeAgentLoopV2Inner(
     modelFailed,
     modelFailureText,
     failedHonestly,
+    completedWithWarning: settlement.completedWithWarning,
+    failureContributors: settlement.failureContributors,
     baselineCheckpoint,
     qualityLoop: qualityFinale
       ? {
@@ -4554,10 +5029,7 @@ async function resumeAgentLoopV2Inner(
     qualityLoopState: qualitySession ? snapshotQualityLoopSession(qualitySession) : undefined,
     finalMessages: [...llmMessages],
     // Observability (Part J): the resumed segment's run record.
-    runObservability: finishRunObservability(
-      resumeRunObs,
-      cancelled ? "cancelled" : modelFailed || failedHonestly ? "failed" : "completed",
-    ),
+    runObservability: finishRunObservability(resumeRunObs, settlement.outcome),
   };
 }
 

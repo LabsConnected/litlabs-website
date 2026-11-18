@@ -43,6 +43,7 @@ import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-tran
 import { createPausedRun, getLatestPausedRunForConversation, getPendingPausedRunForConversation, pausedRunBelongsToMessage } from "@/lib/litt-intelligence/paused-run-store";
 import { getActiveExecution, registerExecution, unregisterExecution } from "@/lib/studio/execution-registry";
 import { getOwnerAwareEntitlements } from "@/lib/entitlements";
+import type { SimulatedPlan } from "@/lib/owner";
 import { resolveTurn } from "@/lib/litt-intelligence/turn-resolver";
 import {
   buildCanonicalRuntimeContext,
@@ -169,10 +170,30 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // it is derived from the authenticated user's plan/owner status.
   // This enables OpenAI (LiTT's own key) for entitled users.
   let allowLittPaidProviders = false;
+  // The owner's active test-mode simulation (null when not simulating).
+  // Threaded into the billing reservation below so a simulated tier is
+  // charged like a real customer. No-op for everyone else: non-owners
+  // and owners without an active simulation resolve to null here —
+  // the simulation exists only behind the owner-only litt_test_mode
+  // cookie.
+  let activeSimulation: SimulatedPlan | null = null;
   if (clerkId) {
     try {
       const entitlements = await getOwnerAwareEntitlements(clerkId);
+      activeSimulation = entitlements.simulation;
+      // Under an active simulation the isOwner short-circuit must NOT
+      // apply: paid-provider access follows the SIMULATED tier's
+      // entitlements, so e.g. Testing-As Starter (premiumModels=false)
+      // actually loses premium models. Without a simulation, real owner
+      // sessions are unchanged (full access via isOwner).
+      const simulationActive =
+        entitlements.simulation !== null && entitlements.simulation !== "owner";
       allowLittPaidProviders = entitlements.isOwner || entitlements.premiumModels;
+      if (simulationActive) {
+        // Simulation overrides the isOwner short-circuit above: access
+        // follows only the simulated tier's own entitlements.
+        allowLittPaidProviders = entitlements.premiumModels;
+      }
     } catch {
       // On entitlement lookup failure, default-deny (safe)
       allowLittPaidProviders = false;
@@ -198,6 +219,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const clientProjectId =
     typeof body.projectId === "string" && body.projectId.trim()
       ? body.projectId.trim()
+      : undefined;
+  // Explicit user confirmation for a project-context decision (step 5).
+  // Sent ONLY by the client's stop-and-ask prompt after a 409
+  // PROJECT_MISMATCH / PROJECT_CONTEXT_CONFIRM refusal: "switch" runs in
+  // the conversation's own project; "rebind" moves the conversation to
+  // the viewed/resolved project and persists the new binding. Absent on
+  // every ordinary send — a binding is never changed without it.
+  const projectContextDecision =
+    body.projectContextDecision === "switch" || body.projectContextDecision === "rebind"
+      ? (body.projectContextDecision as "switch" | "rebind")
       : undefined;
   const executionMode = typeof body.executionMode === "string" && ["plan", "act", "auto"].includes(body.executionMode)
     ? (body.executionMode as "plan" | "act" | "auto")
@@ -264,7 +295,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       }
       runtimeAgent = result.agent;
       // Use the agent template slug for memory/capability routing
-      agentSlug = (result.agent.agentId ? "litt" : "litt") as AgentSlug; // fallback for type compat
+      agentSlug = (result.agent.templateSlug && isValidAgentSlug(result.agent.templateSlug)
+        ? result.agent.templateSlug
+        : "litt") as AgentSlug;
     }
   } else {
     // Builtin agent
@@ -317,60 +350,181 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       (m) => m.parentMessageId === userMessage.id && m.role === "assistant",
     );
 
-    return NextResponse.json({
-      userMessage,
-      assistantMessage: assistantMsg ?? undefined,
-      duplicate: true,
-      revision: conversation.revision,
+    if (assistantMsg || !projectContextDecision) {
+      return NextResponse.json({
+        userMessage,
+        assistantMessage: assistantMsg ?? undefined,
+        duplicate: true,
+        revision: conversation.revision,
+      });
+    }
+
+    // Confirmed project-context resubmit: the original send was stopped
+    // at the step-5 project guard (409) BEFORE any assistant run existed,
+    // and the user has now explicitly confirmed how to proceed. Fall
+    // through and execute against the already-persisted user message
+    // instead of returning a duplicate that never runs.
+    studioLog("message:duplicate_confirmed_resubmit", {
+      conversationId: conversation.id,
+      userId,
+      clientRequestId,
     });
   }
 
-  // 5. Resolve project server-side.
-  // Try the conversation's projectId first. If it's stale (project deleted,
-  // user switched projects, or the conversation references a different user's
-  // project), fall back to the canonical active project via
-  // resolveCurrentProject. This prevents the "LiTT can't find the project"
-  // divergence where the Studio UI shows a connected project but the agent
-  // chat returns 404 because conversation.projectId no longer resolves.
-  let ctx = await buildStudioContext(userId, conversation.id, conversation.projectId, agentSlug);
-  let effectiveProjectId = conversation.projectId;
+  // 5. Resolve the project this RUN operates in — one identity for the
+  // whole request. `effectiveProjectId` feeds EVERYTHING below: the
+  // canonical runtime context, workspace transport creation, the agent
+  // loops, memory scoping, and run persistence.
+  //
+  // (Defect fixed here: the context was built from the resolved project
+  // while transport/execution kept reading the conversation's raw stored
+  // projectId. When the two diverged — a Global LiTT conversation with no
+  // stored binding, resolved via the fallbacks below — the model was told
+  // a verified workspace existed while every workspace tool failed with
+  // "This tool requires an active project workspace".)
+  //
+  // STOP-AND-ASK (Larry's ruling, 2026-11-12): a conversation's project
+  // binding is NEVER changed silently. Resolution may DISCOVER that the
+  // run would operate in a different project than the stored binding —
+  // the viewed project differs from the chat's, a stale binding no
+  // longer resolves, an unbound chat would take its first bind — but it
+  // must not persist that change or execute against it. The send stops
+  // with a structured 409 naming BOTH projects, and only an explicit
+  // user confirmation (`projectContextDecision`, parsed above) lets the
+  // resubmitted send proceed:
+  //   "switch" — run in the conversation's own project (no rebind).
+  //   "rebind" — move the chat to the viewed/resolved project, persist
+  //              the new binding, and run there.
+  //
+  // Resolution priority (unchanged):
+  //   1. The conversation's own bound project (ownership-verified by
+  //      buildStudioContext → resolveProject, which is user-scoped).
+  //   2. The project the user is viewing (client-supplied, verified the
+  //      same way). If it does NOT resolve for this user, refuse with
+  //      the specific reason — never silently substitute a different
+  //      project the user isn't looking at.
+  //   3. The user's current project (resolveCurrentProject).
+  const boundProjectId = conversation.projectId;
+  let ctx = boundProjectId
+    ? await buildStudioContext(userId, conversation.id, boundProjectId, agentSlug)
+    : null;
+  let effectiveProjectId: string | null = ctx ? boundProjectId : null;
 
-  if (!ctx) {
-    // A conversation that was NEVER bound to a project (legacy/general chat)
-    // must not be silently re-bound to whatever project happens to be active.
-    // Its history is foreign context — rebinding would let an unrelated
-    // conversation (e.g. a general assistant thread) execute mutations inside
-    // this project's workspace and answer in the wrong domain. Refuse with
-    // the same explicit error as PROJECT_MISMATCH below.
-    // Stale NON-NULL projectIds keep the repair fallback: that conversation
-    // was project-scoped once, so re-binding to the active project repairs a
-    // deleted-project reference rather than importing foreign context.
-    if (!conversation.projectId && clientProjectId) {
+  // The viewed project resolves independently so a stop-and-ask refusal
+  // can name BOTH projects, and a confirmed "rebind" has a verified
+  // target. (Skipped when it equals the binding — priority 1 already
+  // resolved that project.)
+  let viewedCtx: Awaited<ReturnType<typeof buildStudioContext>> = null;
+  if (clientProjectId && clientProjectId !== boundProjectId) {
+    viewedCtx = await buildStudioContext(userId, conversation.id, clientProjectId, agentSlug);
+  }
+
+  const projectRef = (id: string | null, name: string | null) =>
+    id ? { id, name } : null;
+
+  if (ctx) {
+    // Priority 1: the chat's own project resolved. It stays the run's
+    // home unless the user — told about the mismatch — explicitly chose
+    // to move the chat to the project they're viewing.
+    if (clientProjectId && clientProjectId !== boundProjectId) {
+      if (projectContextDecision === "rebind" && viewedCtx) {
+        // Confirmed: move the chat to the viewed project and run there.
+        // The new binding is persisted below — with consent, this once.
+        ctx = viewedCtx;
+        effectiveProjectId = clientProjectId;
+      } else if (projectContextDecision !== "switch") {
+        // Executing in project A while the user watches project B is
+        // how writes land in the wrong workspace (#551). Stop and ask,
+        // naming both projects; change nothing.
+        const viewedName = viewedCtx?.projectName ?? null;
+        return NextResponse.json(
+          {
+            error: "Project mismatch",
+            code: "PROJECT_MISMATCH",
+            detail:
+              `You're viewing "${viewedName ?? "another project"}", but this chat belongs to "${ctx.projectName}". ` +
+              `Switch to "${ctx.projectName}" to run it there, or move this chat to "${viewedName ?? "the project you're viewing"}" — nothing ran anywhere yet.`,
+            conversationProject: projectRef(boundProjectId, ctx.projectName),
+            viewedProject: projectRef(clientProjectId, viewedName),
+          },
+          { status: 409 },
+        );
+      }
+      // decision === "switch": confirmed — run in the chat's own
+      // project; the client moves its view. No rebind, nothing persisted.
+    }
+  } else if (clientProjectId) {
+    // The binding is stale (no longer resolves) or the chat is unbound,
+    // and the user is viewing a project.
+    if (!viewedCtx) {
+      if (!boundProjectId) {
+        // Unbound chat + unverifiable viewed project: refuse with the
+        // specific reason — never substitute a different project.
+        return NextResponse.json(
+          {
+            error: "Project not available",
+            code: "PROJECT_NOT_AVAILABLE",
+            detail:
+              "The project you're viewing couldn't be verified for your account, " +
+              "so this chat can't run project tasks in it.",
+          },
+          { status: 409 },
+        );
+      }
+      // Bound-but-stale + unverifiable viewed project: fall through to
+      // the current-project check below.
+    } else if (projectContextDecision === "rebind") {
+      // Confirmed: bind (or re-bind) the chat to the viewed project.
+      ctx = viewedCtx;
+      effectiveProjectId = clientProjectId;
+    } else {
+      // Running in the viewed project would CHANGE this chat's binding
+      // (first bind of an unbound chat, or repair of a stale one).
+      // Stop and ask — never bind silently.
       return NextResponse.json(
         {
-          error: "Project mismatch",
-          code: "PROJECT_MISMATCH",
-          detail:
-            "This chat isn't linked to a project, so it can't run project tasks. " +
-            "Start a new chat in this project instead.",
+          error: "Project confirmation needed",
+          code: "PROJECT_CONTEXT_CONFIRM",
+          detail: boundProjectId
+            ? `This chat's saved project couldn't be verified, so nothing ran. Tie this chat to "${viewedCtx.projectName}" — the project you're viewing — and continue?`
+            : `This chat isn't tied to a project yet, so nothing ran. Tie it to "${viewedCtx.projectName}" — the project you're viewing — and continue?`,
+          conversationProject: projectRef(boundProjectId, null),
+          viewedProject: projectRef(clientProjectId, viewedCtx.projectName),
+          targetProject: projectRef(clientProjectId, viewedCtx.projectName),
         },
         { status: 409 },
       );
     }
-    // Stale conversation.projectId — try the active project
+  }
+
+  if (!ctx) {
+    // No viewed-project resolution: the user's current project is the
+    // only remaining candidate. Binding the chat to it is a binding
+    // change whenever it differs from the stored binding — the same
+    // stop-and-ask rule applies.
     const activeProject = await resolveCurrentProject({ userId });
-    if (activeProject && activeProject.projectId !== conversation.projectId) {
-      ctx = await buildStudioContext(userId, conversation.id, activeProject.projectId, agentSlug);
-      if (ctx) {
-        effectiveProjectId = activeProject.projectId;
-        // Update the conversation's projectId so future messages use the
-        // corrected project. This is a one-time fix — subsequent messages
-        // will resolve directly.
-        await admin
-          .from("studio_conversations")
-          .update({ project_id: activeProject.projectId })
-          .eq("id", conversation.id)
-          .eq("owner_id", userId);
+    if (activeProject && activeProject.projectId !== boundProjectId) {
+      const activeCtx = await buildStudioContext(userId, conversation.id, activeProject.projectId, agentSlug);
+      if (activeCtx) {
+        if (projectContextDecision === "rebind") {
+          // Confirmed: bind the chat to the current project and run.
+          ctx = activeCtx;
+          effectiveProjectId = activeProject.projectId;
+        } else {
+          return NextResponse.json(
+            {
+              error: "Project confirmation needed",
+              code: "PROJECT_CONTEXT_CONFIRM",
+              detail:
+                `This chat isn't tied to "${activeCtx.projectName}" yet, so nothing ran. ` +
+                `Tie it to "${activeCtx.projectName}" — your most recent project — and continue?`,
+              conversationProject: projectRef(boundProjectId, null),
+              viewedProject: projectRef(clientProjectId ?? null, viewedCtx?.projectName ?? null),
+              targetProject: projectRef(activeProject.projectId, activeCtx.projectName),
+            },
+            { status: 409 },
+          );
+        }
       }
     }
   }
@@ -379,25 +533,28 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  // 5.2. Project reconciliation — the chat must belong to the project the
-  // user is acting in. A conversation viewed inside a different project
-  // (e.g. a stale chat kept open after switching projects) would otherwise
-  // silently mutate the conversation's project while the user watches
-  // another. Refuse with an explicit, user-visible error — never silently
-  // re-bind (stranding conversation context is worse than a clear error).
-  // Older clients that omit projectId keep the previous behavior.
-  if (clientProjectId && clientProjectId !== effectiveProjectId) {
-    return NextResponse.json(
-      {
-        error: "Project mismatch",
-        code: "PROJECT_MISMATCH",
-        detail:
-          `This chat belongs to project "${ctx.projectName}", but you are viewing a different project. ` +
-          `Start a new chat in this project, or switch back to "${ctx.projectName}".`,
-      },
-      { status: 409 },
-    );
+  // Persist a binding change ONLY when the user confirmed it — the
+  // "rebind" branches above are the sole paths that set an
+  // effectiveProjectId different from the stored binding. The silent
+  // persist that used to live here is gone: without a decision, any
+  // would-be change already stopped at a 409 above.
+  if (effectiveProjectId && effectiveProjectId !== boundProjectId) {
+    await admin
+      .from("studio_conversations")
+      .update({ project_id: effectiveProjectId })
+      .eq("id", conversation.id)
+      .eq("owner_id", userId);
   }
+
+  // The ONE project identity for this run's execution (step 5). Every
+  // consumer below — transport, agent loops, provisioning, memory,
+  // persistence — uses this, never the conversation's raw stored binding.
+  // Non-null by construction: ctx is non-null only when a project
+  // resolved, and every resolution branch sets effectiveProjectId.
+  if (!effectiveProjectId) {
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  }
+  const runProjectId: string = effectiveProjectId;
 
   // 5.5. Build canonical runtime context — the ONE authoritative source
   // of runtime state for LiTT. Merges server-side workspace verification
@@ -450,8 +607,8 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // Extracts name, city, timezone from natural conversation. Dedupe is handled
   // by persistMemory's dedupe_key — no duplicate writes for the same info.
   // Wrapped in try/catch to prevent unhandled rejections from leaking.
-  if (conversation.projectId) {
-    harvestUserPreferences(resolvedMessage, userId, conversation.projectId, {
+  if (runProjectId) {
+    harvestUserPreferences(resolvedMessage, userId, runProjectId, {
       agentSlug,
       conversationId: conversation.id,
     }).catch(() => {
@@ -472,7 +629,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     const { message: toolAssistantMessage } = await insertMessage({
       conversationId: conversation.id,
       ownerId: userId,
-      projectId: conversation.projectId,
+      projectId: runProjectId,
       role: "assistant",
       agentSlug,
       agentInstanceId: runtimeAgent?.agentInstanceId || null,
@@ -489,7 +646,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     persistMemory(
       `User: ${message}\nLiTT: ${toolResult.text}`,
       userId,
-      conversation.projectId,
+      runProjectId,
       {
         agentSlug,
         agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
@@ -503,7 +660,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
 
     studioLog("message:sent", {
       conversationId: conversation.id,
-      projectId: conversation.projectId,
+      projectId: runProjectId,
       userId,
       agentSlug,
       agentInstanceId: runtimeAgent?.agentInstanceId || null,
@@ -560,12 +717,12 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // runs for turns that actually need a workspace. If provisioning fails
   // we fall through to the honest 409 gate below.
   if (
-    conversation.projectId &&
+    runProjectId &&
     !canonicalCtx.workspaceExecutionAvailable &&
     classifyIntent(resolvedMessage, { hasProject: true }).requiresExecution
   ) {
     try {
-      await provisionWorkspaceForProject(conversation.projectId, userId);
+      await provisionWorkspaceForProject(runProjectId, userId);
       canonicalCtx = await buildCanonicalRuntimeContext(
         userId,
         effectiveProjectId,
@@ -575,20 +732,20 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       runtimeContextBlock = buildRuntimeContextBlock(canonicalCtx);
       studioLog("message:workspace_auto_provisioned", {
         conversationId: conversation.id,
-        projectId: conversation.projectId,
+        projectId: runProjectId,
         status: canonicalCtx.workspaceExecutionAvailable ? "ready" : "unavailable",
       });
     } catch (provisionErr) {
       studioLog("message:workspace_auto_provision_failed", {
         conversationId: conversation.id,
-        projectId: conversation.projectId,
+        projectId: runProjectId,
         errorClass: provisionErr instanceof Error ? provisionErr.message : "unknown",
       });
     }
   }
 
   // 8. Recall project-scoped memories
-  const memories = await recallMemories(message, userId, conversation.projectId, {
+  const memories = await recallMemories(message, userId, runProjectId, {
     agentSlug,
     agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
     memoryNamespace: runtimeAgent?.memoryNamespace,
@@ -645,9 +802,40 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     && canonicalCtx.executionMode === "auto";
   const executionRequired =
     !!built.kernelResult.decision.routing.requiresExecution || detcodegenPinned;
+  // Read-only workspace inspection, per the kernel's classification
+  // (#905 pattern group, recorded as routing.taskKind). Such a turn
+  // executes through the tool lane but must never be completed like a
+  // build: the quality session scopes to the stages a read can
+  // evidence, the launch flow returns the read's answer instead of
+  // demanding a mutation, and the completion check below does not
+  // require mutation evidence. The deterministic-codegen pin is an
+  // explicit "answer by generating files" act, so it is never
+  // inspection even if the prose matched the read patterns.
+  const inspectionTurn =
+    built.kernelResult.decision.routing.taskKind === "inspection" && !detcodegenPinned;
+  // Exec-only turn (kernel taskKind "exec"): the user asked for a
+  // shell command to run, not for files to be written. The launch flow
+  // completes it on the command's output — no build guard, no
+  // zero-mutation reprompt, no mutation evidence demanded below. The
+  // deterministic-codegen pin is an explicit "answer by generating
+  // files" act, so it is never exec-only either.
+  const execTurn =
+    built.kernelResult.decision.routing.taskKind === "exec" && !detcodegenPinned;
+  // Media-generation turn (kernel taskKind "media"): the user asked
+  // for a deliverable media file, not site work. The quality session
+  // scopes to the evidence a generation produces (see quality-loop
+  // "media"). Without this signal the session fell back to the prose
+  // classifier, which has no media case and defaulted the turn to the
+  // "standard" build scope — demanding build/test evidence for a
+  // one-image ask and failing a successful generation
+  // (LION-RUN-DIAGNOSIS-2026-11-16 Q1). The deterministic-codegen pin
+  // is an explicit "answer by generating files" act, so it is never
+  // media either.
+  const mediaTurn =
+    built.kernelResult.decision.routing.taskKind === "media" && !detcodegenPinned;
 
   const useV2 = canonicalCtx.workspaceExecutionAvailable
-    && !!conversation.projectId
+    && !!runProjectId
     && executionRequired;
 
   let v2Result: Awaited<ReturnType<typeof runAgentLoopV2>> | null = null;
@@ -663,9 +851,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   let v2Transport: Awaited<ReturnType<typeof createWorkspaceTransport>> | null = null;
   let v2Config: Partial<AgentLoopConfig> | null = null;
 
-  if (conversation.projectId && canonicalCtx.workspaceExecutionAvailable) {
+  if (runProjectId && canonicalCtx.workspaceExecutionAvailable) {
     try {
-      v2Transport = await createWorkspaceTransport(conversation.projectId, userId);
+      v2Transport = await createWorkspaceTransport(runProjectId, userId);
       if (v2Transport.fileOpsReachable === false) {
         // Honest reachability: the DB row said the workspace is ready, but
         // the /ws-files probe failed — file operations will time out. Tell
@@ -675,7 +863,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         runtimeContextBlock = buildRuntimeContextBlock(canonicalCtx);
         studioLog("message:workspace_file_ops_unreachable", {
           conversationId: conversation.id,
-          projectId: conversation.projectId,
+          projectId: runProjectId,
         });
       }
     } catch (transportErr) {
@@ -683,7 +871,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       // so operators can detect workspace issues (not silently swallowed).
       studioLog("message:v2_transport_failed", {
         conversationId: conversation.id,
-        projectId: conversation.projectId,
+        projectId: runProjectId,
         userId,
         errorClass: transportErr instanceof Error ? transportErr.message : "unknown",
       });
@@ -696,14 +884,14 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   if (executionRequired && !(useV2 && v2Transport)) {
     studioLog("message:tool_execution_unavailable", {
       conversationId: conversation.id,
-      projectId: conversation.projectId,
+      projectId: runProjectId,
     });
     return NextResponse.json(
       {
         error: "Tool execution unavailable for this task",
         code: "TOOL_EXECUTION_UNAVAILABLE",
         detail: "No verified workspace execution path is available. The request was not sent to a text-only model.",
-        projectId: conversation.projectId ?? null,
+        projectId: runProjectId ?? null,
         workspaceId: canonicalCtx.workspaceId ?? null,
       },
       { status: 409 },
@@ -729,13 +917,24 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     conversationId: conversation.id,
     // Quality loop: gate serious ACT/AUTO-mode builds through the
     // UNDERSTAND→VERIFY evidence stages + visual-quality judge.
-    qualityLoop: shouldEnableQualityLoop(canonicalCtx.executionMode, conversation.projectId)
+    qualityLoop: shouldEnableQualityLoop(canonicalCtx.executionMode, runProjectId)
       ? {
           enabled: true,
           runId: randomUUID(),
-          projectId: conversation.projectId,
+          projectId: runProjectId,
           userId,
           userRequest: resolvedMessage.slice(0, 2000),
+          // Kernel-classified read-only turn: scope the gate to the
+          // evidence a read produces (see quality-loop "inspection").
+          // An exec-only turn is scoped the same way: its evidence is
+          // the tool lane's answer (the command ran), never a build.
+          // A media-generation turn gets the "media" scope: its
+          // evidence is the generated media result, never a build.
+          taskScope: mediaTurn
+            ? ("media" as const)
+            : inspectionTurn || execTurn
+              ? ("inspection" as const)
+              : undefined,
         }
       : undefined,
     evalMetadata: {
@@ -743,7 +942,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       agentMode: "v2-execution",
       conversationId: conversation.id,
       userId,
-      projectId: conversation.projectId ?? undefined,
+      projectId: runProjectId ?? undefined,
     },
   });
 
@@ -754,14 +953,14 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     // workspace exists) so auto-inspection reads the user's real workspace.
     v1Result = await runAgentLoop(
       resolvedMessage,
-      conversation.projectId ?? "",
+      runProjectId ?? "",
       prompt,
       v2Transport ?? undefined,
     );
     finalPrompt = v1Result.enrichedPrompt;
     // Anaphoric follow-up with a project in context: don't let this fall
     // through to a generic chat reply — nudge toward a targeted clarification.
-    if (conversation.projectId && built.kernelResult.decision.routing.anaphoricFollowUp) {
+    if (runProjectId && built.kernelResult.decision.routing.anaphoricFollowUp) {
       finalPrompt = `${ANAPHORIC_CLARIFICATION_NUDGE}\n\n${finalPrompt}`;
     }
   }
@@ -770,7 +969,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   const { message: assistantMessage } = await insertMessage({
     conversationId: conversation.id,
     ownerId: userId,
-    projectId: conversation.projectId,
+    projectId: runProjectId,
     role: "assistant",
     agentSlug,
     agentInstanceId: runtimeAgent?.agentInstanceId || null,
@@ -803,6 +1002,12 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         messageId: assistantMessage.id,
         idempotencyKey: clientRequestId,
         model: runtimeAgent.model,
+        // Simulation-aware billing: agent-billing's isBillingExempt
+        // check receives the resolved simulation, so under a simulated
+        // tier (including Zero-LiTTBits) the reservation actually
+        // engages instead of being skipped as owner-exempt. Null when
+        // no simulation is active — behavior unchanged.
+        simulation: activeSimulation,
       },
       estimatedCost,
     );
@@ -881,7 +1086,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       const safeMessage = "LiTT couldn't start durable task tracking for this request.";
       studioLog("message:action_run_create_failed", {
         conversationId: conversation.id,
-        projectId: conversation.projectId,
+        projectId: runProjectId,
         userId,
         clientRequestId,
         errorClass: runErr instanceof Error ? runErr.message : "unknown",
@@ -944,7 +1149,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     studioLog("message:transport_detached", {
       requestId: rid,
       conversationId: conversation.id,
-      projectId: conversation.projectId,
+      projectId: runProjectId,
       userId,
       clientRequestId,
     });
@@ -1200,14 +1405,14 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           // duplicate billable event (P0 invariant).
           {
             clerkId: clerkId ?? undefined,
-            projectId: conversation.projectId ?? undefined,
+            projectId: runProjectId ?? undefined,
             runId: agentRunId ?? undefined,
             feature: "studio-chat",
           },
           () => useDeterministicLane
             ? runDeterministicBuildLane({
                 userMessage: resolvedMessage,
-                projectId: conversation.projectId ?? "",
+                projectId: runProjectId ?? "",
                 userId,
                 transport,
                 model: cfg.model ?? "",
@@ -1217,7 +1422,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               })
             : runLaunchFlow({
           userMessage: resolvedMessage,
-          projectId: conversation.projectId ?? "",
+          projectId: runProjectId ?? "",
           userId,
           transport,
           systemPrompt: cfg.systemPrompt,
@@ -1230,6 +1435,19 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           qualityLoop: cfg.qualityLoop,
           enableDeploy: built.kernelResult.decision.routing.mode === "ship",
           requiresExecution: effectiveRequiresExecution,
+          // Kernel-classified read-only turn: completion is the read's
+          // answer, not a mutation/artifact/preview (launch-flow).
+          // Never true on the V1→V2 reroute — a rerouted turn was
+          // classified non-execution, so it cannot be inspection.
+          readOnly: inspectionTurn,
+          // Kernel-classified exec-only turn: completion is the
+          // command's output, not a file write (launch-flow). Never
+          // true on the reroute for the same reason as readOnly.
+          execOnly: execTurn,
+          // Kernel-classified media-generation turn: completion is
+          // the generated media result, not a site build (launch-flow).
+          // Never true on the reroute for the same reason as execOnly.
+          mediaOnly: mediaTurn,
           // A production execution request is not complete until the
           // agent-created website entry file is physically present in the
           // verified workspace. This is enforced again after approval
@@ -1263,7 +1481,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             const pausedRun = await createPausedRun({
               userId,
               conversationId: conversation.id,
-              projectId: conversation.projectId ?? "",
+              projectId: runProjectId ?? "",
               workspaceId: canonicalCtx.workspaceId ?? "",
               toolId: v2Result.pendingApproval.toolId,
               toolCallId: v2Result.pendingApproval.toolCallId,
@@ -1330,7 +1548,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             pausedRunPersistFailed = true;
             studioLog("message:paused_run_persist_failed", {
               conversationId: conversation.id,
-              projectId: conversation.projectId,
+              projectId: runProjectId,
               userId,
               tool: v2Result.pendingApproval.toolId,
               errorClass: pausedErr instanceof Error ? pausedErr.message : "unknown",
@@ -1377,7 +1595,20 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         // exit-0 command whose output never reached disk), and that
         // alone must not establish completion. See
         // completion-evidence.ts for exactly what counts as proof.
-        const mutationRequired = effectiveRequiresExecution === true;
+        // A read-only inspection turn requires no mutation evidence —
+        // demanding it would mark every correct read "not verified"
+        // and replace its answer with a failure notice. Its completion
+        // evidence is the launch flow's read result (successful tool
+        // calls + quality verdict), already reflected in
+        // launchFlowResult.success below. An exec-only turn is the
+        // same: the command's output is the deliverable, so demanding
+        // mutation evidence would fail a command that ran exactly as
+        // asked. A media-generation turn is the same again: the
+        // generated media result is the deliverable, and its only
+        // workspace change is the auto-inserted asset file — demanding
+        // site-mutation evidence would fail a generation that
+        // delivered exactly what was asked.
+        const mutationRequired = effectiveRequiresExecution === true && !inspectionTurn && !execTurn && !mediaTurn;
         const v2ToolCalls = v2Result?.toolCalls ?? [];
         const completionRequirement = {
           mutation: mutationRequired,
@@ -1504,7 +1735,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           persistMemory(
             `User: ${message}\n${agentDisplayName}: ${assistantText}`,
             userId,
-            conversation.projectId,
+            runProjectId,
             {
               agentSlug,
               agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
@@ -1523,7 +1754,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
 
         studioLog("message:sent", {
           conversationId: conversation.id,
-          projectId: conversation.projectId,
+          projectId: runProjectId,
           userId,
           agentSlug,
           agentInstanceId: runtimeAgent?.agentInstanceId || null,
@@ -1630,7 +1861,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                   // this context is present.
                   metering: {
                     clerkId: clerkId ?? undefined,
-                    projectId: conversation.projectId ?? undefined,
+                    projectId: runProjectId ?? undefined,
                     feature: "studio-chat",
                   },
                   evalMetadata: {
@@ -1638,7 +1869,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                     agentMode: "v1-conversation",
                     conversationId: conversation.id,
                     userId,
-                    projectId: conversation.projectId ?? undefined,
+                    projectId: runProjectId ?? undefined,
                   },
                 },
                 undefined,
@@ -1698,7 +1929,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             studioLog("message:v1_to_v2_reroute", {
               requestId: rid,
               conversationId: conversation.id,
-              projectId: conversation.projectId,
+              projectId: runProjectId,
               userId,
               tool: rerouteToolId,
               errorClass: `v1_to_v2_reroute_${v1MarkupHit?.kind ?? "unknown"}`,
@@ -1771,7 +2002,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             persistMemory(
               `User: ${message}\n${agentDisplayName}: ${assistantText}`,
               userId,
-              conversation.projectId,
+              runProjectId,
               {
                 agentSlug,
                 agentInstanceId: runtimeAgent?.agentInstanceId || undefined,
@@ -1786,7 +2017,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
 
           studioLog("message:sent", {
             conversationId: conversation.id,
-            projectId: conversation.projectId,
+            projectId: runProjectId,
             userId,
             agentSlug,
             agentInstanceId: runtimeAgent?.agentInstanceId || null,
@@ -1807,7 +2038,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             studioLog("message:tool_call_markup_in_text", {
               requestId: rid,
               conversationId: conversation.id,
-              projectId: conversation.projectId,
+              projectId: runProjectId,
               userId,
               provider: r?.provider,
               model: r?.model,
@@ -1826,7 +2057,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             // client's next send doesn't 409 on a stale expectedRevision).
             studioLog("message:empty_provider_response", {
               conversationId: conversation.id,
-              projectId: conversation.projectId,
+              projectId: runProjectId,
               userId,
               agentSlug,
               provider: r?.provider,
@@ -1962,7 +2193,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           studioLog("message:execution_finished_after_disconnect", {
             requestId: rid,
             conversationId: conversation.id,
-            projectId: conversation.projectId,
+            projectId: runProjectId,
             userId,
             clientRequestId,
           });

@@ -3,8 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy, Download, ExternalLink, Eye, KeyRound, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { formatSourceSummary } from "@/lib/projects/project-source";
+import { formatSourceSummary, isRepoWorkspaceGated } from "@/lib/projects/project-source";
+import { HOST_EXECUTION_DISABLED_CODE, extractEmbeddedErrorCode } from "@/lib/host-execution-guard";
+import {
+  HOST_EXECUTION_UNAVAILABLE_LABEL,
+  HOST_EXECUTION_UNAVAILABLE_MESSAGE,
+} from "@/lib/projects/runtime-state";
 import { useExecutionStore } from "../stores/useExecutionStore";
+import {
+  useBoardPanelStatusStore,
+  type BoardPanelStatus,
+} from "../stores/useBoardPanelStatusStore";
 import { StudioSecretsPanel } from "./StudioSecretsPanel";
 import StudioPublishControls from "./StudioPublishControls";
 import { downloadProjectExport } from "../lib/export-project";
@@ -206,7 +215,12 @@ function statusFromPayload(payload: PreviewPayload, workspaceStatus: string | nu
   const runtimeStatus = typeof payload.runtimeStatus === "string" ? payload.runtimeStatus : "stopped";
   const url = typeof payload.previewUrl === "string" && payload.previewUrl ? payload.previewUrl : null;
   const error = typeof payload.runtimeError === "string" && payload.runtimeError ? payload.runtimeError : null;
-  const errorCode = typeof payload.runtimeErrorCode === "string" && payload.runtimeErrorCode ? payload.runtimeErrorCode : null;
+  // The structured field wins; when a server path omits it, recover the
+  // code embedded in the message text itself (the terminal-server's 503
+  // body survives storage only as serialized text — see
+  // extractEmbeddedErrorCode). Without this, a HOST_EXECUTION_DISABLED
+  // failure arriving on a code-less payload poses as a generic crash.
+  const errorCode = typeof payload.runtimeErrorCode === "string" && payload.runtimeErrorCode ? payload.runtimeErrorCode : extractEmbeddedErrorCode(error);
   if (runtimeStatus === "ready" && url) return { state: "ready", url, error: null, errorCode: null };
   if (runtimeStatus === "starting") return { state: "starting", url, error, errorCode };
   if (runtimeStatus === "restarting") return { state: "restarting", url, error, errorCode };
@@ -224,6 +238,26 @@ function statusFromPayload(payload: PreviewPayload, workspaceStatus: string | nu
   return { state: "unreachable", url, error, errorCode };
 }
 
+/**
+ * Server error text is log material, not UI copy: some failure paths
+ * persist the terminal-server's raw response body inside the message
+ * (e.g. `Workspace prepare failed (503): {"error":"…","code":"…"}`), and
+ * rendering that verbatim dumps machine JSON on the user (Larry's
+ * production screenshot, 2026-11-10). Serialized payloads map to null so
+ * each state's existing human fallback sentence takes over; plain
+ * human-readable messages pass through untouched. The raw text remains
+ * available server-side (the project's stored runtime/workspace error
+ * and the terminal-server logs) — it just never renders in this pane.
+ */
+function humanizePreviewError(error: string | null): string | null {
+  if (!error) return null;
+  const trimmed = error.trim();
+  const looksSerialized =
+    /\{\s*"(error|code)"\s*:/.test(trimmed) ||
+    (trimmed.startsWith("{") && trimmed.endsWith("}"));
+  return looksSerialized ? null : error;
+}
+
 export default function StudioPreviewPanel({
   projectId,
   projectName,
@@ -235,7 +269,9 @@ export default function StudioPreviewPanel({
   versionControl = "none",
   refreshKey = 0,
   startGraceMs = STUCK_NOT_STARTED_MS,
+  lastRunFailureNote = null,
   onSelectionChange,
+  onViewLogs,
   lockSelection = false,
   inspectorTool = "select",
   snapEnabled = true,
@@ -250,13 +286,24 @@ export default function StudioPreviewPanel({
   /** Who owns the durable source: LiTT ("managed") or GitHub. */
   sourceKind?: "managed" | "github" | null;
   /** Provisioning state of the source itself. */
-  sourceStatus?: "provisioning" | "ready" | "error" | "needs_setup" | null;
+  sourceStatus?: "provisioning" | "ready" | "error" | "needs_setup" | "unavailable" | null;
   /** Whether the workspace has a Git repository. Managed projects do. */
   versionControl?: "git" | "none";
   refreshKey?: number;
   /** How long a not_started preview may sit idle before it fails visibly. Overridable for tests. */
   startGraceMs?: number;
+  /**
+   * Why the project's last build run failed (the failed message's own
+   * words), when it did. Lets the starter-template state say the build
+   * failed — and why — instead of presenting the scaffold as a site.
+   */
+  lastRunFailureNote?: string | null;
   onSelectionChange?: (selection: PreviewSelection | null) => void;
+  /** "View logs" on the failure surface (Kimi wiring item 1): the board
+   *  binding summons the Terminal / Logs panel. Absent outside the
+   *  board — the failure surface then falls back to this panel's own
+   *  logs strip when it has lines. */
+  onViewLogs?: () => void;
   /** Canvas mode: selection stays on regardless of the toolbar toggle. */
   lockSelection?: boolean;
   /** Active canvas tool forwarded to the in-frame inspector bridge. */
@@ -271,6 +318,20 @@ export default function StudioPreviewPanel({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
+  // Refusal code reported by the workspace-state lookup (its
+  // workspaceErrorCode field, recovered server-side from the stored
+  // workspaceError). The preview payload does not reliably carry the
+  // code: the preview GET threads it only when the stored workspace
+  // status/error still carry it, and this panel's own timeout paths null
+  // errorCode when they force "failed" — on Larry's production path the
+  // pane settled code-less as a generic failure with a futile Restart.
+  // The workspace-state lookup runs on every mount and names the
+  // refusal directly; hostExecBlocked below consumes both channels.
+  const [workspaceRefusalCode, setWorkspaceRefusalCode] = useState<string | null>(null);
+  // Render-time mirror of hostExecKnown (derived below) for the async
+  // prepare path: preparePreview is defined before the derivation, so
+  // it reads this ref to refuse a prepare that can never succeed.
+  const hostExecKnownRef = useRef(false);
   const [frameKey, setFrameKey] = useState(0);
   const [deviceMode, setDeviceMode] = useState<DeviceMode>("desktop");
   const [maximized, setMaximized] = useState(false);
@@ -306,6 +367,12 @@ export default function StudioPreviewPanel({
   // Content truth gates auto-start. Starts as "unknown" (blocking) so the
   // very first render can never auto-start on an unresolved truth.
   const [workspaceTruth, setWorkspaceTruth] = useState<WorkspaceTruth>("unknown");
+  // Raw workspace-state content facts (same lookup as workspaceTruth):
+  // `starterContent` = the entry page is still the seeded welcome
+  // scaffold; `touched` = real activity beyond the seed commit. Null
+  // until the lookup resolves — starter labeling waits for the truth
+  // rather than guessing.
+  const [workspaceContent, setWorkspaceContent] = useState<{ touched: boolean; starterContent: boolean } | null>(null);
   // Project secrets editor (Clerk keys for the preview runtime). Toggled
   // from the toolbar; auto-opened from the auth-config error CTA.
   const [secretsOpen, setSecretsOpen] = useState(false);
@@ -343,7 +410,7 @@ export default function StudioPreviewPanel({
   // top (each new request supersedes the previous, so a slow API would never
   // get a response applied).
   const statusInFlightRef = useRef(false);
-  const MAX_START_POLL_ATTEMPTS = 40; // 40 × 3s ≈ 2 minutes
+  const MAX_START_POLL_ATTEMPTS = 110; // 110 × 3s ≈ 330s — matches the start-POST budget; a cold sandbox start (create + mirror + install + boot) legitimately runs past the old ~2-minute bound, which made the panel declare "took too long to start" over starts that were still alive (round 5, 2026-11-15)
   // Which project this panel is showing right now, and a token per start
   // attempt: late results for a previous project are discarded, not applied.
   const activeProjectRef = useRef<string | null>(projectId);
@@ -406,6 +473,17 @@ export default function StudioPreviewPanel({
     }
 
     if (!documentInFrame) {
+      // Static previews can NEVER answer the bridge handshake: the frame
+      // is sandboxed to an opaque origin (no allow-same-origin — that
+      // sandbox is the security boundary for user content, see
+      // PREVIEW_SECURITY_HEADERS in the /api/preview route) and the
+      // static route injects no inspector. Say so immediately and
+      // precisely instead of timing out a doomed handshake and reporting
+      // a generic failure that reads as transient (wave-3 Finding 5).
+      if (framework === "static") {
+        setSelectionError("Element selection isn't available for static previews — it works on live dev-server previews.");
+        return;
+      }
       // Cross-origin preview (the normal case — previews are served by the
       // terminal-server host). Try the injected inspector bridge; if the
       // frame is not instrumented the bridge never answers and we report
@@ -520,7 +598,7 @@ export default function StudioPreviewPanel({
     };
     documentInFrame.addEventListener("click", handleClick, true);
     selectionCleanupRef.current = () => documentInFrame.removeEventListener("click", handleClick, true);
-  }, [clearSelection, onSelectionChange, effectiveSelectionMode, previewUrl, pushInspectorState]);
+  }, [clearSelection, onSelectionChange, effectiveSelectionMode, previewUrl, pushInspectorState, framework]);
 
   const handleIframeLoad = useCallback(() => {
     setIframeFailed(false);
@@ -615,10 +693,13 @@ export default function StudioPreviewPanel({
   useEffect(() => {
     if (!projectId) {
       setWorkspaceTruth("no_content");
+      setWorkspaceContent(null);
+      setWorkspaceRefusalCode(null);
       return;
     }
     let cancelled = false;
     setWorkspaceTruth("unknown");
+    setWorkspaceContent(null);
     (async () => {
       try {
         const res = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/workspace-state`, {
@@ -630,19 +711,32 @@ export default function StudioPreviewPanel({
         if (cancelled) return;
         if (!res.ok) {
           setWorkspaceTruth("no_content");
+          setWorkspaceRefusalCode(null);
           return;
         }
-        const payload = await res.json().catch(() => null) as { scaffolded?: unknown; touched?: unknown } | null;
+        const payload = await res.json().catch(() => null) as { scaffolded?: unknown; touched?: unknown; starterContent?: unknown; workspaceErrorCode?: unknown } | null;
         if (cancelled || !payload) {
           setWorkspaceTruth("no_content");
+          setWorkspaceRefusalCode(null);
           return;
         }
+        // Set the refusal BEFORE the content truth: the auto-start gate
+        // reads both, and the refusal must already be visible in the
+        // same render that first reports has_content.
+        setWorkspaceRefusalCode(typeof payload.workspaceErrorCode === "string" && payload.workspaceErrorCode ? payload.workspaceErrorCode : null);
         // Same signal CommandStudio uses: a second git commit or a consumed
         // scaffold manifest both mean real content exists.
         const hasContent = payload.touched === true || payload.scaffolded === false;
         setWorkspaceTruth(hasContent ? "has_content" : "no_content");
+        setWorkspaceContent({
+          touched: payload.touched === true,
+          starterContent: payload.starterContent === true,
+        });
       } catch {
-        if (!cancelled) setWorkspaceTruth("no_content");
+        if (!cancelled) {
+          setWorkspaceTruth("no_content");
+          setWorkspaceRefusalCode(null);
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -859,11 +953,15 @@ export default function StudioPreviewPanel({
 
   const setPreviewPreparing = useExecutionStore((s) => s.setPreviewPreparing);
 
-  const preparePreview = useCallback(async () => {
+  const preparePreview = useCallback(async (opts?: { forceRestart?: boolean }) => {
     if (!projectId) return;
     // Single-flight guard: only one preview start in flight at a time.
     // Mobile rerenders and rapid prop changes cannot launch duplicate runtimes.
     if (startInFlightRef.current) return;
+    // A known host-execution refusal means prepare can never succeed on
+    // this deployment — no mount or handler (toolbar Restart, pane CTA,
+    // auto-start, retry) may fire the doomed POST.
+    if (hostExecKnownRef.current) return;
     startInFlightRef.current = true;
     // Per-call token: a start launched for a previous project must never
     // clear the in-flight flag or write state for the project now on screen.
@@ -933,13 +1031,47 @@ export default function StudioPreviewPanel({
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-        // Starting a dev server can take a while (workspace provisioning);
-        // 2 minutes is generous, but it must still terminate.
-        signal: AbortSignal.timeout(120000),
+        // Round 13: an explicit Restart on a FAILED preview sends
+        // { restart: true } so the web route takes the terminal's
+        // force-restart path. A plain start can silently adopt a
+        // wedged in-flight runtime (the start path's reuse gate),
+        // which made Restart a no-op against the failure it was
+        // meant to clear. Every other start sends an empty body.
+        body: JSON.stringify(opts?.forceRestart ? { restart: true } : {}),
+        // Starting a dev server can take a while: the web route behind
+        // this POST can legitimately spend 180s provisioning plus 120s
+        // starting (TERMINAL_TIMEOUTS) back-to-back — a 300s worst
+        // case. The panel budget must outlast that: at 120s the
+        // browser aborted starts the terminal was still completing,
+        // and the rejection surfaced verbatim as "signal timed out"
+        // (live failure 2026-11-15). 330s covers the route's budgets
+        // plus its own non-fetch work (auth, DB writes, secrets) and
+        // still terminates a start the route itself has given up on.
+        signal: AbortSignal.timeout(330000),
       });
       const payload = await response.json().catch(() => null) as PreviewPayload | null;
       if (!isCurrent()) return;
-      if (!response.ok || !payload) throw new Error(typeof payload?.runtimeError === "string" ? payload.runtimeError : `Preview preparation failed (${response.status})`);
+      if (!response.ok) {
+        // A failed start still returns a shaped payload (runtimeStatus /
+        // runtimeError / runtimeErrorCode) — run it through
+        // statusFromPayload so the machine code survives (wave-4
+        // threading). This branch used to throw payload.runtimeError into
+        // the catch below, which hard-nulled errorCode and rendered the
+        // serialized server text verbatim: a HOST_EXECUTION_DISABLED
+        // refusal arriving via auto-start/Restart (the production path)
+        // then posed as a generic "Preview failed to start" with the raw
+        // JSON as its detail and a Restart that can never succeed. Only
+        // an unshaped body (no runtime fields at all) keeps the old throw.
+        const shaped = payload !== null && (typeof payload.runtimeStatus === "string" || typeof payload.runtimeError === "string" || typeof payload.runtimeErrorCode === "string");
+        if (!shaped) throw new Error(typeof payload?.runtimeError === "string" ? payload.runtimeError : `Preview preparation failed (${response.status})`);
+        const failedNext = statusFromPayload(payload, workspaceStatus);
+        setState("failed");
+        setPreviewUrl(null);
+        setError(failedNext.error ?? "The preview did not start. Retry, or check that the project has an index.html.");
+        setErrorCode(failedNext.errorCode);
+        return;
+      }
+      if (!payload) throw new Error(`Preview preparation failed (${response.status})`);
       const next = statusFromPayload(payload, workspaceStatus);
       if (next.state === "not_started") {
         // A start that answers "not started" has not started. Say so with a
@@ -978,6 +1110,7 @@ export default function StudioPreviewPanel({
     setPreviewUrl(null);
     setError(null);
     setErrorCode(null);
+    setWorkspaceRefusalCode(null);
     setFramework(null);
     setDevCommand(null);
     setLogs([]);
@@ -1025,11 +1158,19 @@ export default function StudioPreviewPanel({
     if (state !== "not_started") return;
     if (!projectId) return;
     if (workspaceTruth !== "has_content") return;
+    // A refusal already told us prepare can never succeed on this
+    // deployment — do not fire the doomed POST just to learn it again;
+    // the refusal renders as the honest notice instead. The code can
+    // arrive on EITHER channel: the workspace-state lookup
+    // (workspaceRefusalCode) or the preview payload itself (errorCode).
+    // #901's guard read only the first; a payload-only refusal still
+    // auto-started into the wall.
+    if (workspaceRefusalCode === HOST_EXECUTION_DISABLED_CODE || errorCode === HOST_EXECUTION_DISABLED_CODE) return;
     if (autoStartedForRef.current === projectId) return;
     if (startInFlightRef.current) return;
     autoStartedForRef.current = projectId;
     void preparePreview();
-  }, [state, projectId, preparePreview, workspaceTruth]);
+  }, [state, projectId, preparePreview, workspaceTruth, workspaceRefusalCode, errorCode]);
 
   const handleCopyUrl = useCallback(async () => {
     if (!previewUrl) return;
@@ -1083,6 +1224,40 @@ export default function StudioPreviewPanel({
   const effectivePreviewUrl = isStaticProject ? staticPreviewUrl : previewUrl;
   const displayUrl = effectivePreviewUrl ? `${effectivePreviewUrl}${effectivePreviewUrl.includes("?") ? "&" : "?"}studioRefresh=${frameKey}` : null;
   const isAuthConfigError = errorCode === "preview_clerk_config_error" || errorCode === "preview_auth_config_error";
+  // Wave-4 truth: a HOST_EXECUTION_DISABLED failure is the hosted service's
+  // fail-closed execution policy, not a transient crash — repo-backed
+  // workspaces cannot open there until a verified sandbox exists, so the
+  // pane names that state and offers no restart that can never succeed.
+  // The code can arrive on either of two channels: the preview payload
+  // (errorCode, wave-4/#887 threading) or the workspace-state lookup
+  // (workspaceRefusalCode) — the latter is the reliable carrier when the
+  // preview channel settles code-less (including a not_started settle,
+  // where the refusal is already known before any start is attempted).
+  // Both feed this one derivation; there is no second detection path.
+  const hostExecKnown = errorCode === HOST_EXECUTION_DISABLED_CODE || workspaceRefusalCode === HOST_EXECUTION_DISABLED_CODE;
+  // hostExecBlocked is the state-scoped presentation derivation (label,
+  // detail, notice card, source line): the honest notice replaces the
+  // generic failure copy only in the settled states #901 covered.
+  const hostExecBlocked = hostExecKnown && (state === "failed" || state === "not_started");
+  // Repo gate (B2): when the project's live workspace is not offered on
+  // the hosted service, there is no preview runtime to configure — the
+  // Project secrets editor (Clerk keys FOR the preview) is a dead end
+  // and is not rendered at all. Known either from a refusal this session
+  // (hostExecKnown) or from the canonical runtime state, which now
+  // reports gated repo projects as sourceStatus "unavailable" from the
+  // first poll.
+  const repoWorkspaceGated = hostExecKnown || isRepoWorkspaceGated({ kind: sourceKind, status: sourceStatus });
+  // The RESTART GATES, however, key on hostExecKnown in ANY state
+  // (follow-up to #901, production f9ad12cd): the refusal can be known
+  // while the panel sits in "unreachable" — a state hostExecBlocked
+  // excludes — where the pane CTA (handleRetry → preparePreview) still
+  // offered a prepare that can never succeed and the toolbar/pane
+  // rendered "Restart preview" over the honest notice. Once the refusal
+  // is known, no restart affordance renders and no prepare fires; the
+  // toolbar Refresh (a status re-check, not a prepare) stays available.
+  useEffect(() => {
+    hostExecKnownRef.current = hostExecKnown;
+  }, [hostExecKnown]);
   // The v4 @import trap: a Tailwind-intended preview that renders unstyled
   // must surface honestly — never a green "Preview ready" over dead CSS.
   const stylingFailed = state === "ready" && styleProbe?.tailwindDetected === true && styleProbe.styled === false;
@@ -1090,10 +1265,111 @@ export default function StudioPreviewPanel({
   // of an indefinite "Preparing your preview automatically…".
   const awaitingFirstContent = state === "not_started" && workspaceTruth === "no_content";
   const frameFailed = iframeFailed || frameCheck === "failed";
-  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (frameFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : frameCheck === "ok" ? "Preview ready" : "Loading preview…") : state === "stale" ? "Preview may be stale" : state === "not_started" ? (awaitingFirstContent ? "No preview yet" : "Preview not started") : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : "Preview failed to start") : "Preview runtime unreachable";
-  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "ready" && frameFailed ? (frameError ?? "The preview address did not load. Retry to check it again.") : state === "not_started" ? (awaitingFirstContent ? "Build something in this project and the preview will start automatically. Already have files? Start it manually." : "Preparing your preview automatically…") : state === "unreachable" ? (error ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (error ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : error ?? "The dev server failed to start. Try restarting it.") : error ?? "The preview surface reports only real project runtime state.";
+  // Raw serialized server payloads never render — see humanizePreviewError.
+  const humanError = humanizePreviewError(error);
+  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (frameFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : frameCheck === "ok" ? "Preview ready" : "Loading preview…") : state === "stale" ? "Preview may be stale" : state === "not_started" ? (hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_LABEL : awaitingFirstContent ? "No preview yet" : "Preview not started") : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_LABEL : "Preview failed to start") : "Preview runtime unreachable";
+  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "ready" && frameFailed ? (frameError ?? "The preview address did not load. Retry to check it again.") : state === "not_started" ? (hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : awaitingFirstContent ? "Build something in this project and the preview will start automatically. Already have files? Start it manually." : "Preparing your preview automatically…") : state === "unreachable" ? (humanError ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (humanError ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : humanError ?? "The dev server failed to start. Try restarting it.") : humanError ?? "The preview surface reports only real project runtime state.";
   const dotColor = stylingFailed ? STATUS_DOT_COLOR.stale : STATUS_DOT_COLOR[state];
   const isLive = state === "ready" || state === "stale";
+
+  // Starter-template truth (wave-3 Finding 4 — Larry's screenshot
+  // 2026-11-10: a failed-build project rendered its seeded welcome
+  // scaffold under a green "Preview ready"). When the entry page is
+  // still the starter scaffold, the frame may still render (the welcome
+  // screen's starter prompts are a real onboarding surface) but it must
+  // be LABELED as the starter template everywhere — header, footer, and
+  // a notice strip — never as the project's built site.
+  const entryIsStarter = workspaceContent?.starterContent === true;
+  const starterTouched = entryIsStarter && workspaceContent?.touched === true;
+  const showStarterNotice = isLive && entryIsStarter;
+  const starterDetail = lastRunFailureNote
+    ? `The last build failed — ${lastRunFailureNote} Nothing has been built yet, so the preview still shows the starter template.`
+    : starterTouched
+      ? "This project's entry page is still the starter template — edits so far haven't replaced it. It is not a built site yet."
+      : "Nothing has been built in this project yet — the preview is showing the starter template. Build something and the real preview will replace it.";
+  const starterStripText = lastRunFailureNote
+    ? `Starter template — the last build failed: ${lastRunFailureNote}`
+    : starterTouched
+      ? "Starter template — the entry page hasn't been replaced by a build yet."
+      : "Starter template — nothing has been built in this project yet.";
+  const displayLabel = showStarterNotice ? "Starter template — not built yet" : label;
+  const displayDetail = showStarterNotice ? starterDetail : detail;
+  const displayDotColor = showStarterNotice ? STATUS_DOT_COLOR.not_started : dotColor;
+
+  // ── Kimi wiring item 1: staged-loading timer + curtain reveal ──────
+  // Elapsed time is measured from the moment THIS panel entered a start
+  // state — a real measurement of the wait, never a simulated progress
+  // value. It resets when the start settles.
+  const isStarting = state === "starting" || state === "restarting";
+  const startStampRef = useRef<number | null>(null);
+  const [startElapsedMs, setStartElapsedMs] = useState(0);
+  useEffect(() => {
+    if (!isStarting) {
+      startStampRef.current = null;
+      setStartElapsedMs(0);
+      return;
+    }
+    if (startStampRef.current === null) startStampRef.current = Date.now();
+    const id = window.setInterval(() => {
+      if (startStampRef.current !== null) {
+        setStartElapsedMs(Date.now() - startStampRef.current);
+      }
+    }, 100);
+    return () => window.clearInterval(id);
+  }, [isStarting]);
+
+  // Curtain-lift reveal: each transition INTO ready (from a start or a
+  // failure — not ready↔stale wobble) replays one short blur→sharp lift
+  // with an accent scanline. Reduced motion collapses it to a plain
+  // opacity fade (globals.css kills the scanline/blur there).
+  const prevStateRef = useRef(state);
+  const [revealing, setRevealing] = useState(false);
+  useEffect(() => {
+    const prev = prevStateRef.current;
+    prevStateRef.current = state;
+    if (state !== "ready" || prev === "ready" || prev === "stale") return;
+    setRevealing(true);
+    const id = window.setTimeout(() => setRevealing(false), 460);
+    return () => window.clearTimeout(id);
+  }, [state]);
+
+  // ── Kimi wiring item 2: publish this panel's own status for the
+  // board header dot. The mapping reads only states this panel already
+  // derives — no new data, no blended aggregate.
+  const setPanelStatus = useBoardPanelStatusStore((s) => s.setPanelStatus);
+  useEffect(() => {
+    const status: BoardPanelStatus =
+      state === "ready"
+        ? frameFailed
+          ? { tone: "error", label: "Preview failed to load" }
+          : stylingFailed
+            ? { tone: "working", label: "Preview styling failed to apply" }
+            : { tone: "ready", label: "Preview ready" }
+        : state === "starting"
+          ? {
+              tone: "working",
+              label:
+                startPhase === "provision"
+                  ? "Provisioning workspace"
+                  : startPhase === "devserver"
+                    ? "Starting dev server"
+                    : "Preparing preview…",
+              pulse: true,
+            }
+          : state === "restarting"
+            ? { tone: "working", label: "Restarting dev server", pulse: true }
+            : state === "loading"
+              ? { tone: "working", label: "Checking preview status…", pulse: true }
+              : state === "stale"
+                ? { tone: "working", label: "Preview may be stale" }
+                : state === "failed"
+                  ? { tone: "error", label: "Preview failed to start" }
+                  : state === "unreachable"
+                    ? { tone: "error", label: "Preview runtime unreachable" }
+                    : { tone: "idle", label: "Preview not started" };
+    setPanelStatus("preview", status);
+  }, [state, startPhase, frameFailed, stylingFailed, setPanelStatus]);
+  useEffect(() => () => setPanelStatus("preview", null), [setPanelStatus]);
 
   // Verify the preview address answers before calling it ready. Iframes do
   // not raise onError for HTTP 404/5xx, so the probe is what catches a
@@ -1109,8 +1385,12 @@ export default function StudioPreviewPanel({
       setFrameError(null);
     }
     let cancelled = false;
+    let timedOut = false;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FRAME_PROBE_TIMEOUT_MS);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, FRAME_PROBE_TIMEOUT_MS);
     (async () => {
       try {
         const response = await fetch(effectivePreviewUrl, { cache: "no-store", credentials: "include", signal: controller.signal });
@@ -1127,7 +1407,17 @@ export default function StudioPreviewPanel({
       } catch {
         if (cancelled) return;
         setFrameCheck("failed");
-        setFrameError("The preview address did not respond. Retry to check it again.");
+        // Round 14: a thrown fetch is two different failures wearing
+        // one message. If OUR probe timer fired, the address was
+        // reached but never answered in time (a black-holed upstream
+        // makes the terminal proxy hang past this probe's budget).
+        // Any other throw means the request never completed at all —
+        // network failure or a cross-origin rejection in the browser.
+        // Say which one happened; the old single "did not respond"
+        // hid the distinction the diagnosis needed.
+        setFrameError(timedOut
+          ? "The preview address did not answer in time — it may still be starting, or the connection is stuck. Retry to check it again."
+          : "The preview address could not be reached from your browser. Retry to check it again.");
       } finally {
         clearTimeout(timer);
       }
@@ -1145,8 +1435,12 @@ export default function StudioPreviewPanel({
     setIframeFailed(false);
     setFrameKey((value) => value + 1);
     autoStartedForRef.current = projectId;
-    void preparePreview();
-  }, [preparePreview, projectId]);
+    // Round 13: in the failed state this button IS "Restart preview"
+    // — an explicit user restart takes the force path, not a plain
+    // start that can adopt the wedged runtime. Other states keep
+    // the plain start.
+    void preparePreview(state === "failed" ? { forceRestart: true } : undefined);
+  }, [preparePreview, projectId, state]);
 
   // Export the project's publishable source as a ZIP download. Server-side
   // build — the button only reports what the endpoint actually returned.
@@ -1165,13 +1459,15 @@ export default function StudioPreviewPanel({
       setExportNotice({ kind: "err", text: result.error });
     }
   }, [projectId, exporting, getToken]);
-  const sourceSummary = formatSourceSummary({
-    kind: sourceKind,
-    status: sourceStatus,
-    versionControl,
-    branch,
-    githubRepository: repositoryName,
-  });
+  const sourceSummary = hostExecBlocked
+    ? "Repo workspace unavailable on the hosted service"
+    : formatSourceSummary({
+        kind: sourceKind,
+        status: sourceStatus,
+        versionControl,
+        branch,
+        githubRepository: repositoryName,
+      });
 
   return (
     <div className={`flex h-full min-h-0 flex-col ${maximized ? "fixed inset-0 z-[300] p-3" : ""}`} data-testid="studio-preview-panel" data-project-id={projectId ?? ""}>
@@ -1179,15 +1475,15 @@ export default function StudioPreviewPanel({
           Horizontally scrollable: on narrow phones the action buttons
           (refresh/restart/stop/copy/maximize) would otherwise be cut off
           with no way to reach them. */}
-      <div className="no-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto border-b px-2 py-1.5" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }} data-testid="preview-toolbar">
+      <div className="no-scrollbar flex shrink-0 items-center gap-1.5 overflow-x-auto border-b px-2 py-1" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }} data-testid="preview-toolbar">
         {/* Runtime status dot */}
         <div
           className="h-2 w-2 shrink-0 rounded-full"
           style={{
-            backgroundColor: dotColor,
-            boxShadow: isLive ? `0 0 6px ${dotColor}80` : "none",
+            backgroundColor: displayDotColor,
+            boxShadow: isLive ? `0 0 6px ${displayDotColor}80` : "none",
           }}
-          aria-label={`Runtime status: ${label}`}
+          aria-label={`Runtime status: ${displayLabel}`}
           data-testid="preview-status-dot"
         />
         <div className="min-w-[96px] flex-1">
@@ -1199,7 +1495,7 @@ export default function StudioPreviewPanel({
               sitting above the source line cannot read as "no source".
             */}
             {framework && (
-              <span className="shrink-0 rounded px-1 py-0.5 text-[8px] font-bold uppercase" style={{ backgroundColor: "rgba(139,92,246,0.12)", color: "#9b4dff" }} title={`Runtime: ${framework}`} data-testid="preview-runtime-badge">
+              <span className="shrink-0 rounded px-1 py-0.5 text-[8px] font-bold uppercase" style={{ backgroundColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", color: "var(--color-accent-strong)" }} title={`Runtime: ${framework}`} data-testid="preview-runtime-badge">
                 {framework}
               </span>
             )}
@@ -1224,7 +1520,7 @@ export default function StudioPreviewPanel({
                 key={mode}
                 type="button"
                 onClick={() => setDeviceMode(mode)}
-                className="grid min-h-9 min-w-9 place-items-center rounded-md transition"
+                className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 place-items-center rounded-md transition"
                 style={{
                   backgroundColor: deviceMode === mode ? "rgba(114,242,56,0.12)" : "transparent",
                   color: deviceMode === mode ? "var(--litt-primary)" : "var(--text-muted)",
@@ -1242,6 +1538,12 @@ export default function StudioPreviewPanel({
         {isLive && !lockSelection && (
           <button
             type="button"
+            // Static previews cannot serve element selection (the
+            // attach path rejects them and shows the "unavailable"
+            // banner) — the toggle must not render ON/active there.
+            // Honest disabled state instead (Larry's polish pass,
+            // 2026-11-13).
+            disabled={isStaticProject}
             onClick={() => {
               const next = !selectionMode;
               setSelectionMode(next);
@@ -1252,14 +1554,14 @@ export default function StudioPreviewPanel({
                 attachSelection();
               }
             }}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
             style={{
-              backgroundColor: selectionMode ? "rgba(155,77,255,0.14)" : "transparent",
-              color: selectionMode ? "#c4b5fd" : "var(--text-muted)",
+              backgroundColor: selectionMode && !isStaticProject ? "color-mix(in srgb, var(--color-accent) 12%, transparent)" : "transparent",
+              color: selectionMode && !isStaticProject ? "var(--color-accent-strong)" : "var(--text-muted)",
             }}
-            aria-label={selectionMode ? "Disable preview element selection" : "Select an element in the preview"}
-            aria-pressed={selectionMode}
-            title={selectionMode ? "Element selection on" : "Select an element in the preview"}
+            aria-label={isStaticProject ? "Element selection is unavailable for static previews" : selectionMode ? "Disable preview element selection" : "Select an element in the preview"}
+            aria-pressed={isStaticProject ? false : selectionMode}
+            title={isStaticProject ? "Element selection is unavailable for static previews" : selectionMode ? "Element selection on" : "Select an element in the preview"}
             data-testid="preview-select"
           >
             <MousePointer2 size={13} className="pointer-events-none" />
@@ -1270,19 +1572,23 @@ export default function StudioPreviewPanel({
           type="button"
           onClick={handleHardRefresh}
           disabled={state === "loading" || state === "starting" || state === "restarting"}
-          className="grid h-7 w-7 shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5 disabled:opacity-40"
           aria-label="Refresh preview"
           title="Refresh preview (Ctrl+R)"
           data-testid="preview-refresh"
         >
           <RefreshCw size={12} className={`pointer-events-none ${state === "stale" ? "animate-spin" : ""}`} />
         </button>
-        {/* Restart dev server — hidden for static projects (no dev server) */}
-        {(isLive || state === "failed") && !isStaticProject && (
+        {/* Restart dev server — hidden for static projects (no dev server)
+            and whenever a host-execution refusal is KNOWN, in any state:
+            a restart can never succeed on the hosted service (wave-4;
+            gating widened from hostExecBlocked to hostExecKnown after
+            production f9ad12cd still rendered this button). */}
+        {(isLive || state === "failed") && !isStaticProject && !hostExecKnown && (
           <button
             type="button"
-            onClick={() => void preparePreview()}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            onClick={() => void preparePreview(state === "failed" ? { forceRestart: true } : undefined)}
+            className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5"
             aria-label="Restart preview"
             title="Restart preview runtime"
             data-testid="preview-restart"
@@ -1295,7 +1601,7 @@ export default function StudioPreviewPanel({
           <button
             type="button"
             onClick={() => void stopPreview()}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5"
             aria-label="Stop preview"
             title="Stop preview runtime"
             data-testid="preview-stop"
@@ -1308,7 +1614,7 @@ export default function StudioPreviewPanel({
           <button
             type="button"
             onClick={() => void handleCopyUrl()}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5"
             aria-label="Copy preview URL"
             title="Copy preview URL"
             data-testid="preview-copy-url"
@@ -1324,7 +1630,7 @@ export default function StudioPreviewPanel({
             type="button"
             onClick={() => void handleExport()}
             disabled={exporting}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
+            className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5 disabled:opacity-40"
             aria-label="Export project source as ZIP"
             title="Export project source (.zip)"
             data-testid="preview-export"
@@ -1334,12 +1640,15 @@ export default function StudioPreviewPanel({
               : <Download size={12} className="pointer-events-none" />}
           </button>
         )}
-        {/* Project secrets — Clerk keys for the preview runtime */}
+        {/* Project secrets — Clerk keys for the preview runtime.
+            Not rendered for repo-gated projects: no preview runtime
+            exists there to hold keys (see repoWorkspaceGated). */}
+        {!repoWorkspaceGated && (
         <button
           type="button"
           onClick={() => setSecretsOpen((v) => !v)}
           disabled={!projectId}
-          className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8 disabled:opacity-40"
+          className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5 disabled:opacity-40"
           style={{
             backgroundColor: secretsOpen ? "rgba(114,242,56,0.12)" : "transparent",
             color: secretsOpen ? "var(--litt-primary)" : "var(--text-muted)",
@@ -1351,12 +1660,13 @@ export default function StudioPreviewPanel({
         >
           <KeyRound size={12} className="pointer-events-none" />
         </button>
+        )}
         {/* Maximize */}
         {isLive && (
           <button
             type="button"
             onClick={() => setMaximized((v) => !v)}
-            className="grid min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition hover:bg-white/8"
+            className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5"
             aria-label={maximized ? "Exit fullscreen" : "Maximize preview"}
             title={maximized ? "Exit fullscreen" : "Maximize"}
             data-testid="preview-maximize"
@@ -1365,8 +1675,10 @@ export default function StudioPreviewPanel({
           </button>
         )}
       </div>
-      {/* Project secrets section — collapsible, above the preview surface */}
-      {secretsOpen && projectId && (
+      {/* Project secrets section — collapsible, above the preview surface.
+          The !repoWorkspaceGated guard also covers a secretsOpen left
+          true by the auth-config CTA: a gated project never mounts it. */}
+      {secretsOpen && projectId && !repoWorkspaceGated && (
         <div
           className="max-h-[45%] shrink-0 overflow-y-auto border-b"
           style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}
@@ -1385,7 +1697,7 @@ export default function StudioPreviewPanel({
           style={{
             borderColor: exportNotice.kind === "err" ? "rgba(239,68,68,0.3)" : "var(--studio-border)",
             backgroundColor: exportNotice.kind === "err" ? "rgba(239,68,68,0.06)" : "rgba(114,242,56,0.05)",
-            color: exportNotice.kind === "err" ? "#fca5a5" : "var(--text-secondary)",
+            color: exportNotice.kind === "err" ? "#b91c1c" : "var(--text-secondary)",
           }}
           role="status"
           aria-live="polite"
@@ -1395,7 +1707,7 @@ export default function StudioPreviewPanel({
           <button
             type="button"
             onClick={() => setExportNotice(null)}
-            className="shrink-0 rounded p-0.5 hover:bg-white/10"
+            className="shrink-0 rounded p-0.5 hover:bg-black/5"
             aria-label="Dismiss export notice"
           >
             <X size={10} />
@@ -1405,19 +1717,19 @@ export default function StudioPreviewPanel({
       {selectedElement && (
         <div
           className="flex shrink-0 items-center gap-2 border-b px-2.5 py-1.5 text-[10px]"
-          style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(155,77,255,0.06)" }}
+          style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}
           role="status"
           aria-live="polite"
           data-testid="preview-selection"
         >
-          <MousePointer2 size={11} className="shrink-0" style={{ color: "#c4b5fd" }} aria-hidden="true" />
+          <MousePointer2 size={11} className="shrink-0" style={{ color: "var(--color-accent-strong)" }} aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate" style={{ color: "var(--text-secondary)" }}>
-            Selected: <strong style={{ color: "#c4b5fd" }}>{selectedElement.label}</strong>
+            Selected: <strong style={{ color: "var(--color-accent-strong)" }}>{selectedElement.label}</strong>
           </span>
           <button
             type="button"
             onClick={() => clearSelection()}
-            className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md hover:bg-white/8"
+            className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md hover:bg-black/5"
             aria-label="Clear selected preview element"
             title="Clear selection"
           >
@@ -1426,27 +1738,47 @@ export default function StudioPreviewPanel({
         </div>
       )}
       {selectionError && selectionMode && (
-        <div className="shrink-0 border-b px-2.5 py-1 text-[9px]" style={{ borderColor: "rgba(227,179,65,0.2)", color: "#e3b341" }} role="status">
+        <div className="mx-2 mt-2 inline-flex max-w-full shrink-0 items-start gap-1.5 self-start rounded-md border px-2 py-1 text-[10px] font-semibold shadow-sm" style={{ borderColor: "rgba(180,120,20,0.45)", backgroundColor: "#fff7e0", color: "#6b4a00" }} role="status">
           {selectionError}
         </div>
       )}
 
-      {/* Preview surface */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ backgroundColor: "rgba(0,0,0,0.2)" }}>
+      {/* Preview surface — sits on the shell backdrop inside a defined
+          surface frame (var(--studio-surface), theme-driven) so a live,
+          loading, or blank preview always reads as a framed surface,
+          never as an unbounded void. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-2" style={{ backgroundColor: "var(--studio-bg)" }}>
+        {showStarterNotice && (
+          <div
+            className="mb-2 shrink-0 rounded-md border px-3 py-1.5 text-[10px] font-bold"
+            style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)", color: "var(--text-secondary)" }}
+            role="status"
+            data-testid="preview-starter-notice"
+          >
+            {starterStripText}
+          </div>
+        )}
         {isLive && displayUrl && !frameFailed ? (
-          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-2">
+          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-lg border shadow-sm" style={{ borderColor: "var(--studio-border-strong)", backgroundColor: "var(--studio-surface)" }}>
             <iframe
               key={frameKey}
               ref={iframeRef}
               title={`${projectName ?? "Project"} preview`}
               src={displayUrl}
-              className="border-0 bg-white transition-all duration-200"
+              className="border-0 transition-all duration-200"
               style={{
+                backgroundColor: "var(--studio-surface)",
                 width: deviceMode === "desktop" ? "100%" : `${DEVICE_DIMENSIONS[deviceMode].w}px`,
                 height: deviceMode === "desktop" ? "100%" : `${DEVICE_DIMENSIONS[deviceMode].h}px`,
                 maxWidth: "100%",
-                borderRadius: deviceMode === "desktop" ? "0" : "8px",
-                boxShadow: deviceMode === "desktop" ? "none" : "0 4px 24px rgba(0,0,0,0.4)",
+                borderRadius: "8px",
+                boxShadow: deviceMode === "desktop" ? "0 1px 3px rgba(14,60,26,0.12)" : "0 4px 24px rgba(0,0,0,0.4)",
+                // Curtain lift (Kimi wiring item 1): blur→sharp over the
+                // reveal window; the .preview-reveal class in globals.css
+                // reduces this to an opacity fade under reduced motion.
+                filter: revealing ? "blur(10px)" : "blur(0px)",
+                opacity: revealing ? 0.4 : 1,
+                transition: "filter 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1)",
               }}
               sandbox={isStaticProject 
                 ? "allow-scripts allow-forms allow-modals allow-popups" 
@@ -1456,68 +1788,133 @@ export default function StudioPreviewPanel({
               onError={() => setIframeFailed(true)}
               data-testid="preview-iframe"
             />
+            {revealing && (
+              <div
+                aria-hidden
+                data-testid="preview-reveal-scanline"
+                className="preview-scanline pointer-events-none absolute inset-x-0 h-10"
+                style={{
+                  background:
+                    "linear-gradient(to bottom, transparent, color-mix(in srgb, var(--color-accent) 25%, transparent), transparent)",
+                }}
+              />
+            )}
           </div>
         ) : (
           <div
-            className="flex min-h-[280px] flex-1 flex-col items-center justify-center gap-4 px-6 text-center"
+            className={hostExecBlocked
+              ? "flex min-h-[280px] flex-1 flex-col rounded-lg border px-5 py-5 shadow-sm"
+              : "flex min-h-[280px] flex-1 flex-col items-center justify-center gap-4 rounded-lg border px-6 text-center shadow-sm"}
             style={{
+              borderColor: "var(--studio-border)",
+              backgroundColor: "var(--studio-surface)",
               backgroundImage: "radial-gradient(ellipse 60% 50% at 50% 40%, rgba(168,255,47,0.04), transparent)",
             }}
           >
-            <div
-              className="grid h-12 w-12 place-items-center rounded-2xl"
-              style={{
-                backgroundColor: state === "failed" ? "rgba(239,68,68,0.1)" : "color-mix(in srgb, var(--color-accent) 10%, transparent)",
-                color: state === "failed" ? "#EF4444" : "var(--litt-primary)",
-                border: `1px solid ${state === "failed" ? "rgba(239,68,68,0.2)" : "color-mix(in srgb, var(--color-accent) 20%, transparent)"}`,
-                boxShadow: state === "failed" ? "0 0 24px rgba(239,68,68,0.1)" : "0 0 24px rgba(168,255,47,0.08)",
-              }}
-            >
-              {state === "loading" || state === "starting" || state === "restarting" ? (
-                <Loader2 size={20} className="animate-spin" />
-              ) : (
-                <Eye size={20} />
-              )}
-            </div>
-            <div>
-              <div className="text-sm font-extrabold tracking-tight" style={{ color: "var(--text-primary)" }}>{label}</div>
-              <div className="mx-auto mt-1.5 max-w-[280px] text-xs leading-5" style={{ color: "var(--text-muted)" }}>{detail}</div>
-            </div>
-            {/* Staged loading — show honest progress while the preview starts. */}
-            {(state === "starting" || state === "restarting") && startPhase && (
-              <div className="flex items-center gap-2" data-testid="preview-start-stages" aria-label="Preview startup progress">
-                {START_STAGES.map((stageName) => {
-                  const stageKey = stageName === "Provision" ? "provision" : "devserver";
-                  const isCurrent = startPhase === stageKey || (startPhase === "devserver" && stageKey === "provision");
-                  const isDone = startPhase === "devserver" && stageKey === "provision";
-                  return (
-                    <div key={stageName} className="flex items-center gap-1.5">
-                      <span
-                        className={`h-1.5 w-1.5 rounded-full ${isCurrent && !isDone ? "animate-pulse" : ""}`}
-                        style={{
-                          backgroundColor: isDone
-                            ? "var(--litt-primary)"
-                            : isCurrent
-                              ? "#e3b341"
-                              : "var(--text-muted)",
-                          opacity: isDone || isCurrent ? 1 : 0.4,
-                        }}
-                        aria-hidden
-                      />
-                      <span
-                        className="text-[10px] font-bold"
-                        style={{ color: isDone || isCurrent ? "var(--text-primary)" : "var(--text-muted)" }}
-                      >
-                        {stageName}
-                      </span>
-                    </div>
-                  );
-                })}
+            {hostExecBlocked ? (
+              // Host-exec refusal: a compact notice card inside the pane's
+              // normal chrome — never a full-pane empty void with the
+              // message stranded in the middle (Larry's screenshot rule:
+              // unavailable states render as compact notices, not dead
+              // panes). Same label/detail copy as the wave-4 notice.
+              <div
+                data-testid="preview-host-exec-notice"
+                className="flex w-full max-w-[560px] items-start gap-3 self-start rounded-xl border p-4 text-left"
+                style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}
+              >
+                <div
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
+                  style={{
+                    backgroundColor: "rgba(239,68,68,0.1)",
+                    color: "#EF4444",
+                    border: "1px solid rgba(239,68,68,0.2)",
+                  }}
+                >
+                  <Eye size={16} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-extrabold tracking-tight" style={{ color: "var(--text-primary)" }}>{displayLabel}</div>
+                  <div className="mt-1 text-xs leading-5" style={{ color: "var(--text-muted)" }}>{displayDetail}</div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div
+                  className="grid h-12 w-12 place-items-center rounded-2xl"
+                  style={{
+                    backgroundColor: state === "failed" ? "rgba(239,68,68,0.1)" : "color-mix(in srgb, var(--color-accent) 10%, transparent)",
+                    color: state === "failed" ? "#EF4444" : "var(--litt-primary)",
+                    border: `1px solid ${state === "failed" ? "rgba(239,68,68,0.2)" : "color-mix(in srgb, var(--color-accent) 20%, transparent)"}`,
+                    boxShadow: state === "failed" ? "0 0 24px rgba(239,68,68,0.1)" : "0 0 24px rgba(168,255,47,0.08)",
+                  }}
+                >
+                  {state === "loading" || state === "starting" || state === "restarting" ? (
+                    <Loader2 size={20} className="animate-spin" />
+                  ) : (
+                    <Eye size={20} />
+                  )}
+                </div>
+                <div>
+                  <div className="text-sm font-extrabold tracking-tight" style={{ color: "var(--text-primary)" }}>{displayLabel}</div>
+                  <div className="mx-auto mt-1.5 max-w-[280px] text-xs leading-5" style={{ color: "var(--text-muted)" }}>{displayDetail}</div>
+                </div>
+              </>
+            )}
+            {/* Staged loading — show honest progress while the preview
+                starts (Kimi wiring item 1 presentation over the SAME
+                derived stages). Segments render ONLY when startPhase
+                distinguishes a stage from real signals; when it cannot,
+                no segments appear — the single "Preparing preview…"
+                label above and the elapsed timer below are all that is
+                claimed. The timer measures this panel's actual wait. */}
+            {(state === "starting" || state === "restarting") && (
+              <div className="flex flex-col items-center gap-2">
+                {startPhase && (
+                  <div className="flex items-center gap-2" data-testid="preview-start-stages" aria-label="Preview startup progress">
+                    {START_STAGES.map((stageName) => {
+                      const stageKey = stageName === "Provision" ? "provision" : "devserver";
+                      const isCurrent = startPhase === stageKey || (startPhase === "devserver" && stageKey === "provision");
+                      const isDone = startPhase === "devserver" && stageKey === "provision";
+                      return (
+                        <div key={stageName} className="flex items-center gap-1.5">
+                          <span
+                            className={`h-1 w-6 rounded-full ${isCurrent && !isDone ? "animate-pulse" : ""}`}
+                            style={{
+                              backgroundColor: isDone
+                                ? "var(--litt-primary)"
+                                : isCurrent
+                                  ? "var(--color-accent)"
+                                  : "var(--studio-border-strong)",
+                            }}
+                            aria-hidden
+                          />
+                          <span
+                            className="text-[10px] font-bold"
+                            style={{ color: isDone || isCurrent ? "var(--text-primary)" : "var(--text-muted)" }}
+                          >
+                            {stageName}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <span
+                  className="font-mono text-[10px] tabular-nums"
+                  style={{ color: "var(--text-muted)" }}
+                  data-testid="preview-start-elapsed"
+                  aria-label="Time spent starting the preview"
+                >
+                  {(startElapsedMs / 1000).toFixed(1)}s
+                </span>
               </div>
             )}
             {/* Retry button for unreachable/failed states. not_started is
-                handled by auto-start — no manual button needed. */}
-            {(["unreachable", "failed", "not_started"].includes(state) || (isLive && frameFailed)) && projectId && (
+                handled by auto-start — no manual button needed. A KNOWN
+                host-exec refusal gets NO button in any state (this CTA's
+                handler fires a prepare POST): retrying can never succeed
+                on the hosted service, so the honest notice stands alone. */}
+            {(["unreachable", "failed", "not_started"].includes(state) || (isLive && frameFailed)) && projectId && !hostExecKnown && (
               <>
                 <button
                   type="button"
@@ -1541,7 +1938,7 @@ export default function StudioPreviewPanel({
                   <button
                     type="button"
                     onClick={() => setSecretsOpen(true)}
-                    className="flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold transition hover:bg-white/8"
+                    className="flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold transition hover:bg-black/5"
                     style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)" }}
                     data-testid="preview-add-keys"
                   >
@@ -1549,6 +1946,25 @@ export default function StudioPreviewPanel({
                     Add Clerk keys
                   </button>
                 )}
+                {/* View logs (Kimi wiring item 1): on the board this
+                    summons the Terminal / Logs panel; elsewhere it opens
+                    this panel's own logs strip. Rendered only when one
+                    of those real log surfaces exists. */}
+                {(state === "failed" || state === "unreachable" || (isLive && frameFailed)) &&
+                  (onViewLogs || logs.length > 0) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onViewLogs) onViewLogs();
+                        else setLogsOpen(true);
+                      }}
+                      className="flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold transition hover:bg-black/5"
+                      style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)" }}
+                      data-testid="preview-view-logs"
+                    >
+                      View logs
+                    </button>
+                  )}
               </>
             )}
           </div>
@@ -1560,19 +1976,19 @@ export default function StudioPreviewPanel({
         <div className="flex shrink-0 items-center gap-1.5 border-t px-2 py-1" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
           <span
             className="h-1.5 w-1.5 shrink-0 rounded-full"
-            style={{ backgroundColor: dotColor }}
+            style={{ backgroundColor: displayDotColor }}
             aria-hidden
           />
           <span className="min-w-0 flex-1 truncate text-[9px]" style={{ color: state === "stale" ? "#e3b341" : "var(--text-muted)" }}>
             {deviceMode !== "desktop" ? `${DEVICE_DIMENSIONS[deviceMode].label} · ` : ""}
-            {label}
+            {displayLabel}
             {devCommand && <span style={{ color: "var(--text-muted)", opacity: 0.7 }}> · {devCommand}</span>}
           </span>
           {logs.length > 0 && (
             <button
               type="button"
               onClick={() => setLogsOpen((v) => !v)}
-              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold transition hover:bg-white/8"
+              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold transition hover:bg-black/5"
               style={{ color: "var(--text-secondary)" }}
               aria-label="Toggle logs"
               data-testid="preview-logs-toggle"
@@ -1584,7 +2000,7 @@ export default function StudioPreviewPanel({
             <button
               type="button"
               onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")}
-              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold transition hover:bg-white/8"
+              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold transition hover:bg-black/5"
               style={{ color: "var(--text-secondary)" }}
               aria-label="Open preview in new tab"
               data-testid="preview-open-external"
@@ -1596,7 +2012,7 @@ export default function StudioPreviewPanel({
         </div>
       )}
       {logsOpen && logs.length > 0 && (
-        <div className="max-h-28 shrink-0 overflow-auto border-t px-2 py-1 font-mono text-[9px] leading-3" style={{ borderColor: "var(--studio-border)", backgroundColor: "rgba(0,0,0,0.15)", color: "var(--text-muted)" }} data-testid="preview-logs">
+        <div className="max-h-28 shrink-0 overflow-auto border-t px-2 py-1 font-mono text-[9px] leading-3" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-bg)", color: "var(--text-muted)" }} data-testid="preview-logs">
           {logs.slice(-50).map((line, i) => (
             <div key={i} className="truncate">{line}</div>
           ))}

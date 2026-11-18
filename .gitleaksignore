@@ -38,3 +38,9 @@ ce0065c8bbc238767570795d03c6b7bbe905e65b:packages/litt-cli/src/__tests__/repair-
 # test value. Fingerprints verified against the gitleaks push run on 7ee8235.
 7ee82350431e6e32899dd5b4a92e5ace28874718:packages/litt-cli/src/__tests__/repair-hardening.test.ts:stripe-access-token:149
 7ee82350431e6e32899dd5b4a92e5ace28874718:packages/litt-cli/src/__tests__/repair-hardening.test.ts:stripe-access-token:155
+# Synthetic redaction-test fixture (PR #924) — not a real credential.
+# The test proves secret-shaped values never reach approval-card details;
+# the made-up apiKey value sk-live-123456 is the fixture that proves it.
+# Fingerprint from the gitleaks PR-range run that stopped the merge train
+# on head 4c409ed9 (adjudicated by Muse 2026-11-11: synthetic, test-only).
+5e2ab74d1ea6bfae395e1777dffd367e3359a407:src/app/(app)/studio/components/ApprovalCard.subjects.test.tsx:generic-api-key:148

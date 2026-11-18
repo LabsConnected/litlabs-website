@@ -759,3 +759,95 @@ describe("StudioTranscript — quality verdict checklist", () => {
     ]);
   });
 });
+
+describe("StudioTranscript — chronological rendering", () => {
+  it("renders messages in createdAt order even when the array is inverted", () => {
+    // Regression: persisted-message replacement swaps createdAt in place
+    // without repositioning the array entry, so a run's failure card could
+    // render BEFORE an earlier progress message from the same run.
+    const t0 = Date.parse("2026-11-09T19:20:00.000Z");
+    const messages: ChatMessage[] = [
+      {
+        role: "assistant",
+        content: "The run failed: all AI routes unavailable.",
+        status: "failed",
+        createdAt: t0 + 120_000,
+      },
+      {
+        role: "assistant",
+        content: "Exploring the project structure…",
+        createdAt: t0,
+      },
+      { role: "user", content: "Build my site", createdAt: t0 - 60_000 },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+      />,
+    );
+    const rendered = screen
+      .getAllByTestId(/^(user|assistant)-message$/)
+      .map((el) => el.textContent ?? "");
+    const exploringIdx = rendered.findIndex((t) =>
+      t.includes("Exploring the project structure"),
+    );
+    const failedIdx = rendered.findIndex((t) => t.includes("The run failed"));
+    expect(exploringIdx).toBeGreaterThanOrEqual(0);
+    expect(failedIdx).toBeGreaterThan(exploringIdx);
+  });
+
+  it("keeps insertion order for messages with equal timestamps", () => {
+    const t0 = Date.parse("2026-11-09T19:20:00.000Z");
+    const messages: ChatMessage[] = [
+      { role: "assistant", content: "First same-time message", createdAt: t0 },
+      { role: "assistant", content: "Second same-time message", createdAt: t0 },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+      />,
+    );
+    const rendered = screen
+      .getAllByTestId(/^(user|assistant)-message$/)
+      .map((el) => el.textContent ?? "");
+    expect(rendered[0]).toContain("First same-time message");
+    expect(rendered[1]).toContain("Second same-time message");
+  });
+});
+
+describe("StudioTranscript — Signature chat surfaces (chat beauty, 2026-11-11)", () => {
+  // The docked/mobile transcript is a Studio-shell surface and must wear
+  // the Signature light tokens like the rest of the shell. It used to
+  // paint every bubble with hard-coded dark-purple glass
+  // (rgba(20,15,31,*)) and render markdown with prose-invert (light text
+  // for dark backgrounds) regardless of the applied theme.
+  it("message bubbles use the Signature surface tokens, not dark-purple glass", () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "Build a landing page", createdAt: Date.now() },
+      { role: "assistant", content: "I'm ready to help.", createdAt: Date.now() },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+      />,
+    );
+
+    const userBubble = screen.getByText("Build a landing page").closest(".rounded-2xl") as HTMLElement;
+    const assistantBubble = screen.getByText("I'm ready to help.").closest(".rounded-2xl") as HTMLElement;
+    expect(userBubble.style.backgroundColor).not.toContain("20, 15, 31");
+    expect(assistantBubble.style.backgroundColor).not.toContain("20, 15, 31");
+    expect(assistantBubble.style.backgroundColor).toBe("var(--studio-card)");
+
+    const prose = screen.getByText("I'm ready to help.").closest(".prose") as HTMLElement;
+    expect(prose.className).not.toContain("prose-invert");
+  });
+});

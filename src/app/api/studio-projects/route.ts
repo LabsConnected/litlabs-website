@@ -4,11 +4,14 @@ import { getInstallationOctokit } from "@/lib/github-app";
 import {
   createBlankProject,
   createGithubProject,
+  findReusableEmptyBlankProject,
   listProjects,
   ProjectConflictError,
   PROJECT_TEMPLATES,
 } from "@/lib/projects/project-repository";
 import { supabaseAdmin } from "@/lib/supabase";
+import { isHostExecutionPermitted } from "@/lib/host-execution-guard";
+import { isSandboxExecutionAvailable } from "@/lib/terminal-internal-client";
 import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
 import { getProject } from "@/lib/projects/project-repository";
 import type { ProjectTemplateId } from "@/lib/projects/types";
@@ -25,13 +28,41 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  let result;
   try {
-    const result = await listProjects(userId);
-    return NextResponse.json(result);
+    result = await listProjects(userId);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
+
+  // Projects-card availability truth (stored-refusal fix,
+  // 2026-11-14): a repo-backed project whose prepare settled
+  // failed/error can still carry a stored HOST_EXECUTION_DISABLED
+  // refusal that Studio no longer shows — once the sandbox reports
+  // execution available, that verdict is stale and the card must
+  // read as a retryable setup failure, not "Repo workspace
+  // unavailable". Probe the SAME availability Studio's
+  // workspace-state route probes, once for the whole list, and only
+  // when some project matches the exact refusal shape (repo-backed +
+  // settled failure + host guard refusing). The probe fails closed,
+  // so an unreachable terminal keeps today's unavailable badge; a
+  // probe failure here must never fail the list itself.
+  let sandboxAvailable = false;
+  try {
+    const hasRefusalShape = result.projects.some(
+      (p) =>
+        p.sourceType === "github" &&
+        (p.workspaceStatus === "failed" || p.workspaceStatus === "error") &&
+        !isHostExecutionPermitted(),
+    );
+    sandboxAvailable = hasRefusalShape
+      ? await isSandboxExecutionAvailable(userId)
+      : false;
+  } catch {
+    sandboxAvailable = false;
+  }
+  return NextResponse.json({ ...result, sandboxAvailable });
 }
 
 /**
@@ -83,6 +114,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Entry flows that always ask for the same default project (the
+  // Studio Website chip's "New Website") opt in to empty-project
+  // reuse: when the user already has a provably untouched blank from
+  // a previous entry, return it instead of minting a duplicate.
+  // Explicit creates never set this flag and always create.
+  const reuseUntouchedBlank = body.reuseUntouchedBlank === true;
+
   try {
     // "managed" is the domain name for LiTT-owned source; the stored
     // source_type remains "blank" — the domain layer unifies them.
@@ -95,17 +133,27 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const project = await createBlankProject({
-        userId,
-        name,
-        templateId,
-        accessMode: body.accessMode === "shared" ? "shared" : "private",
-        // Same-key repeats (retry of this submission — double click,
-        // network retry, sequential concurrent POSTs) return the row
-        // they already made; enforced by a unique index on
-        // (user_id, idempotency_key), never by name or slug.
-        ...(idempotencyKey ? { idempotencyKey } : {}),
-      });
+      // Reuse is checked first, but it can only ever return a
+      // provably untouched blank; a keyed submission whose project
+      // has been touched falls through to createBlankProject, whose
+      // idempotency lookup still returns that submission's own row.
+      const reusable = reuseUntouchedBlank
+        ? await findReusableEmptyBlankProject(userId, { name, templateId })
+        : null;
+
+      const project =
+        reusable ??
+        (await createBlankProject({
+          userId,
+          name,
+          templateId,
+          accessMode: body.accessMode === "shared" ? "shared" : "private",
+          // Same-key repeats (retry of this submission — double click,
+          // network retry, sequential concurrent POSTs) return the row
+          // they already made; enforced by a unique index on
+          // (user_id, idempotency_key), never by name or slug.
+          ...(idempotencyKey ? { idempotencyKey } : {}),
+        }));
 
       // Provision durable source at create time — a managed project must
       // not wait for Preview auto-start to get its workspace, Git repo
@@ -131,7 +179,13 @@ export async function POST(request: NextRequest) {
         ),
       );
       const refreshed = await getProject(project.id, userId);
-      return NextResponse.json({ project: refreshed ?? project }, { status: 201 });
+      return NextResponse.json(
+        {
+          project: refreshed ?? project,
+          ...(reusable ? { reused: true } : {}),
+        },
+        { status: reusable ? 200 : 201 },
+      );
     }
 
     if (sourceType === "github") {

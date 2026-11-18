@@ -14,6 +14,20 @@ vi.mock("@/hooks/useClerkAuth", () => ({
 
 vi.mock("@/context/ThemeContext", () => ({
   useTheme: () => ({
+    // Mirrors the real ThemeContext value: the page passes
+    // resolvedColors to LiTTAppShell and tokens to its own chrome.
+    resolvedColors: {
+      bgColor: "#0a0a12",
+      textColor: "#e0e0ff",
+      textMuted: "#8888aa",
+      linkColor: "#7b61ff",
+      headerColor: "#00f0ff",
+      borderColor: "#2a2a45",
+      accentColor: "#00f0ff",
+      boxBg: "#151520",
+      success: "#00ff41",
+      warning: "#ffff00",
+    },
     tokens: {
       background: "#0a0a12",
       surface: "#151520",

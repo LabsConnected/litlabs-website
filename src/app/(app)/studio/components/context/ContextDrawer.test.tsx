@@ -3,6 +3,30 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import ContextDrawer from "./ContextDrawer";
 
+// ContextDrawer's tab header is theme-token driven (useTheme) —
+// provide fixed tokens. (The suite below stays otherwise unmocked:
+// this only stubs the theme lookup, not the component.) Theme
+// compliance itself is covered by shell/shell-chrome-theme.test.tsx.
+vi.mock("@/context/ThemeContext", () => ({
+  useTheme: () => ({
+    tokens: {
+      background: "#000000",
+      surface: "#111111",
+      surfaceElevated: "#1a1a1a",
+      border: "#333333",
+      text: "#ffffff",
+      textMuted: "#888888",
+      textInverse: "#000000",
+      primary: "#72f238",
+      secondary: "#9b4dff",
+      success: "#25e08a",
+      warning: "#f5b544",
+      danger: "#f85149",
+      focus: "#72f238",
+    },
+  }),
+}));
+
 /**
  * Focused, unmocked tests for ContextDrawer (Phase C2.1).
  *

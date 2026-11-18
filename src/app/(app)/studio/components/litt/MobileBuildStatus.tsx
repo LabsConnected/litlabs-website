@@ -1,10 +1,17 @@
 "use client";
 
 /**
- * MobileBuildStatusBar — compact Build status bar for the mobile LiTT Studio chat.
+ * MobileBuildStatusBar — compact Build status control for the mobile LiTT
+ * Studio chat.
  *
  * Replaces the Mission / Checkpoints / Next Actions card stack with a single
  * ~36px button on mobile. Tapping it opens a bottom sheet with the full cards.
+ *
+ * Clean-open (Larry, 2026-11-13): this control used to be a dark bar pinned
+ * above the chat transcript, where it sat over the first message. It now
+ * lives in the LiTTMobileSheet header chrome as a light control on the
+ * standard studio surface token — in the sheet's own layout, never over
+ * chat content, no dark bar, no highlight bar.
  *
  * Reads the SAME zustand stores as MissionCards (useExecutionStore,
  * useStudioAgentStore) — no new state.
@@ -13,12 +20,15 @@
 import { Activity, CheckCircle2, ChevronDown } from "lucide-react";
 import { PHASE_META } from "../MissionCards";
 import { useExecutionStore } from "../../stores/useExecutionStore";
+import { approvalAwaitingDecision } from "../../lib/approval-awaiting";
 import { useStudioAgentStore, AGENT_META } from "../../stores/useStudioAgentStore";
 
-/* ── Design tokens (literals, matching MissionCards) ───────────── */
+/* ── Design tokens — the platform's standard light studio tokens
+      (same tokens MobileBottomSheet and the CommandComposer portaled
+      surfaces use; under .studio-shell these resolve light). ── */
 
-const CARD_SURFACE = "rgba(16,12,26,0.92)";
-const CARD_BORDER = "rgba(255,255,255,0.07)";
+const CARD_SURFACE = "var(--studio-surface)";
+const CARD_BORDER = "var(--studio-border)";
 const ACCENT = "var(--color-accent)";
 const AMBER = "#e3b341";
 
@@ -30,6 +40,11 @@ export interface MobileBuildStatusBarProps {
 export default function MobileBuildStatusBar({ open, onOpen }: MobileBuildStatusBarProps) {
   const phase = useExecutionStore((s) => s.phase);
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
+  const approvalPhase = useExecutionStore((s) => s.approvalPhase);
+  // pendingApproval stays mounted while the resumed run executes — the
+  // badge means "a decision is waiting on YOU", so it follows the shared
+  // approvalAwaitingDecision derivation, not mere presence.
+  const approvalWaiting = approvalAwaitingDecision(pendingApproval, approvalPhase);
   const checkpoint = useExecutionStore((s) => s.checkpoint);
 
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
@@ -111,7 +126,7 @@ export default function MobileBuildStatusBar({ open, onOpen }: MobileBuildStatus
       )}
 
       {/* Pending approval badge */}
-      {pendingApproval && (
+      {approvalWaiting && (
         <span
           data-testid="mobile-build-approval"
           style={{

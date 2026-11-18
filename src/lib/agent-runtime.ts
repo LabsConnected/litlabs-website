@@ -44,6 +44,8 @@ export interface RuntimeAgent {
   agentInstanceId: string | null;
   /** The agent template ID (from the agents table). */
   agentId: string | null;
+  /** The agent template slug (agents.slug), or null. */
+  templateSlug: string | null;
   /** The published version ID. */
   agentVersionId: string | null;
   /** Approval mode for this instance. */
@@ -128,6 +130,7 @@ async function resolveBuiltinAgent(
       memoryNamespace: `${clerkId}:${slug}`,
       agentInstanceId: null,
       agentId: null,
+      templateSlug: slug,
       agentVersionId: null,
       approvalMode: "ask-first",
       perRunBudgetCredits: 0,
@@ -249,6 +252,7 @@ async function resolveInstalledAgent(
       memoryNamespace,
       agentInstanceId: instance.id,
       agentId: instance.agent_id,
+      templateSlug: agentRow?.slug ?? null,
       agentVersionId: instance.agent_version_id,
       approvalMode,
       perRunBudgetCredits,

@@ -115,6 +115,15 @@ export async function handleImageGenerate(
       providerId: result.providerId,
       title: result.title,
       id: result.id,
+      // Asset Lake identity + persistence outcome. The Media panel reads
+      // ONLY the Asset Lake (generation_jobs), never the workspace file
+      // tree — so when the generation-job record fails to persist, the
+      // image silently never surfaces in Media while the workspace save
+      // still reports "saved to project". Forwarding both fields makes
+      // that failure visible in the run record instead of vanishing
+      // (LION-RUN-DIAGNOSIS-2026-11-16 Q2/F2a).
+      assetId: result.assetId ?? null,
+      assetPersistenceFailed: result.assetPersistenceFailed ?? false,
       cost: result.cost ?? 0,
       free: result.free ?? true,
       markdown: `![${prompt}](${result.downloadUrl})`,

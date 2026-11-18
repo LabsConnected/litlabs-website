@@ -9,6 +9,9 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { checkPreviewToken } from "../preview-auth";
+import { createWorkspacePreviewToken } from "../preview/preview-token";
+
+const TERMINAL_SECRET = "terminal-auth-secret-with-at-least-32-chars";
 
 describe("checkPreviewToken", () => {
   let origEnv: NodeJS.ProcessEnv;
@@ -62,5 +65,66 @@ describe("checkPreviewToken", () => {
   it("accepts the correct token", () => {
     process.env.PREVIEW_ACCESS_TOKEN = "correct-token";
     expect(checkPreviewToken("correct-token")).toEqual({ ok: true });
+  });
+});
+
+describe("checkPreviewToken — signed per-workspace channel (Phase 2)", () => {
+  let origEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    origEnv = { ...process.env };
+    process.env.TERMINAL_AUTH_SECRET = TERMINAL_SECRET;
+  });
+
+  afterEach(() => {
+    process.env = origEnv;
+  });
+
+  function signedToken(workspaceId = "ws-proj_1"): string {
+    return createWorkspacePreviewToken({
+      userId: "user_owner",
+      projectId: "proj_1",
+      workspaceId,
+    });
+  }
+
+  it("accepts a signed token for its own workspace — with NO legacy token configured (retirement path)", () => {
+    delete process.env.PREVIEW_ACCESS_TOKEN;
+    expect(checkPreviewToken(signedToken(), "ws-proj_1")).toEqual({ ok: true });
+  });
+
+  it("rejects a signed token presented for a different workspace", () => {
+    delete process.env.PREVIEW_ACCESS_TOKEN;
+    const result = checkPreviewToken(signedToken("ws-proj_1"), "ws-proj_2");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.status).toBe(401);
+  });
+
+  it("rejects garbage with 401 when the signed channel is configured but the token verifies for nothing", () => {
+    delete process.env.PREVIEW_ACCESS_TOKEN;
+    const result = checkPreviewToken("attacker-guess", "ws-proj_1");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(401);
+      expect(result.errorCode).toBe("invalid_preview_token");
+    }
+  });
+
+  it("still fails CLOSED with 503 when neither channel is configured", () => {
+    delete process.env.PREVIEW_ACCESS_TOKEN;
+    delete process.env.TERMINAL_AUTH_SECRET;
+    const result = checkPreviewToken("attacker-guess", "ws-proj_1");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(503);
+      expect(result.errorCode).toBe("preview_token_not_configured");
+    }
+  });
+
+  it("legacy global token keeps working during the transition", () => {
+    process.env.PREVIEW_ACCESS_TOKEN = "correct-token";
+    expect(checkPreviewToken("correct-token", "ws-proj_1")).toEqual({ ok: true });
+    // And a signed token is accepted alongside it.
+    expect(checkPreviewToken(signedToken(), "ws-proj_1")).toEqual({ ok: true });
   });
 });

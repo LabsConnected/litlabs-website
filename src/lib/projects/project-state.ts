@@ -9,6 +9,15 @@
  * blue/purple/cyan/pink drift — lime is the brand accent.
  */
 
+import {
+  extractEmbeddedErrorCode,
+  HOST_EXECUTION_DISABLED_CODE,
+} from "@/lib/host-execution-guard";
+import {
+  HOST_EXECUTION_UNAVAILABLE_MESSAGE,
+  HOST_EXECUTION_UNAVAILABLE_SHORT,
+} from "./runtime-state";
+
 export const STALE_PROVISIONING_MS = 30 * 60 * 1000; // 30 minutes
 
 export const LAST_OPENED_PROJECT_KEY = "litt:last-opened-project";
@@ -19,6 +28,18 @@ export type ProjectStateInput = {
   updatedAt: string;
   workspaceError?: string | null;
   runtimeError?: string | null;
+  /**
+   * Whether the terminal reports sandboxed execution available for
+   * this user (the same availability truth Studio's workspace-state
+   * route probes — see isSandboxExecutionAvailable). Callers that
+   * cannot probe leave it unset, which keeps the pre-sandbox
+   * derivation: a stored HOST_EXECUTION_DISABLED refusal reads as a
+   * permanent, non-retryable state. When true, that stored verdict is
+   * stale — it records a prepare refused by the pre-sandbox host
+   * policy — and the failure reads as an ordinary retryable setup
+   * failure instead (stored-refusal fix, 2026-11-14).
+   */
+  sandboxAvailable?: boolean;
 };
 
 export type ProjectStateDescription = {
@@ -55,6 +76,34 @@ export function describeProjectState(
   const rt = project.runtimeStatus;
 
   if (["failed", "error"].includes(ws)) {
+    // A failure carrying HOST_EXECUTION_DISABLED is the fail-closed
+    // policy verdict for repo-backed workspaces, not a setup failure:
+    // honest copy and NO retry — re-POSTing prepare can never succeed
+    // until a verified sandbox exists.
+    if (extractEmbeddedErrorCode(project.workspaceError) === HOST_EXECUTION_DISABLED_CODE) {
+      // Stored-refusal fix (2026-11-14): when the sandbox IS
+      // available for this user, the stored verdict is stale — it
+      // records a prepare refused by the pre-sandbox host policy, and
+      // the only event that clears it is a successful prepare, which
+      // the unavailable badge's no-retry state would never attempt.
+      // Read it as the ordinary retryable setup failure it now is.
+      // The detail stays generic on purpose: workspaceError here is
+      // the serialized refusal payload, not user-facing copy.
+      if (project.sandboxAvailable === true) {
+        return {
+          label: "Setup failed",
+          color: RED,
+          detail: "Workspace setup failed before it finished. Your project is safe.",
+          canRetry: true,
+        };
+      }
+      return {
+        label: HOST_EXECUTION_UNAVAILABLE_SHORT,
+        color: AMBER,
+        detail: HOST_EXECUTION_UNAVAILABLE_MESSAGE,
+        canRetry: false,
+      };
+    }
     return {
       label: "Setup failed",
       color: RED,
@@ -94,7 +143,15 @@ export function describeProjectState(
   }
 
   if (ws === "ready") {
-    return { label: "Ready", color: LIME, detail: null, canRetry: false };
+    // Specific state, not a vague "Ready" (Studio Finish Spec, Larry
+    // 2026-11-14): the workspace files are saved; the preview runtime
+    // has not started yet, and the label must not imply it has.
+    return {
+      label: "Saved",
+      color: LIME,
+      detail: "Workspace files are saved. The preview has not started yet.",
+      canRetry: false,
+    };
   }
 
   return { label: "Setup needed", color: GRAY, detail: null, canRetry: false };

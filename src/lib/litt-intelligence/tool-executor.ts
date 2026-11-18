@@ -22,9 +22,10 @@ import {
 } from "./weather-tool";
 import {
   executeWebSearch,
+  executeWebFetch,
   type WebSearchToolResponse,
+  type WebFetchToolResponse,
 } from "./web-search-tool";
-import { isWebSearchAvailable } from "./web-search-provider";
 import {
   runOneShotScreenshot,
   detectScreenshotIntent,
@@ -34,7 +35,7 @@ import type { ConversationTurn } from "./turn-resolver";
 
 /* ── Types ──────────────────────────────────────────────────────── */
 
-export type ToolId = "weather" | "web_search" | "browser_screenshot" | "none";
+export type ToolId = "weather" | "web_search" | "web_fetch" | "browser_screenshot" | "none";
 
 /* ── Explicit location extraction ──────────────────────────────── */
 
@@ -111,7 +112,7 @@ export interface ToolExecutionResult {
   /** Structured metadata for the response payload */
   metadata: ToolMetadata;
   /** The raw tool response (for callers that need structured data) */
-  raw?: WeatherToolResponse | WebSearchToolResponse;
+  raw?: WeatherToolResponse | WebSearchToolResponse | WebFetchToolResponse;
 }
 
 /* ── Intent detection ───────────────────────────────────────────── */
@@ -189,6 +190,30 @@ export function detectWeatherIntent(message: string): "current" | "hourly" | "da
  * Detects whether a user message expresses web search intent.
  * Returns true if the message should trigger a web search.
  */
+/** Extract the first http(s) URL from a message, or null. */
+export function extractFetchUrl(message: string): string | null {
+  const match = message.match(/https?:\/\/[^\s<>"')\]]+/i);
+  if (!match) return null;
+  // Trim trailing sentence punctuation that isn't part of the URL.
+  return match[0].replace(/[.,;:!?]+$/, "");
+}
+
+const WEB_FETCH_VERBS =
+  /\b(fetch|read|open|visit|summarize|summarise|check|load|get|show|pull|grab|download)\b/i;
+
+/**
+ * Detects an explicit "fetch this URL" intent: the message contains an
+ * http(s) URL and either asks to fetch/read/open/summarize it, or the
+ * message is (essentially) just the URL itself.
+ */
+export function detectWebFetchIntent(message: string): boolean {
+  const url = extractFetchUrl(message);
+  if (!url) return false;
+  const rest = message.replace(url, "").trim();
+  if (rest.length <= 3) return true; // bare URL (plus punctuation)
+  return WEB_FETCH_VERBS.test(rest);
+}
+
 export function detectWebSearchIntent(message: string): boolean {
   const lower = message.toLowerCase();
   // Don't fire for weather queries (those are handled by weather tool)
@@ -235,6 +260,13 @@ export function detectToolIntent(
 ): { tool: ToolId; weatherType?: "current" | "hourly" | "daily" } | null {
   const weatherType = detectWeatherIntent(message);
   if (weatherType) return { tool: "weather", weatherType };
+
+  // Check for explicit URL fetch intent ("read https://…", a bare URL, …).
+  // Runs before web search: a concrete URL is a more specific instruction
+  // than a keyword-matched search.
+  if (detectWebFetchIntent(message)) {
+    return { tool: "web_fetch" };
+  }
 
   // Check for web search intent
   if (detectWebSearchIntent(message)) {
@@ -307,6 +339,10 @@ export async function detectAndExecuteTool(
 
   if (intent.tool === "weather") {
     return executeWeatherTool(userId, message, intent.weatherType ?? "current", options?.headers, options?.history);
+  }
+
+  if (intent.tool === "web_fetch") {
+    return executeWebFetchTool(userId, message, options?.headers);
   }
 
   if (intent.tool === "web_search") {
@@ -416,18 +452,16 @@ async function executeWeatherTool(
 }
 
 /**
- * Executes the web search tool for a user.
- * Only fires when BRAVE_SEARCH_API_KEY is configured.
+ * Executes the web fetch tool for a user: reads the content of the URL
+ * named in the message via the SSRF-safe agent-core fetch.
  */
-async function executeWebSearchTool(
+async function executeWebFetchTool(
   userId: string,
   message: string,
   headers?: Headers,
 ): Promise<ToolExecutionResult> {
-  const query = extractSearchQuery(message);
-
-  // Check if web search is configured
-  if (!isWebSearchAvailable()) {
+  const url = extractFetchUrl(message);
+  if (!url) {
     return {
       executed: false,
       toolId: "none",
@@ -437,15 +471,61 @@ async function executeWebSearchTool(
   }
 
   const ctx = await getUserContext(userId, {
+    capabilities: ["web.fetch"],
+    headers,
+  });
+
+  const result = await executeWebFetch(ctx, url);
+
+  const metadata: ToolMetadata = {
+    tool: "web_fetch",
+    provider: "agent_core_safe_fetch",
+    realtime: true,
+    location: null,
+  };
+
+  if (result.success) {
+    return {
+      executed: true,
+      toolId: "web_fetch",
+      text: result.formatted,
+      metadata,
+      raw: result,
+    };
+  }
+
+  return {
+    executed: true,
+    toolId: "web_fetch",
+    text: `I couldn't fetch that page: ${result.error}`,
+    metadata,
+    raw: result,
+  };
+}
+
+/**
+ * Executes the web search tool for a user.
+ * Uses Brave when BRAVE_SEARCH_API_KEY is configured; otherwise the
+ * keyless agent-core search (see web-search-tool.ts) — search no longer
+ * silently no-ops when the optional key is absent.
+ */
+async function executeWebSearchTool(
+  userId: string,
+  message: string,
+  headers?: Headers,
+): Promise<ToolExecutionResult> {
+  const query = extractSearchQuery(message);
+
+  const ctx = await getUserContext(userId, {
     capabilities: ["web.search"],
     headers,
   });
 
-  const result = await executeWebSearch(ctx, query);
+  const result: WebSearchToolResponse = await executeWebSearch(ctx, query);
 
   const metadata: ToolMetadata = {
     tool: "web_search",
-    provider: "brave_search",
+    provider: result.success ? result.provider : "brave_search",
     realtime: true,
     location: null,
   };

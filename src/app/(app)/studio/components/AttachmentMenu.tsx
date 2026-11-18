@@ -274,10 +274,10 @@ export default function AttachmentMenu({
           width: showLinkInput ? 280 : 240,
           maxHeight: "80vh",
           overflowY: "auto",
-          backgroundColor: "rgba(13, 9, 22, 0.95)",
-          borderColor: "var(--studio-border-strong, rgba(155, 77, 255, 0.2))",
+          backgroundColor: "var(--studio-elevated)",
+          borderColor: "var(--studio-border)",
           backdropFilter: "blur(16px)",
-          boxShadow: "0 20px 50px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05)",
+          boxShadow: "0 20px 50px rgba(14, 60, 26, 0.18)",
         }}
         className="rounded-xl border p-1.5 shadow-2xl"
         data-testid="attachment-menu"
@@ -303,7 +303,7 @@ export default function AttachmentMenu({
                 if (e.key === "Escape") handleClose();
               }}
               placeholder="https://youtube.com/watch?v=..."
-              className="w-full rounded-lg border px-2.5 py-2 text-[12px] outline-none focus:border-purple-400/40"
+              className="w-full rounded-lg border px-2.5 py-2 text-[12px] outline-none focus:border-[#a9c48f]"
               style={{
                 backgroundColor: "var(--studio-card)",
                 borderColor: "var(--studio-border-strong)",
@@ -317,8 +317,8 @@ export default function AttachmentMenu({
                 disabled={!isLinkUrl(linkInput.trim())}
                 className="flex-1 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition disabled:opacity-40"
                 style={{
-                  backgroundColor: "rgba(168,85,247,0.15)",
-                  color: "#c084fc",
+                  backgroundColor: "rgba(23,122,54,0.12)",
+                  color: "#0c5a26",
                 }}
               >
                 Add link
@@ -326,7 +326,7 @@ export default function AttachmentMenu({
               <button
                 type="button"
                 onClick={() => { setShowLinkInput(false); setLinkInput(""); }}
-                className="rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition hover:bg-white/5"
+                className="rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition hover:bg-black/5"
                 style={{ color: "var(--text-muted)" }}
               >
                 Back
@@ -336,7 +336,7 @@ export default function AttachmentMenu({
         ) : (
           <div className="flex flex-col gap-0.5">
             {!canAdd && (
-              <div className="px-2.5 py-1.5 text-[10px] font-bold" style={{ color: "#fca5a5" }}>
+              <div className="px-2.5 py-1.5 text-[10px] font-bold" style={{ color: "#b91c1c" }}>
                 Attachment limit reached ({MAX_ATTACHMENTS})
               </div>
             )}
@@ -346,10 +346,10 @@ export default function AttachmentMenu({
                 type="button"
                 onClick={() => handleAction(item.id)}
                 disabled={!canAdd}
-                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40"
                 style={{ color: "var(--text-secondary)" }}
               >
-                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg" style={{ backgroundColor: "rgba(168,85,247,0.1)", color: "#c084fc" }}>
+                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg" style={{ backgroundColor: "rgba(23,122,54,0.08)", color: "#177a36" }}>
                   {item.icon}
                 </span>
                 <span className="min-w-0 flex-1">

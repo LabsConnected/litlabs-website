@@ -75,7 +75,7 @@ export default function PageShell({
             <div className="min-w-0 flex-1">
               <div className="mb-1.5 flex items-center gap-2">
                 <Link
-                  href="/dashboard"
+                  href="/studio"
                   className="text-[9px] font-black uppercase tracking-[.24em] transition-opacity hover:opacity-80"
                   style={{ color: T.accentColor }}
                 >

@@ -6,6 +6,29 @@ import WorktabBar from "./WorktabBar";
 import type { WorktabBadge } from "../stores/useExecutionStore";
 import type { Worktab } from "../hooks/useServerWorktabs";
 
+// WorktabBar is theme-token driven (useTheme) — provide fixed tokens
+// so this suite stays a pure behavior suite. Theme compliance itself
+// is covered by shell/shell-chrome-theme.test.tsx.
+vi.mock("@/context/ThemeContext", () => ({
+  useTheme: () => ({
+    tokens: {
+      background: "#000000",
+      surface: "#111111",
+      surfaceElevated: "#1a1a1a",
+      border: "#333333",
+      text: "#ffffff",
+      textMuted: "#888888",
+      textInverse: "#000000",
+      primary: "#72f238",
+      secondary: "#9b4dff",
+      success: "#25e08a",
+      warning: "#f5b544",
+      danger: "#f85149",
+      focus: "#72f238",
+    },
+  }),
+}));
+
 const TAB_A: Worktab = {
   id: "tab-a",
   title: "Homepage",

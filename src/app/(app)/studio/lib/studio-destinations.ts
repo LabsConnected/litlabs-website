@@ -87,6 +87,83 @@ export function modeToWorkspaceStage(mode: StudioMode): WorkspaceStage | null {
   }
 }
 
+/**
+ * Phase 2 (Master Build Directive §2) — the five PRESENTED stages.
+ *
+ * This is the shell-facing taxonomy Larry approved: the top navigation
+ * is exactly Plan | Canvas & Design | Code | Preview | Media. It is an
+ * adapter over the legacy taxonomies above (WorkspaceStage / StudioMode
+ * / StudioDestination), NOT a replacement for them — persisted URLs,
+ * localStorage keys, and the destination router keep resolving through
+ * the older mappings, extended here rather than rewritten. The full
+ * taxonomy consolidation is Phase 3 work.
+ *
+ * "canvas-design" is ONE stage with two modes (see CanvasDesignMode):
+ * there is deliberately no separate "design" stage and no floating
+ * Design tool — the legacy `design` StudioMode lands inside this stage
+ * with the Design mode preselected.
+ */
+export type DirectiveStage = "plan" | "canvas-design" | "code" | "preview" | "media";
+
+/** The two modes inside the single Canvas & Design stage. */
+export type CanvasDesignMode = "build" | "design";
+
+export const DIRECTIVE_STAGES: readonly DirectiveStage[] = [
+  "plan",
+  "canvas-design",
+  "code",
+  "preview",
+  "media",
+];
+
+export const DIRECTIVE_STAGE_LABELS: Record<DirectiveStage, string> = {
+  plan: "Plan",
+  "canvas-design": "Canvas & Design",
+  code: "Code",
+  preview: "Preview",
+  media: "Media",
+};
+
+/** Map a Directive stage to the legacy StudioMode internal it drives. */
+export function directiveStageToMode(stage: DirectiveStage): StudioMode {
+  switch (stage) {
+    case "plan":
+      return "work";
+    case "canvas-design":
+      return "files";
+    case "code":
+      return "code";
+    case "preview":
+      return "preview";
+    case "media":
+      return "media";
+  }
+}
+
+/**
+ * Reverse: map a legacy StudioMode back to its Directive stage.
+ * Unlike modeToWorkspaceStage, "design" DOES map here — to the
+ * Canvas & Design stage (its mode is recovered separately via the
+ * canvas/design landing helpers in station-url.ts).
+ */
+export function modeToDirectiveStage(mode: StudioMode): DirectiveStage | null {
+  switch (mode) {
+    case "work":
+      return "plan";
+    case "files":
+    case "design":
+      return "canvas-design";
+    case "code":
+      return "code";
+    case "preview":
+      return "preview";
+    case "media":
+      return "media";
+    default:
+      return null;
+  }
+}
+
 /** UI labels for canonical creator kinds. */
 export const CREATOR_KIND_LABELS: Record<CreatorKind, string> = {
   image: "Image",
@@ -118,7 +195,7 @@ export type MissionMode =
   | "templates";
 
 /** Internal tabs inside the right inspector. */
-export type InspectorTab = "plan" | "changes" | "files" | "preview" | "checks" | "approvals" | "browser";
+export type InspectorTab = "plan" | "changes" | "files" | "preview" | "checks" | "approvals";
 
 /** Internal tabs inside the bottom drawer. */
 export type DrawerTab = "activity" | "terminal" | "media";
@@ -188,6 +265,57 @@ export function resolveCreatorDestination(creator: string | null): DestinationSt
     return { destination: "create", mode: creator as CreateMode };
   }
   return null;
+}
+
+/**
+ * The seven creation types offered as entry hints inside the one
+ * chat (one-chat entry, Larry's directive 2026-11-11;
+ * ART-20261111-031). These are the same types the retired
+ * "What do you want to make?" hub page offered — but the chips now
+ * live in the chat's own entry surface and act in place: selecting
+ * one sets the chat's creation context / opens the matching pane in
+ * the same screen. Never a separate destination page, never a
+ * second prompt.
+ */
+export type StudioEntryCreateType =
+  | "website"
+  | "image"
+  | "video"
+  | "music"
+  | "code"
+  | "design"
+  | "game";
+
+/**
+ * How an entry chip executes, resolved purely so the routing parity
+ * is unit-testable:
+ *  - "website-start": the page-level website start owns blank-project
+ *    creation (mint/reuse + pin) — the chip routes through the same
+ *    ?creator=website URL the hub's Website chip used. There is no
+ *    in-chat substitute for that create path.
+ *  - "creator": activate the Create destination in this mode — the
+ *    exact state the hub's ?creator=<mode> deep link resolves to.
+ *  - "tool": route the legacy tool in place — the exact mapping the
+ *    hub's ?tool=code / ?tool=design deep links resolve through.
+ */
+export type EntryCreateTypePlan =
+  | { kind: "website-start" }
+  | { kind: "creator"; mode: CreateMode }
+  | { kind: "tool"; tool: "code" | "design" };
+
+export function resolveEntryCreateType(type: StudioEntryCreateType): EntryCreateTypePlan {
+  switch (type) {
+    case "website":
+      return { kind: "website-start" };
+    case "image":
+    case "video":
+    case "music":
+    case "game":
+      return { kind: "creator", mode: type };
+    case "code":
+    case "design":
+      return { kind: "tool", tool: type };
+  }
 }
 
 /**
@@ -266,6 +394,15 @@ export function mapLegacyToolToDestination(
     case "plugins":
     case "clibridge":
       return { destination: "more", legacyTool: tool as StudioTool, mode: tool as MoreMode };
+
+    // Memory → Studio/Work. There is no dedicated project-memory browser
+    // inside Studio yet (the real memory UI today lives under Settings →
+    // "What LiTT Knows", and per-agent memory lives in the Agents detail
+    // panel) — this intentionally opens the chat surface, mirroring the
+    // camera/screen/space fallback above, so the user can ask LiTT what
+    // it remembers rather than silently falling through to the default.
+    case "memory":
+      return { destination: "studio", legacyTool: "memory", mode: "work" };
 
     // Unknown / default → Studio with Preview as the primary surface.
     // Chat lives in the LiTT panel (left); Preview gets the main workspace.
@@ -363,4 +500,5 @@ export type StudioTool =
   | "clibridge"
   | "loops"
   | "preview"
-  | "game";
+  | "game"
+  | "memory";

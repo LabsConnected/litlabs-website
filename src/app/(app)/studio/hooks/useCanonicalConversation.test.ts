@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { shouldDeferConversationUrlSync, useConversationStore } from "../stores/useConversationStore";
+import { shouldDeferConversationUrlSync, useConversationStore, type ChatMessage, type ChatMessage as StoreChatMessage } from "../stores/useConversationStore";
+import { useExecutionStore } from "../stores/useExecutionStore";
 import type { Conversation, ConversationMessage } from "@/lib/studio/types";
 import type { SendResult } from "./useCanonicalConversation";
 import { useCanonicalConversation } from "./useCanonicalConversation";
@@ -623,5 +624,613 @@ describe("send() selection context — StudioSelectionPayload", () => {
     expect(sendResult?.accepted).toBe(true);
     expect(capturedBody.message).toBe("make it bigger");
     expect(capturedBody.previewSelection).toBeUndefined();
+  });
+});
+
+// ── Retry honesty — real hook render ────────────────────────────────
+// Regression (production run aa70559b, diagnosis ART-20261111-070 §4):
+// pressing Retry on a failed agent turn silently fell back to the
+// chat-only /regenerate endpoint whenever the client store's copy of the
+// turn failed findRetryResendText's strict preconditions (e.g. a locally
+// constructed shape with parentMessageId: null). The user got a plain
+// chat reply ("Could you share the link…?") and the task never re-ran.
+// Retry must resolve the turn from canonical messages, re-send through
+// the agent pipeline when the server has the linkage, and otherwise say
+// honestly that it couldn't re-run — never downgrade silently.
+describe("regenerate() Retry honesty", () => {
+  const CONVERSATION: Conversation = {
+    id: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-1",
+    title: "Test",
+    activeAgentSlug: "litt",
+    activeAgentMode: "standard",
+    agentInstanceId: null,
+    revision: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    archivedAt: null,
+  };
+
+  const makeMsg = (overrides: Partial<ConversationMessage>): ConversationMessage => ({
+    id: "msg-x",
+    conversationId: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-1",
+    role: "assistant",
+    agentSlug: "litt",
+    agentMode: "standard",
+    agentInstanceId: null,
+    content: "",
+    status: "completed",
+    parentMessageId: null,
+    regenerationOfMessageId: null,
+    clientRequestId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  });
+
+  const makeChatMsg = (overrides: Partial<StoreChatMessage>): StoreChatMessage => ({
+    id: "cm-x",
+    role: "assistant",
+    content: "",
+    agentSlug: "litt",
+    agentMode: "standard",
+    status: "completed",
+    createdAt: new Date().toISOString(),
+    parentMessageId: null,
+    regenerationOfMessageId: null,
+    ...overrides,
+  });
+
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  const PROMPT = "Use the live browser to inspect this project's preview page";
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let postMessageBodies: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let regenerateBodies: any[];
+  let canonicalMessages: ConversationMessage[];
+
+  beforeEach(() => {
+    postMessageBodies = [];
+    regenerateBodies = [];
+    canonicalMessages = [];
+    useConversationStore.getState().resetForProject();
+
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+
+      if (method === "GET" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        return jsonResponse({ messages: canonicalMessages, revision: 2 });
+      }
+      if (method === "POST" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        const body = JSON.parse(String(init?.body));
+        postMessageBodies.push(body);
+        return jsonResponse({
+          userMessage: makeMsg({ id: "u-new", role: "user", content: body.message }),
+          assistantMessage: makeMsg({ id: "a-new", content: "Re-running the task." }),
+          revision: 3,
+        });
+      }
+      if (method === "POST" && /\/api\/studio\/conversations\/[^/]+\/regenerate$/.test(url)) {
+        regenerateBodies.push(JSON.parse(String(init?.body)));
+        return jsonResponse({
+          assistantMessage: makeMsg({ id: "a-regen", content: "Fresh chat answer." }),
+          revision: 3,
+        });
+      }
+      if (url.startsWith("/api/studio/conversations")) {
+        return jsonResponse({ conversations: [] });
+      }
+      return jsonResponse({});
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useConversationStore.getState().resetForProject();
+  });
+
+  async function renderAndSeed(storeMessages: StoreChatMessage[]) {
+    const { result } = renderHook(() => useCanonicalConversation({ serverProjectId: "proj-1" }));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    act(() => {
+      const st = useConversationStore.getState();
+      st.setConversations([CONVERSATION]);
+      st.selectConversation("conv-1");
+      st.setMessages("conv-1", storeMessages);
+    });
+    return result;
+  }
+
+  it("re-sends through the agent pipeline when the store lost the parent linkage but the server kept it", async () => {
+    canonicalMessages = [
+      makeMsg({ id: "u1", role: "user", content: PROMPT, clientRequestId: "req-1" }),
+      makeMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: "u1", clientRequestId: "req-1" }),
+    ];
+    // Hazard shape: the store's copy of the failed turn has no parent and
+    // the parent user message is not in the store's list at all.
+    const result = await renderAndSeed([
+      makeChatMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: null }),
+    ]);
+
+    await act(async () => { await result.current.regenerate("asst-1"); });
+
+    expect(postMessageBodies).toHaveLength(1);
+    expect(postMessageBodies[0].message).toBe(PROMPT);
+    expect(regenerateBodies).toHaveLength(0);
+  });
+
+  it("says honestly that it couldn't re-run when the linkage exists nowhere, and never calls the chat-only regenerate", async () => {
+    canonicalMessages = [
+      makeMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: null }),
+    ];
+    const result = await renderAndSeed([
+      makeChatMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: null }),
+    ]);
+
+    await act(async () => { await result.current.regenerate("asst-1"); });
+
+    expect(regenerateBodies).toHaveLength(0);
+    expect(postMessageBodies).toHaveLength(0);
+    expect(result.current.sendError).toContain("Couldn't re-run that turn");
+  });
+
+  it("re-sends directly when the store already resolves the parent (no downgrade, no regenerate call)", async () => {
+    canonicalMessages = [
+      makeMsg({ id: "u1", role: "user", content: PROMPT }),
+      makeMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: "u1" }),
+    ];
+    const result = await renderAndSeed([
+      makeChatMsg({ id: "u1", role: "user", content: PROMPT, status: "completed" }),
+      makeChatMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: "u1" }),
+    ]);
+
+    await act(async () => { await result.current.regenerate("asst-1"); });
+
+    expect(postMessageBodies).toHaveLength(1);
+    expect(postMessageBodies[0].message).toBe(PROMPT);
+    expect(regenerateBodies).toHaveLength(0);
+  });
+
+  it("keeps plain Regenerate (no id, completed turn) on the chat-only endpoint", async () => {
+    const result = await renderAndSeed([
+      makeChatMsg({ id: "u1", role: "user", content: "Say hi", status: "completed" }),
+      makeChatMsg({ id: "a9", content: "Hi.", status: "completed", parentMessageId: "u1" }),
+    ]);
+
+    await act(async () => { await result.current.regenerate(); });
+
+    expect(regenerateBodies).toHaveLength(1);
+    expect(regenerateBodies[0].assistantMessageId).toBe("a9");
+    expect(postMessageBodies).toHaveLength(0);
+    expect(result.current.sendError).toBeNull();
+  });
+});
+
+// ── Approval-gate derivation from canonical messages (approve-in-chat) ──
+// The pinned chat ApprovalCard is fed by the execution store's
+// pendingApproval — session-local state. Before this lane it was set only
+// by (a) this client's own send flow, or (b) loadMessages rehydration,
+// which requires !isRunning and runs only at load time. A session that
+// OPENS a conversation whose run is already paused in another session
+// (desktop pass 2026-11-11 07:17: the chat announced the gate, no card
+// existed anywhere in that client), or whose store tracks the run as
+// running, never got the card. The derivation below watches the canonical
+// messages — the server-persisted truth every session loads — and arms
+// the gate whenever the viewed conversation's latest assistant message
+// carries one, subject to the store's own anti-resurrection guards.
+describe("approval gate derivation from canonical messages", () => {
+  const CONVERSATION: Conversation = {
+    id: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-1",
+    title: "Test",
+    activeAgentSlug: "litt",
+    activeAgentMode: "standard",
+    agentInstanceId: null,
+    revision: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    archivedAt: null,
+  };
+
+  const gatedMessage = (pausedRunId: string): ChatMessage => ({
+    id: "asst-gated",
+    role: "assistant",
+    content: "I need your approval to run image.stock.",
+    agentSlug: "litt",
+    agentMode: "standard",
+    status: "awaiting_approval",
+    createdAt: new Date().toISOString(),
+    parentMessageId: null,
+    regenerationOfMessageId: null,
+    pendingApproval: {
+      toolId: "image.stock",
+      reason: "Mutation requires approval in ACT mode",
+      pausedRunId,
+      inputs: { projectId: "proj-1", query: "people enjoying food in a food court" },
+    },
+  });
+
+  const jsonResponse = (body: unknown) =>
+    new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  beforeEach(() => {
+    useConversationStore.getState().resetForProject();
+    useExecutionStore.getState().reset();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/studio/conversations")) {
+        return jsonResponse({ conversations: [], messages: [], revision: 1 });
+      }
+      return jsonResponse({});
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useConversationStore.getState().resetForProject();
+    useExecutionStore.getState().reset();
+  });
+
+  async function renderAndSeed() {
+    const utils = renderHook(() => useCanonicalConversation({ serverProjectId: "proj-1" }));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    act(() => {
+      const st = useConversationStore.getState();
+      st.setConversations([CONVERSATION]);
+      st.selectConversation("conv-1");
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    return utils;
+  }
+
+  it("arms the gate in a session that did not start the run — even while it tracks the run as running", async () => {
+    await renderAndSeed();
+    // The observer session's store believes a run is active (it restored
+    // the other session's run) — the old loadMessages-only rehydration
+    // skipped arming in exactly this state.
+    act(() => {
+      useExecutionStore.getState().startRun();
+    });
+    expect(useExecutionStore.getState().isRunning).toBe(true);
+
+    act(() => {
+      useConversationStore.getState().setMessages("conv-1", [gatedMessage("paused-observer")]);
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+
+    const pending = useExecutionStore.getState().pendingApproval;
+    expect(pending?.toolId).toBe("image.stock");
+    expect(pending?.pausedRunId).toBe("paused-observer");
+    expect(pending?.conversationId).toBe("conv-1");
+    expect(pending?.inputs?.query).toBe("people enjoying food in a food court");
+  });
+
+  it("never resurrects a gate this session already decided", async () => {
+    await renderAndSeed();
+    act(() => {
+      useConversationStore.getState().setMessages("conv-1", [gatedMessage("paused-decided")]);
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(useExecutionStore.getState().pendingApproval?.pausedRunId).toBe("paused-decided");
+
+    act(() => {
+      useExecutionStore.getState().resolveApproval("approved");
+    });
+    expect(useExecutionStore.getState().pendingApproval).toBeNull();
+
+    // The persisted message still carries the (now-decided) gate until the
+    // transcript reload lands — a messages refresh must not re-arm it.
+    act(() => {
+      useConversationStore.getState().setMessages("conv-1", [gatedMessage("paused-decided")]);
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(useExecutionStore.getState().pendingApproval).toBeNull();
+  });
+
+  it("does not reset an in-flight decision when messages refresh mid-submit", async () => {
+    await renderAndSeed();
+    act(() => {
+      useConversationStore.getState().setMessages("conv-1", [gatedMessage("paused-inflight")]);
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+
+    act(() => {
+      useExecutionStore.getState().beginApprovalSubmit();
+      useExecutionStore.getState().approvalAccepted();
+    });
+    expect(useExecutionStore.getState().approvalPhase).toBe("executing");
+
+    act(() => {
+      useConversationStore.getState().setMessages("conv-1", [gatedMessage("paused-inflight")]);
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+
+    expect(useExecutionStore.getState().approvalPhase).toBe("executing");
+    expect(useExecutionStore.getState().pendingApproval?.pausedRunId).toBe("paused-inflight");
+  });
+});
+
+// ── Project guard — stop-and-ask (B5) ────────────────────────────────
+// The server stops a send that would run against (or silently rebind
+// to) an unconfirmed project with 409 PROJECT_MISMATCH /
+// PROJECT_CONTEXT_CONFIRM naming BOTH projects. The hook must surface
+// the blocking prompt (not a generic error), and only an explicit
+// user decision resubmits — with the decision flag and the SAME
+// clientRequestId, so the server continues the persisted message.
+describe("send() project guard — stop-and-ask prompt + confirmed resubmit", () => {
+  const CONVERSATION: Conversation = {
+    id: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-old",
+    title: "Test",
+    activeAgentSlug: "litt",
+    activeAgentMode: "standard",
+    agentInstanceId: null,
+    revision: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    archivedAt: null,
+  };
+
+  const makeMsg = (overrides: Partial<ConversationMessage>): ConversationMessage => ({
+    id: "msg-x",
+    conversationId: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-old",
+    role: "assistant",
+    agentSlug: "litt",
+    agentMode: "standard",
+    agentInstanceId: null,
+    content: "",
+    status: "completed",
+    parentMessageId: null,
+    regenerationOfMessageId: null,
+    clientRequestId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  });
+
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  let postBodies: Array<Record<string, unknown>> = [];
+
+  beforeEach(() => {
+    postBodies = [];
+    useConversationStore.getState().resetForProject();
+
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+
+      if (method === "POST" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        postBodies.push(JSON.parse(String(init?.body ?? "{}")));
+        if (postBodies.length === 1) {
+          // First send: the guard stops it — the chat belongs to
+          // proj-old, the user is viewing proj-new.
+          return jsonResponse({
+            error: "Project mismatch",
+            code: "PROJECT_MISMATCH",
+            detail: "You're viewing \"New Project\", but this chat belongs to \"Old Project\".",
+            conversationProject: { id: "proj-old", name: "Old Project" },
+            viewedProject: { id: "proj-new", name: "New Project" },
+          }, 409);
+        }
+        // Confirmed resubmit: the run completes (JSON completion shape).
+        return jsonResponse({
+          userMessage: makeMsg({ id: "user-1", role: "user", content: "Build me a website" }),
+          assistantMessage: makeMsg({ id: "asst-1", role: "assistant", content: "Done." }),
+          revision: 3,
+        });
+      }
+      // The refusal reloads canonical messages — the user message WAS
+      // persisted before the gate stopped the turn.
+      if (method === "GET" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        return jsonResponse({
+          messages: [makeMsg({ id: "user-1", role: "user", content: "Build me a website" })],
+          revision: 2,
+        });
+      }
+      if (url.startsWith("/api/studio/conversations")) {
+        return jsonResponse({ conversations: [] });
+      }
+      return jsonResponse({});
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useConversationStore.getState().resetForProject();
+  });
+
+  async function renderAndSend() {
+    const { result } = renderHook(() => useCanonicalConversation({ serverProjectId: "proj-new" }));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    act(() => {
+      const st = useConversationStore.getState();
+      st.setConversations([CONVERSATION]);
+      st.selectConversation("conv-1");
+    });
+    let sendResult: SendResult | undefined;
+    await act(async () => {
+      sendResult = await result.current.send("Build me a website");
+    });
+    return { result, sendResult };
+  }
+
+  it("surfaces the blocking prompt naming both projects instead of a generic error", async () => {
+    const { result, sendResult } = await renderAndSend();
+
+    expect(sendResult?.accepted).toBe(false);
+    expect(sendResult?.errorKind).toBe("conflict");
+    expect(postBodies).toHaveLength(1);
+    expect(postBodies[0].projectContextDecision).toBeUndefined();
+    // The prompt carries BOTH projects; the plain error banner stays empty.
+    expect(result.current.projectDecisionPrompt).toMatchObject({
+      code: "PROJECT_MISMATCH",
+      conversationProject: { id: "proj-old", name: "Old Project" },
+      viewedProject: { id: "proj-new", name: "New Project" },
+    });
+    expect(result.current.sendError).toBeNull();
+  });
+
+  it("Stay cancels the send — no resubmit is fired", async () => {
+    const { result } = await renderAndSend();
+    expect(result.current.projectDecisionPrompt).not.toBeNull();
+
+    act(() => {
+      result.current.dismissProjectDecision();
+    });
+
+    expect(result.current.projectDecisionPrompt).toBeNull();
+    expect(postBodies).toHaveLength(1);
+  });
+
+  it("Switch resubmits with the decision and the SAME clientRequestId", async () => {
+    const { result } = await renderAndSend();
+    const firstRequestId = postBodies[0].clientRequestId;
+    expect(typeof firstRequestId).toBe("string");
+
+    await act(async () => {
+      await result.current.confirmProjectDecision("switch");
+    });
+
+    expect(result.current.projectDecisionPrompt).toBeNull();
+    expect(postBodies).toHaveLength(2);
+    expect(postBodies[1].projectContextDecision).toBe("switch");
+    expect(postBodies[1].clientRequestId).toBe(firstRequestId);
+    // The resubmit uses the revision refreshed by the refusal reload.
+    expect(postBodies[1].expectedRevision).toBe(2);
+  });
+});
+
+// ── generate_image falls through to the agent run (board-only rebuild) ──
+// Larry's decision (2026-11-14): "Generate with LiTT" generates INSIDE the
+// Studio chat. The deterministic intent short-circuit used to intercept
+// generate_image, post a canned reply, and bounce the user to the Image
+// Studio via onOpenImageStudio. Now the message must reach the real agent
+// run (whose image.generate tool renders inline + persists to the Asset
+// Lake for the Media panel) — onOpenImageStudio must never fire.
+describe("send() generate_image — no Image Studio bounce", () => {
+  const CONVERSATION: Conversation = {
+    id: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-1",
+    title: "Test",
+    activeAgentSlug: "litt",
+    activeAgentMode: "standard",
+    agentInstanceId: null,
+    revision: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    archivedAt: null,
+  };
+
+  const makeMsg = (overrides: Partial<ConversationMessage>): ConversationMessage => ({
+    id: "msg-x",
+    conversationId: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-1",
+    role: "assistant",
+    agentSlug: "litt",
+    agentMode: "standard",
+    agentInstanceId: null,
+    content: "",
+    status: "completed",
+    parentMessageId: null,
+    regenerationOfMessageId: null,
+    clientRequestId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  });
+
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  const onOpenImageStudio = vi.fn();
+  let capturedClientRequestId: string | null = null;
+
+  beforeEach(() => {
+    onOpenImageStudio.mockClear();
+    capturedClientRequestId = null;
+    useConversationStore.getState().resetForProject();
+
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      // The agent-run POST is accepted, then the transport dies — the
+      // reconciled snapshot proves the turn ran server-side (the agent
+      // path), not the canned intent path.
+      if (method === "POST" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        capturedClientRequestId = (JSON.parse(String(init?.body)) as { clientRequestId: string }).clientRequestId;
+        throw new TypeError("fetch failed");
+      }
+      if (method === "GET" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        return jsonResponse({
+          messages: capturedClientRequestId
+            ? [
+                makeMsg({ id: "user-1", role: "user", clientRequestId: capturedClientRequestId, content: "generate an image of a sunset" }),
+                makeMsg({ id: "asst-1", role: "assistant", parentMessageId: "user-1", status: "completed", content: "Here is your sunset — saved to the project media." }),
+              ]
+            : [],
+          revision: 2,
+        });
+      }
+      if (url.startsWith("/api/studio/conversations")) {
+        return jsonResponse({ conversations: [] });
+      }
+      return jsonResponse({});
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useConversationStore.getState().resetForProject();
+  });
+
+  it("routes an image request to the agent run, never to the Image Studio", async () => {
+    const { result } = renderHook(() =>
+      useCanonicalConversation({ serverProjectId: "proj-1", onOpenImageStudio }),
+    );
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    act(() => {
+      const st = useConversationStore.getState();
+      st.setConversations([CONVERSATION]);
+      st.selectConversation("conv-1");
+    });
+
+    let sendResult: SendResult | undefined;
+    await act(async () => {
+      sendResult = await result.current.send("generate an image of a sunset");
+    });
+
+    expect(onOpenImageStudio).not.toHaveBeenCalled();
+    expect(sendResult?.accepted).toBe(true);
+    // The reply is the agent run's reconciled answer — NOT the canned
+    // intent message ("Opening the Image Studio…").
+    expect(sendResult?.reply).toBe("Here is your sunset — saved to the project media.");
+    expect(sendResult?.suppressCompletion).toBeFalsy();
   });
 });

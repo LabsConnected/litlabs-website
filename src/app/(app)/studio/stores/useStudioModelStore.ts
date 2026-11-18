@@ -17,7 +17,7 @@ export type SelectedModel = {
   bitsLabel?: string;
 };
 
-export type ProviderHealth = "available" | "degraded" | "unavailable" | "locked";
+export type ProviderHealth = "available" | "degraded" | "unavailable" | "locked" | "unknown";
 
 export const MODELS: SelectedModel[] = CHAT_MODELS.map((m) => ({
   id: m.id,

@@ -40,6 +40,7 @@ import {
 } from "@/lib/billing/canonical-pricing";
 import {
   createGenerationJob,
+  getGenerationJob,
   getGenerationJobByRequestId,
   updateGenerationJobStatus,
   updateGenerationJobMetadata,
@@ -842,17 +843,40 @@ async function handleRecraftImage(prompt: string): Promise<MediaResult> {
 
 
 /**
- * Automatic routing starts with OpenAI GPT Image when configured. Pollinations
- * is never included in automatic routing.
+ * Automatic routing starts with OpenAI GPT Image when configured, then the
+ * other key-configured free/cheap providers. Pollinations is the TERMINAL
+ * entry: it needs no key, so it is always "configured", and it is only
+ * reached after every configured provider ahead of it has failed. It must
+ * stay last — it is the last resort that makes the auto-free chain
+ * always servable, which is exactly what capabilities.ts advertises
+ * (image_generation is offered because a no-key free provider exists).
+ *
+ * Production proof 2026-11-15 (build 4bd24248): without a terminal
+ * no-key entry, the chain in production was exactly ["openai"] — the
+ * Cloudflare and Alibaba keys are not set there — and the production
+ * OPENAI_API_KEY was dead ("Incorrect API key provided"). A present-
+ * but-dead key passes isProviderConfigured, so the sole chain member
+ * failed and the approved image.generate died with the raw OpenAI
+ * error even though a wired no-key provider existed. A dead key must
+ * never be the terminal answer while any provider can still serve.
  */
-const AUTO_FREE_ORDER: MediaProviderId[] = ["openai", "cloudflare", "alibaba"];
+const AUTO_FREE_ORDER: MediaProviderId[] = [
+  "openai",
+  "cloudflare",
+  "alibaba",
+  "pollinations",
+];
 
 /**
  * Auto-quality provider order: OpenAI → FAL → Recraft → Gemini
  * FAL is the most reliable quality provider (fast, good output).
  * Recraft is preferred for vector/logo prompts.
- * Gemini is tried after the configured primary providers. There is no silent
- * Pollinations fallback when all configured providers fail.
+ * Gemini is tried after the configured primary providers. Auto-quality
+ * itself never substitutes Pollinations — quality mode fails honestly
+ * when its configured providers fail. (The manual-pin fallthrough in
+ * generateImage is a different path: a pinned provider that cannot
+ * serve at all — dead key / quota — ends at Pollinations as the final
+ * resort rather than failing the approved operation outright.)
  */
 const AUTO_QUALITY_ORDER: MediaProviderId[] = ["openai", "fal", "recraft", "gemini"];
 
@@ -865,10 +889,59 @@ function isProviderConfigured(providerId: MediaProviderId): boolean {
     case "together": return !!TOGETHER_API_KEY;
     case "openai": return !!OPENAI_API_KEY;
     case "recraft": return !!RECRAFT_API_KEY;
-    case "pollinations": return true; // explicit experimental manual use only
+    case "pollinations": return true; // no key — always available as the terminal auto-chain fallback
     case "huggingface": return !!HF_API_KEY;
     default: return false;
   }
+}
+
+/**
+ * True when a provider failure means the provider is not actually
+ * configured: its key is missing, or the provider rejected the key
+ * (401/403, invalid/incorrect API key). isProviderConfigured() only
+ * proves a key STRING exists — it cannot prove the key is alive.
+ * Provider handlers surface these as message text ("OpenAI error:
+ * {...Incorrect API key provided...}", "Gemini is not configured —
+ * set GEMINI_API_KEY", "FAL.ai key missing — set FAL_KEY"), so the
+ * classification matches their stable phrasings.
+ */
+function isProviderConfigError(err: Error): boolean {
+  const msg = err.message.toLowerCase();
+  return (
+    msg.includes("not configured") ||
+    msg.includes("key missing") ||
+    msg.includes("api key is missing") ||
+    msg.includes("invalid api key") ||
+    msg.includes("invalid_api_key") ||
+    msg.includes("incorrect api key") ||
+    msg.includes("api key not valid") ||
+    msg.includes("unauthorized") ||
+    msg.includes("authentication") ||
+    /\b401\b/.test(msg) ||
+    /\b403\b/.test(msg)
+  );
+}
+
+/**
+ * True when a provider failure is a quota / rate-limit condition:
+ * the provider is configured and reachable, but it will not serve
+ * this request right now (HTTP 429, quota exhausted, rate limit).
+ * Handlers surface these as message text ("OpenAI error: {..."
+ * code":"insufficient_quota"...}", "Gemini quota exceeded:
+ * RESOURCE_EXHAUSTED (429)", "Pollinations upstream rate limit
+ * (429)"), so the classification matches their stable phrasings.
+ * Quota failures are fallthrough-eligible exactly like config
+ * failures: this provider cannot serve, but the chain may.
+ */
+function isProviderQuotaError(err: Error): boolean {
+  const msg = err.message.toLowerCase();
+  return (
+    msg.includes("quota") ||
+    msg.includes("rate limit") ||
+    msg.includes("rate_limit") ||
+    msg.includes("too many requests") ||
+    /\b429\b/.test(msg)
+  );
 }
 
 function isVectorRequest(prompt: string): boolean {
@@ -1082,6 +1155,12 @@ export interface ImageServiceDeps {
     jobId: string,
     metadataUpdates: Record<string, unknown>,
   ) => Promise<void>;
+  /**
+   * Round 14: read a job row back by id — the completion read-back
+   * in §8 verifies the completion writes actually landed before the
+   * service reports a persisted asset.
+   */
+  getJob: (jobId: string) => Promise<GenerationJob | null>;
   getBalances: (clerkId: string) => Promise<{ total: number }>;
   debit: (
     clerkId: string,
@@ -1108,10 +1187,25 @@ const defaultDeps: ImageServiceDeps = {
   getJobByRequestId: (internalUserId, requestId) =>
     getGenerationJobByRequestId(internalUserId, requestId),
   createJob: (input) => createGenerationJob(input),
-  setJobStatus: (jobId, status, updates) =>
-    updateGenerationJobStatus(jobId, status, updates),
-  updateJobMetadata: (jobId, metadataUpdates) =>
-    updateGenerationJobMetadata(jobId, metadataUpdates),
+  // Round 14: the jobs layer now reports write failures. A failed
+  // "completed" flip is the one failure that must not pass silently
+  // (it is exactly what made a saved image invisible to Media), so
+  // it throws into §8's persistence-failure handling. Non-terminal
+  // marks stay best-effort, as before — a lost "processing" mark is
+  // recoverable noise, and failJob already swallows its own errors.
+  setJobStatus: async (jobId, status, updates) => {
+    const ok = await updateGenerationJobStatus(jobId, status, updates);
+    if (!ok && status === "completed") {
+      throw new Error(`generation job completion write failed for jobId=${jobId}`);
+    }
+  },
+  updateJobMetadata: async (jobId, metadataUpdates) => {
+    const ok = await updateGenerationJobMetadata(jobId, metadataUpdates);
+    if (!ok) {
+      throw new Error(`generation job metadata write failed for jobId=${jobId}`);
+    }
+  },
+  getJob: (jobId) => getGenerationJob(jobId),
   getBalances: (clerkId) => getCreditBalances(clerkId),
   debit: async (clerkId, amount, reason, idempotencyKey) => {
     const charge = await adjustWalletBalance({
@@ -1379,6 +1473,14 @@ export async function generateImage(
   let result: MediaResult | null = null;
   let usedProviderId: MediaProviderId = providerId;
   let lastError: Error | null = null;
+  // Every failed dispatch, in order — used to build a truthful
+  // all-providers-failed error that names what was actually tried.
+  const attempts: Array<{ providerId: MediaProviderId; error: Error }> = [];
+  const recordFailure = (candidateId: MediaProviderId, err: unknown): Error => {
+    const error = err instanceof Error ? err : new Error("Provider error");
+    attempts.push({ providerId: candidateId, error });
+    return error;
+  };
 
   if (generationMode === "auto-free" || generationMode === "auto-quality") {
     const order = getAutoOrder(generationMode, prompt);
@@ -1389,28 +1491,89 @@ export async function generateImage(
         usedProviderId = candidateId;
         break;
       } catch (err) {
-        lastError = err instanceof Error ? err : new Error("Provider error");
+        lastError = recordFailure(candidateId, err);
       }
     }
   } else {
     try {
       result = await deps.dispatch(providerId, input, prompt);
     } catch (err) {
-      lastError = err instanceof Error ? err : new Error("Provider error");
+      lastError = recordFailure(providerId, err);
+      // A pinned provider whose credential is absent or REJECTED (dead
+      // key) is not actually configured — the pin cannot be served by
+      // it at all. Fall through the configured auto-quality chain so a
+      // dead key never becomes the terminal answer while a genuinely
+      // configured provider exists (production 2026-11-11: the pane's
+      // default pin is OpenAI, whose key was dead, while Gemini was
+      // healthy). A pinned provider that is OUT OF QUOTA (429) gets
+      // the same treatment (production battery 2026-11-11: OpenAI
+      // quota-exceeded was terminal even though the chain was
+      // healthy) — it cannot serve this request, but the chain may.
+      // Other failures keep the pin's semantics: they are the pinned
+      // provider's real answer and stay terminal.
+      if (isProviderConfigError(lastError) || isProviderQuotaError(lastError)) {
+        // The configured auto-quality chain first, then Pollinations as
+        // the terminal resort: it needs no key, so a deployment whose
+        // configured providers are ALL dead-keyed or unconfigured still
+        // serves the approved operation instead of failing it (the
+        // 2026-11-15 production proof: sole configured provider OpenAI
+        // had a dead key and no other chain member was configured).
+        const fallthrough = [
+          ...getAutoOrder("auto-quality", prompt),
+          "pollinations" as MediaProviderId,
+        ].filter(
+          (candidateId, index, all) =>
+            candidateId !== providerId && all.indexOf(candidateId) === index,
+        );
+        for (const candidateId of fallthrough) {
+          if (!getProvider(candidateId)) continue;
+          try {
+            result = await deps.dispatch(candidateId, input, prompt);
+            usedProviderId = candidateId;
+            break;
+          } catch (fallbackErr) {
+            lastError = recordFailure(candidateId, fallbackErr);
+          }
+        }
+      }
     }
   }
 
   if (!result) {
     const rawMsg = lastError?.message || "Generation failed";
+    const duration = Date.now() - startTime;
+    console.info(
+      `[image-service] FAIL provider=${usedProviderId} requestId=${requestId} duration=${duration}ms error=${rawMsg.replace(/\s+/g, " ").slice(0, 200)}`,
+    );
+    if (attempts.length > 1) {
+      // The chain was walked and every provider failed. The error
+      // must be truthful about that: name each provider tried and
+      // its failure, instead of blaming only the last one (the
+      // pre-fix behavior synthesized "<first provider> quota
+      // exceeded" even after fallthrough attempts). The code is
+      // QUOTA_EXCEEDED only when quota is the whole story.
+      const allQuota = attempts.every((a) => isProviderQuotaError(a.error));
+      const triedList = attempts.map((a) => a.providerId).join(", ");
+      const detail = attempts
+        .map(
+          (a) =>
+            `${a.providerId}: ${a.error.message.replace(/\s+/g, " ").slice(0, 160)}`,
+        )
+        .join("; ");
+      const errorMsg = `All configured image providers failed. Tried: ${triedList}. ${detail}`;
+      await failJob(errorMsg);
+      return fail(
+        allQuota ? "QUOTA_EXCEEDED" : "PROVIDER_ERROR",
+        errorMsg,
+        !allQuota,
+        usedProviderId,
+      );
+    }
     const isQuota = rawMsg.includes("429") || rawMsg.toLowerCase().includes("quota");
     const errorMsg = isQuota
       ? `${usedProviderId} quota exceeded. Try again later or choose another configured provider.`
       : rawMsg;
     await failJob(errorMsg);
-    const duration = Date.now() - startTime;
-    console.info(
-      `[image-service] FAIL provider=${usedProviderId} requestId=${requestId} duration=${duration}ms error=${rawMsg.replace(/\s+/g, " ").slice(0, 200)}`,
-    );
     return fail(
       isQuota ? "QUOTA_EXCEEDED" : "PROVIDER_ERROR",
       errorMsg,
@@ -1511,6 +1674,25 @@ export async function generateImage(
         assetId: `generation_job:${job.id}`,
         actualProviderCostCents: usedCostResult.providerCostCents,
       });
+      // Round 14 — completion read-back. The jobs layer historically
+      // swallowed Supabase errors, so the two writes above could fail
+      // while this service reported clean success — and the row,
+      // still "processing" or missing its durableUrl, stayed
+      // invisible to the project-scope Media repository. Never claim
+      // a persisted asset on writes alone: the row must READ BACK
+      // completed with its durable URL, which is precisely the state
+      // the repository surfaces.
+      const verified = await deps.getJob(job.id).catch(() => null);
+      if (
+        !verified ||
+        verified.status !== "completed" ||
+        typeof verified.metadata?.durableUrl !== "string" ||
+        !verified.metadata.durableUrl
+      ) {
+        throw new Error(
+          `generation job completion could not be verified on read-back for jobId=${job.id}`,
+        );
+      }
       generationJobId = job.id;
     } catch (persistErr) {
       console.error(

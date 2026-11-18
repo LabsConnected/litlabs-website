@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { UserMessageAvatar } from "@/components/chat/MessageAvatar";
 import { parseJarvisActions } from "@/lib/litt-context";
@@ -33,6 +33,27 @@ import {
   conversationToMarkdown,
   markdownToPlainText,
 } from "@/lib/studio/message-copy";
+
+/**
+ * Kimi wiring item 3 — typewriter bookkeeping, module-level on purpose
+ * (the pattern from Kimmy's AssistantPanel): a message that finished
+ * typing once NEVER re-types, even when the transcript unmounts and
+ * remounts (panel close/reopen, layout switch). Progress is kept per
+ * message id so a mid-stream remount resumes instead of restarting.
+ * Presentation only — the underlying message content is never altered,
+ * and any control that needs the full text (copy, speak, downloads)
+ * reads the message itself, not the typed prefix.
+ */
+const typedMessageIds = new Set<string>();
+const typedProgressById = new Map<string, number>();
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
 
 /**
  * Derive the work-log line from execution evidence only.
@@ -198,7 +219,7 @@ function StreamingProgress() {
     .map((e) => ({ id: e.id, summary: e.summary, dotColor: eventDotColor(e) }));
 
   return (
-    <div data-testid="studio-live-progress" className="mb-2 border-b pb-2" style={{ borderColor: "rgba(155,77,255,0.14)" }} aria-live="polite">
+    <div data-testid="studio-live-progress" className="mb-2 border-b pb-2" style={{ borderColor: "color-mix(in srgb, var(--color-accent) 18%, transparent)" }} aria-live="polite">
       <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--text-main)" }}>
         <span className="studio-anim-blink inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "var(--litt-primary)" }} aria-hidden />
         {headline}
@@ -530,22 +551,52 @@ function CodeBlockWithCopy({ code, children }: { code: string; children: React.R
         onClick={handleCopy}
         className="absolute right-1.5 top-1.5 z-10 rounded border px-1.5 py-0.5 text-[8px] font-bold opacity-0 transition group-hover:opacity-100 focus:opacity-100"
         style={{
-          borderColor: "rgba(255,255,255,0.15)",
-          backgroundColor: "rgba(0,0,0,0.5)",
-          color: copied ? "#a3e635" : "rgba(255,255,255,0.6)",
+          borderColor: "var(--studio-border)",
+          backgroundColor: "var(--studio-surface)",
+          color: copied ? "var(--color-accent)" : "var(--text-muted)",
         }}
         aria-label={copied ? "Code copied" : "Copy code"}
         title={copied ? "Copied!" : "Copy code"}
       >
         {copied ? "Copied" : "Copy"}
       </button>
-      <pre className="overflow-x-auto rounded-lg bg-black/40 p-2 text-[11px]">{children}</pre>
+      <pre
+        className="overflow-x-auto rounded-lg border p-2 text-[11px]"
+        style={{ backgroundColor: "var(--studio-bg)", borderColor: "var(--studio-border)" }}
+      >
+        {children}
+      </pre>
     </div>
   );
 }
 
+/**
+ * Render order for the transcript: chronological by createdAt, stable
+ * for ties. The store's array order is insertion order, and persisted
+ * replacement swaps a message's id/createdAt IN PLACE (see
+ * useCanonicalConversation's updateMessage calls) without repositioning
+ * it — so array order can invert causality, e.g. a run's failure card
+ * rendering before an earlier progress message from the same run.
+ * Messages without a usable timestamp keep their relative position.
+ */
+export function orderMessagesChronologically(
+  messages: ChatMessage[],
+): ChatMessage[] {
+  return messages
+    .map((message, index) => ({ message, index }))
+    .sort((a, b) => {
+      const ta = a.message.createdAt ?? NaN;
+      const tb = b.message.createdAt ?? NaN;
+      const va = Number.isNaN(ta) ? null : ta;
+      const vb = Number.isNaN(tb) ? null : tb;
+      if (va === null || vb === null || va === vb) return a.index - b.index;
+      return va - vb;
+    })
+    .map(({ message }) => message);
+}
+
 export default function StudioTranscript({
-  messages,
+  messages: rawMessages,
   busy,
   activeAgentId,
   onRouteToolAction,
@@ -554,6 +605,7 @@ export default function StudioTranscript({
   onDismissCompletion,
   onUndoCompletion,
   onContinueCompletion,
+  onOpenPreview,
   overflowDownloads = false,
   ptyUsable = false,
 }: {
@@ -566,6 +618,10 @@ export default function StudioTranscript({
   onDismissCompletion?: () => void;
   onUndoCompletion?: () => void;
   onContinueCompletion?: () => void;
+  /** Completion card "Open Preview" (Kimi wiring item 3): summons the
+   *  board's Preview panel. Absent outside the board shell — the card
+   *  then renders without the button rather than a dead control. */
+  onOpenPreview?: () => void;
   /**
    * When true, the Download .txt / .md pills collapse into a single "⋯"
    * overflow button that opens a small popover. Used on mobile to save
@@ -579,6 +635,10 @@ export default function StudioTranscript({
    */
   ptyUsable?: boolean;
 }) {
+  const messages = useMemo(
+    () => orderMessagesChronologically(rawMessages),
+    [rawMessages],
+  );
   const { speakText } = useVoiceSession();
   // ptyUsable comes from the canonical runtime truth via props (the parent
   // passes runtime.terminal.usable). The "Run in terminal" button genuinely
@@ -591,11 +651,94 @@ export default function StudioTranscript({
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
   const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  // Tap-revealed timestamp (Kimi wiring item 3): hover reveals via the
+  // group class; touch has no hover, so a tap pins one message's time.
+  const [revealedTimestampId, setRevealedTimestampId] = useState<string | null>(null);
 
-  useEffect(() => {
+  // ── Scroll-pin (Kimi wiring item 3) ────────────────────────────────
+  // Auto-scroll follows the stream ONLY while the user is at (or near)
+  // the bottom. Scrolling up to read unpins; new arrivals then raise
+  // the "New messages" pill instead of yanking the view down.
+  const scrollPinnedRef = useRef(true);
+  const [hasUnseenMessages, setHasUnseenMessages] = useState(false);
+  const messageCountRef = useRef(messages.length);
+
+  const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    scrollPinnedRef.current = true;
+    setHasUnseenMessages(false);
+  }, []);
+
+  useEffect(() => {
+    const grew = messages.length !== messageCountRef.current;
+    messageCountRef.current = messages.length;
+    if (scrollPinnedRef.current) {
+      const el = scrollRef.current;
+      if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    } else if (grew) {
+      setHasUnseenMessages(true);
+    }
   }, [messages, busy]);
+
+  const handleTranscriptScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const pinned = distance <= 80;
+    scrollPinnedRef.current = pinned;
+    if (pinned) setHasUnseenMessages(false);
+  }, []);
+
+  // ── Typewriter (Kimi wiring item 3) ────────────────────────────────
+  // Smooths the REAL stream's chunk arrivals for the latest streaming
+  // assistant message: the rendered prefix chases the message's actual
+  // content at ~16ms ticks with a catch-up step, so chunks read as a
+  // flow instead of jumps. Only the latest streaming message types;
+  // every other message renders its full text. When the stream ends,
+  // the id is retired into typedMessageIds and never types again.
+  const streamingMessage = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const candidate = messages[i];
+      if (candidate.role !== "user" && candidate.status === "streaming") return candidate;
+    }
+    return null;
+  }, [messages]);
+  const streamingId = streamingMessage?.id ?? null;
+  const streamingContent = streamingMessage?.content ?? "";
+  const [typedLength, setTypedLength] = useState(0);
+
+  useEffect(() => {
+    if (!streamingId || !streamingMessage) return;
+    if (typedMessageIds.has(streamingId) || prefersReducedMotion()) {
+      typedMessageIds.add(streamingId);
+      setTypedLength(streamingContent.length);
+      return;
+    }
+    setTypedLength(typedProgressById.get(streamingId) ?? 0);
+    const timer = window.setInterval(() => {
+      setTypedLength((current) => {
+        const full = streamingContent.length;
+        if (current >= full) return current;
+        const next = Math.min(full, current + Math.max(3, Math.ceil((full - current) / 5)));
+        typedProgressById.set(streamingId, next);
+        if (next >= full) typedMessageIds.add(streamingId);
+        return next;
+      });
+    }, 16);
+    return () => window.clearInterval(timer);
+    // streamingContent is a dep so the chase target tracks new chunks.
+  }, [streamingId, streamingContent, streamingMessage]);
+
+  // A message that stops streaming is done typing forever.
+  useEffect(() => {
+    for (const message of messages) {
+      if (message.id && message.status !== "streaming" && typedProgressById.has(message.id)) {
+        typedMessageIds.add(message.id);
+        typedProgressById.delete(message.id);
+      }
+    }
+  }, [messages]);
 
   const handleCopyText = useCallback(async (message: ChatMessage) => {
     const ok = await copyToClipboard(markdownToPlainText(message.content));
@@ -667,6 +810,7 @@ export default function StudioTranscript({
   return (
     <div
       ref={scrollRef}
+      onScroll={handleTranscriptScroll}
       data-testid="studio-transcript"
       className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-4"
       style={{ color: "var(--text-main)" }}
@@ -684,6 +828,19 @@ export default function StudioTranscript({
           const showThinkingPlaceholder = !isUser && isStreaming && !hasContent;
           const command = !isUser ? parseJarvisActions(message.content).find((a) => a.command)?.command : undefined;
           const key = message.id || `msg_${index}`;
+          // Typewriter display text (Kimi wiring item 3): only the
+          // latest streaming message renders its typed prefix; every
+          // other message — and every action taken on this one — uses
+          // the full real content.
+          const isTypingTarget =
+            !isUser &&
+            isStreaming &&
+            message.id != null &&
+            message.id === streamingId &&
+            !typedMessageIds.has(message.id);
+          const displayContent = isTypingTarget
+            ? (message.content ?? "").slice(0, typedLength)
+            : message.content;
           const isCopied = copiedId === message.id;
           const isPinned = pinnedIds.has(message.id ?? "");
           const workLog = deriveWorkLog(message, isFailed);
@@ -719,7 +876,7 @@ export default function StudioTranscript({
               >
                 <div
                   className={`mb-1 flex items-center gap-2 px-1 text-[9px] font-black uppercase tracking-[.14em] ${isUser ? "flex-row-reverse" : ""}`}
-                  style={{ color: isUser ? "#fb923c" : agentColor }}
+                  style={{ color: isUser ? "var(--color-accent)" : agentColor }}
                 >
                   <span>{isUser ? "You" : agentMeta.displayName}</span>
                   {!isUser && (
@@ -738,7 +895,7 @@ export default function StudioTranscript({
                       onClick={() => onRouteToolAction?.("terminal", command)}
                       disabled={!ptyUsable}
                       className="rounded-lg border px-2.5 py-1.5 text-[9px] font-bold transition disabled:cursor-not-allowed disabled:opacity-35"
-                      style={{ borderColor: "rgba(114,242,56,0.2)", backgroundColor: "rgba(114,242,56,0.05)", color: "#a3e635" }}
+                      style={{ borderColor: "color-mix(in srgb, var(--color-accent) 30%, transparent)", backgroundColor: "color-mix(in srgb, var(--color-accent) 7%, transparent)", color: "var(--color-accent)" }}
                       aria-label={`Run ${command} in terminal`}
                       title={`Run ${command} in terminal`}
                     >
@@ -759,24 +916,31 @@ export default function StudioTranscript({
                   style={{
                     overflowWrap: "anywhere",
                     wordBreak: "break-word",
+                    // Chat beauty (2026-11-11): bubbles wear the Studio
+                    // shell's Signature tokens (white worked into green)
+                    // like every other shell surface. They used to be
+                    // hard-coded dark-purple glass (rgba(20,15,31,*))
+                    // with prose-invert markdown, whatever theme was
+                    // applied.
                     borderColor: isFailed
                       ? "rgba(239,68,68,0.3)"
-                      : isUser ? "rgba(155,77,255,0.2)" : "rgba(155,77,255,0.12)",
-                    background: isFailed
-                      ? "linear-gradient(135deg, rgba(239,68,68,0.08), rgba(239,68,68,0.02))"
                       : isUser
-                        ? "rgba(20,15,31,0.72)"
-                        : isStreaming
-                          ? `linear-gradient(135deg, ${agentColor}14, rgba(255,255,255,0.03))`
-                          : "rgba(20,15,31,0.6)",
-                    color: isUser ? "var(--text-main)" : "var(--text-main)",
-                    backdropFilter: "blur(12px) saturate(130%)",
-                    WebkitBackdropFilter: "blur(12px) saturate(130%)",
+                        ? "color-mix(in srgb, var(--color-accent) 35%, transparent)"
+                        : "var(--studio-border)",
+                    ...(isFailed
+                      ? {
+                          background:
+                            "linear-gradient(135deg, rgba(239,68,68,0.08), rgba(239,68,68,0.02))",
+                        }
+                      : {
+                          backgroundColor: isUser
+                            ? "color-mix(in srgb, var(--color-accent) 14%, var(--studio-card))"
+                            : "var(--studio-card)",
+                        }),
+                    color: "var(--text-main)",
                     boxShadow: isFailed
                       ? "0 4px 16px rgba(239,68,68,0.1)"
-                      : isUser
-                        ? "0 4px 16px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04)"
-                        : `0 4px 16px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.03), 0 0 12px rgba(155,77,255,0.04)`,
+                      : "0 4px 16px rgba(14,60,26,0.10), 0 0 12px rgba(23,122,54,0.05)",
                   }}
                   aria-busy={showThinkingPlaceholder}
                 >
@@ -784,7 +948,10 @@ export default function StudioTranscript({
                   {isUser ? (
                     <span className="select-text">{message.content}</span>
                   ) : showThinkingPlaceholder ? (
-                    <div className="flex min-h-[2.25rem] items-center gap-2 text-[12px] text-white/55">
+                    <div
+                      className="flex min-h-[2.25rem] items-center gap-2 text-[12px]"
+                      style={{ color: "var(--text-muted)" }}
+                    >
                       <span className="flex gap-1" aria-hidden>
                         <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[color:var(--litt-primary)] [animation-delay:-0.3s]" />
                         <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[color:var(--litt-primary)] [animation-delay:-0.15s]" />
@@ -793,7 +960,7 @@ export default function StudioTranscript({
                       <span>LiTT is thinking…</span>
                     </div>
                   ) : (
-                    <div className="prose prose-invert prose-sm max-w-none select-text prose-p:my-1 prose-pre:my-1">
+                    <div className="prose prose-sm max-w-none select-text prose-p:my-1 prose-pre:my-1">
                       <ReactMarkdown
                         components={{
                           img: ({ src, alt }) => (
@@ -819,7 +986,7 @@ export default function StudioTranscript({
                           },
                         }}
                       >
-                        {message.content}
+                        {displayContent}
                       </ReactMarkdown>
                       {isStreaming && hasContent && (
                         <span
@@ -891,9 +1058,15 @@ export default function StudioTranscript({
                     onBranch={() => handleBranch(message)}
                     isPinned={isPinned}
                   />
-                  {/* Minimal timestamp — always visible, actions appear on hover */}
+                  {/* Timestamp (Kimi wiring item 3): revealed on hover,
+                      or pinned open by a tap for touch. */}
                   <div className="mt-0.5 flex items-center gap-1.5 px-1">
-                    <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
+                    <span
+                      className={`cursor-pointer text-[9px] transition-opacity duration-150 ${revealedTimestampId === key ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+                      style={{ color: "var(--text-muted)" }}
+                      onClick={() => setRevealedTimestampId(revealedTimestampId === key ? null : key)}
+                      title="Message time"
+                    >
                       {message.createdAt ? new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
                     </span>
                     {isCopied && <CopiedBadge show={isCopied} />}
@@ -958,7 +1131,24 @@ export default function StudioTranscript({
               {onUndoCompletion && completedMutationCount > 0 && (
                 <button type="button" onClick={onUndoCompletion} className="rounded-md px-2 py-1 text-[10px] font-bold hover:bg-white/8" style={{ color: "#fca5a5" }}>Undo</button>
               )}
-              <button type="button" onClick={onContinueCompletion} className="rounded-md px-2 py-1 text-[10px] font-bold" style={{ backgroundColor: "rgba(155,77,255,0.14)", color: "#c4b5fd" }}>Continue</button>
+              {/* Open Preview (Kimi wiring item 3): the completion
+                  card's artifact action — summons the board's Preview
+                  panel. Only when the run actually updated the preview
+                  and a summon handler exists. No thumbnail: the real
+                  system has no preview-capture image to show, and a
+                  fabricated one would be fake data. */}
+              {onOpenPreview && completion.previewUpdated && (
+                <button
+                  type="button"
+                  onClick={onOpenPreview}
+                  className="rounded-md px-2 py-1 text-[10px] font-bold hover:bg-white/8"
+                  style={{ color: "var(--text-secondary)" }}
+                  data-testid="studio-completion-open-preview"
+                >
+                  Open Preview
+                </button>
+              )}
+              <button type="button" onClick={onContinueCompletion} className="rounded-md px-2 py-1 text-[10px] font-bold" style={{ backgroundColor: "color-mix(in srgb, var(--color-accent) 14%, transparent)", color: "var(--color-accent)" }}>Continue</button>
             </div>
           </div>
         )}
@@ -1055,6 +1245,26 @@ export default function StudioTranscript({
           )
         )}
       </div>
+      {/* "New messages" pill (Kimi wiring item 3): sticky to the
+          scroll viewport's bottom while the user is reading history
+          and new messages land below. */}
+      {hasUnseenMessages && (
+        <div className="sticky bottom-2 z-10 flex justify-center">
+          <button
+            type="button"
+            onClick={scrollToBottom}
+            className="rounded-full px-3 py-1.5 text-[10px] font-bold shadow-lg transition hover:opacity-90"
+            style={{
+              backgroundColor: "var(--color-accent)",
+              color: "#fff",
+              boxShadow: "0 8px 20px rgba(0,0,0,0.35)",
+            }}
+            data-testid="transcript-new-messages"
+          >
+            New messages ↓
+          </button>
+        </div>
+      )}
     </div>
   );
 }

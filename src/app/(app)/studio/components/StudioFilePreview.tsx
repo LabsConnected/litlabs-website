@@ -259,7 +259,7 @@ export function StudioFilePreview({ projectId, selection }: StudioFilePreviewPro
           type="button"
           onClick={() => window.dispatchEvent(new CustomEvent("studio:files-changed", { detail: { projectId, path } }))}
           className="rounded-lg px-3 py-1.5 text-[10px] font-bold"
-          style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}
+          style={{ backgroundColor: "var(--litt-primary)", color: "#fff" }}
         >
           Retry
         </button>
@@ -309,7 +309,11 @@ export function StudioFilePreview({ projectId, selection }: StudioFilePreviewPro
       )}
       {rawUrl && (
         <a
-          href={rawUrl}
+          // Prefer the already-fetched blob URL: the raw route serves
+          // Content-Disposition: inline, so a plain navigation-style
+          // link can display the file instead of saving it. A blob:
+          // href with `download` always saves.
+          href={mediaUrl ?? rawUrl}
           download={fileName}
           className="rounded p-0.5 hover:bg-white/8"
           style={{ color: "var(--text-muted)" }}
@@ -365,12 +369,19 @@ export function StudioFilePreview({ projectId, selection }: StudioFilePreviewPro
           );
         }
         return (
-          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4" style={{ backgroundColor: "rgba(0,0,0,0.2)" }}>
+          <div className="flex min-h-0 flex-1 overflow-auto p-4" style={{ backgroundColor: "rgba(0,0,0,0.2)" }}>
+            {/* Fit + centering: the img needs max-w-full as well as
+                max-h-full — without it a wide image renders at natural
+                width, overflows the pane at 100% zoom, and looks cut in
+                half. Centering via m-auto on the flex child (instead of
+                items/justify-center on the container) keeps any overflow
+                scrollable on every side instead of clipping the
+                top/left edges out of reach. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={mediaUrl}
               alt={fileName}
-              className="max-h-full transition-transform"
+              className="m-auto max-h-full max-w-full transition-transform"
               style={{ transform: `scale(${zoom})`, transformOrigin: "center" }}
               data-testid="file-preview-image"
             />
@@ -382,9 +393,9 @@ export function StudioFilePreview({ projectId, selection }: StudioFilePreviewPro
       case "svg": {
         const sanitized = content ? sanitizeSvg(content) : "";
         return (
-          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4" style={{ backgroundColor: "rgba(0,0,0,0.2)" }}>
+          <div className="flex min-h-0 flex-1 overflow-auto p-4" style={{ backgroundColor: "rgba(0,0,0,0.2)" }}>
             <div
-              className="transition-transform"
+              className="m-auto transition-transform"
               style={{ transform: `scale(${zoom})`, transformOrigin: "center" }}
               dangerouslySetInnerHTML={{ __html: sanitized }}
               data-testid="file-preview-svg"
@@ -399,7 +410,7 @@ export function StudioFilePreview({ projectId, selection }: StudioFilePreviewPro
         return (
           <div className="min-h-0 flex-1 overflow-auto p-6">
             <div
-              className="prose prose-invert max-w-none text-[12px] leading-relaxed"
+              className="prose max-w-none text-[12px] leading-relaxed"
               dangerouslySetInnerHTML={{ __html: html }}
               data-testid="file-preview-markdown"
             />
@@ -562,7 +573,7 @@ export function StudioFilePreview({ projectId, selection }: StudioFilePreviewPro
                 href={rawUrl}
                 download={fileName}
                 className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[10px] font-bold"
-                style={{ backgroundColor: "var(--litt-primary)", color: "#000" }}
+                style={{ backgroundColor: "var(--litt-primary)", color: "#fff" }}
               >
                 <Download size={12} /> Download
               </a>

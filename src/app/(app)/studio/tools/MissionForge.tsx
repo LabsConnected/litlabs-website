@@ -254,7 +254,14 @@ function nodeIcon(node: MissionNode): typeof Bot {
 
 /* ─── Component ───────────────────────────────────────────────────── */
 export default function MissionForge() {
-  const { resolvedColors: T } = useTheme();
+  const { resolvedColors: T, theme } = useTheme();
+  // The canvas, node cards, and log lines were hard-coded for a dark
+  // stage (near-black root, afterglow photo, white log text) even though
+  // the chrome already consumed theme tokens — so under a light theme
+  // (LiTT Signature, the default) the panels went light while the
+  // canvas stayed dark. isLight switches those structural surfaces to
+  // the theme tokens; dark themes keep the original stage.
+  const isLight = theme.mode === "light";
   const { userId } = useClerkAuth();
   const canvasRef = useRef<HTMLDivElement>(null);
   const nodeIdCounter = useRef(0);
@@ -730,7 +737,7 @@ export default function MissionForge() {
 
   /* ── Render ── */
   return (
-    <div className="flex h-full overflow-hidden bg-[#03050a] text-white">
+    <div className="flex h-full overflow-hidden" style={{ backgroundColor: T.bgColor, color: T.textColor }}>
       {/* ── LEFT: Node Library (desktop) ── */}
       <aside
         className="hidden md:flex w-65 shrink-0 flex-col border-r"
@@ -915,12 +922,22 @@ export default function MissionForge() {
           }}
           onDoubleClick={fitCanvas}
           className={`relative flex-1 overflow-hidden touch-none ${isPanning ? "cursor-grabbing" : "cursor-grab"}`}
-          style={{
-            backgroundImage:
-              "linear-gradient(105deg,rgba(3,5,11,.96),rgba(3,5,11,.72) 48%,rgba(3,5,11,.88)),url('/wallpapers/litt-afterglow.webp')",
-          }}
+          style={
+            isLight
+              ? {
+                  backgroundColor: T.bgColor,
+                  backgroundImage: `radial-gradient(circle, ${T.borderColor}90 1px, transparent 1.4px)`,
+                  backgroundSize: "26px 26px",
+                }
+              : {
+                  backgroundImage:
+                    "linear-gradient(105deg,rgba(3,5,11,.96),rgba(3,5,11,.72) 48%,rgba(3,5,11,.88)),url('/wallpapers/litt-afterglow.webp')",
+                }
+          }
         >
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_48%_30%,rgba(101,244,255,.08),transparent_32%),radial-gradient(circle_at_78%_68%,rgba(169,112,255,.09),transparent_30%)]" />
+          {!isLight && (
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_48%_30%,rgba(101,244,255,.08),transparent_32%),radial-gradient(circle_at_78%_68%,rgba(169,112,255,.09),transparent_30%)]" />
+          )}
 
           <div
             className="absolute left-0 top-0 origin-top-left"
@@ -930,8 +947,8 @@ export default function MissionForge() {
           <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
             <defs>
               <linearGradient id="mission-line" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="#65f4ff" stopOpacity=".65" />
-                <stop offset="100%" stopColor="#a970ff" stopOpacity=".75" />
+                <stop offset="0%" stopColor={T.accentColor} stopOpacity=".65" />
+                <stop offset="100%" stopColor={T.headerColor} stopOpacity=".75" />
               </linearGradient>
             </defs>
             {edges.map((edge) => {
@@ -946,7 +963,7 @@ export default function MissionForge() {
               return (
                 <g key={edge.id}>
                   <path d={`M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`} fill="none" stroke="url(#mission-line)" strokeWidth="2" strokeDasharray="6 6" />
-                  <circle cx={x2} cy={y2} r="3" fill="#a970ff" opacity="0.6" />
+                  <circle cx={x2} cy={y2} r="3" fill={T.headerColor} opacity="0.6" />
                 </g>
               );
             })}
@@ -971,8 +988,8 @@ export default function MissionForge() {
                   left: node.x,
                   top: node.y,
                   borderColor: isSelected || isConnecting ? `${node.color}aa` : `${node.color}45`,
-                  background: `linear-gradient(145deg, ${node.color}18, rgba(6,9,18,.96) 55%)`,
-                  boxShadow: isSelected ? `0 0 0 1px ${node.color}55, 0 0 34px ${node.color}20` : "0 18px 40px rgba(0,0,0,.32)",
+                  background: `linear-gradient(145deg, ${node.color}18, ${T.boxBg}f2 55%)`,
+                  boxShadow: isSelected ? `0 0 0 1px ${node.color}55, 0 0 34px ${node.color}20` : isLight ? "0 10px 24px rgba(14,21,16,.10)" : "0 18px 40px rgba(0,0,0,.32)",
                 }}
               >
                 <span className="flex items-start gap-3">
@@ -985,12 +1002,12 @@ export default function MissionForge() {
                   </span>
                   <span className="min-w-0">
                     <span className="block truncate text-xs font-black">{node.title}</span>
-                    <span className="mt-1 block line-clamp-2 text-[9px] leading-3 text-white/40">{node.subtitle}</span>
+                    <span className="mt-1 block line-clamp-2 text-[9px] leading-3" style={{ color: T.textMuted }}>{node.subtitle}</span>
                   </span>
                 </span>
                 <span className="absolute bottom-2 right-3 text-[7px] font-black uppercase tracking-widest" style={{ color: node.color }}>{node.type}</span>
                 {node.status && node.status !== "idle" && (
-                  <span className="absolute -top-1.5 -right-1.5 w-3 h-3 rounded-full border-2 border-[#03050a]" style={{ backgroundColor: sColor, boxShadow: `0 0 6px ${sColor}` }} />
+                  <span className="absolute -top-1.5 -right-1.5 w-3 h-3 rounded-full border-2" style={{ backgroundColor: sColor, boxShadow: `0 0 6px ${sColor}`, borderColor: T.bgColor }} />
                 )}
               </button>
             );
@@ -999,9 +1016,9 @@ export default function MissionForge() {
           {nodes.length === 0 && (
             <div className="absolute inset-0 grid place-items-center p-8 text-center">
               <div>
-                <Workflow size={34} className="mx-auto text-white/15" />
+                <Workflow size={34} className="mx-auto" style={{ color: T.textMuted, opacity: 0.4 }} />
                 <h3 className="mt-3 text-sm font-black">Your Mission Forge is empty</h3>
-                <p className="mt-1 text-[10px] text-white/35">Drag LiTT, triggers, and capabilities here to begin.</p>
+                <p className="mt-1 text-[10px]" style={{ color: T.textMuted }}>Drag LiTT, triggers, and capabilities here to begin.</p>
               </div>
             </div>
           )}
@@ -1031,16 +1048,20 @@ export default function MissionForge() {
           </div>
           <div className="flex-1 overflow-y-auto px-3 py-1.5 font-mono text-[9px] space-y-0.5">
             {logs.map((l, i) => {
-              let cls = "opacity-60";
-              if (l.includes("[OK]")) cls = "text-emerald-400";
-              if (l.includes("[SYS]")) cls = "text-cyan-400";
-              if (l.includes("[WRN]")) cls = "text-amber-400";
-              if (l.includes("[ERR]")) cls = "text-red-400";
-              if (l.includes("[EXEC]")) cls = "text-white font-bold";
-              if (l.includes("[AI]")) cls = "text-violet-400";
-              if (l.includes("[RUN]")) cls = "text-white";
-              if (l.includes("[WAIT]")) cls = "text-amber-300";
-              return <div key={i} className={cls} style={{ color: cls.includes("text-") ? undefined : T.textMuted }}>{l}</div>;
+              // Mode-aware log colors: the neon 400-shades and white
+              // EXEC/RUN lines were tuned for the old dark stage and are
+              // unreadable (white) or glaring on the light panel.
+              let cls = "";
+              let color: string = T.textMuted;
+              if (l.includes("[OK]")) color = isLight ? "#047857" : "#34d399";
+              else if (l.includes("[SYS]")) color = isLight ? "#0369a1" : "#22d3ee";
+              else if (l.includes("[WRN]")) color = isLight ? "#b45309" : "#fbbf24";
+              else if (l.includes("[ERR]")) color = isLight ? "#b91c1c" : "#f87171";
+              else if (l.includes("[EXEC]")) { color = T.textColor; cls = "font-bold"; }
+              else if (l.includes("[AI]")) color = isLight ? "#6d28d9" : "#a78bfa";
+              else if (l.includes("[RUN]")) color = T.textColor;
+              else if (l.includes("[WAIT]")) color = isLight ? "#d97706" : "#fcd34d";
+              return <div key={i} className={cls} style={{ color }}>{l}</div>;
             })}
           </div>
         </div>
@@ -1219,7 +1240,7 @@ export default function MissionForge() {
 
               {/* Capability info */}
               {selected.type === "capability" && selected.capabilityKey && (
-                <div className="rounded-lg p-2.5 text-[9px] space-y-1" style={{ background: "rgba(0,0,0,0.25)", border: `1px solid ${T.borderColor}15` }}>
+                <div className="rounded-lg p-2.5 text-[9px] space-y-1" style={{ background: `${T.textColor}0d`, border: `1px solid ${T.borderColor}15` }}>
                   <div className="flex justify-between"><span style={{ color: T.textMuted }}>Capability</span><span style={{ color: selected.color }}>{selected.capabilityKey}</span></div>
                   {CAPABILITY_REGISTRY[selected.capabilityKey] && (
                     <>
@@ -1245,7 +1266,7 @@ export default function MissionForge() {
               </div>
 
               {/* Edge info */}
-              <div className="rounded-lg p-2.5 space-y-1.5 text-[9px]" style={{ background: "rgba(0,0,0,0.2)", border: `1px solid ${T.borderColor}10` }}>
+              <div className="rounded-lg p-2.5 space-y-1.5 text-[9px]" style={{ background: `${T.textColor}0d`, border: `1px solid ${T.borderColor}10` }}>
                 <div className="flex justify-between"><span style={{ color: T.textMuted }}>Incoming</span><span style={{ color: T.textColor }}>{edges.filter((e) => e.to === selected.id).length}</span></div>
                 <div className="flex justify-between"><span style={{ color: T.textMuted }}>Outgoing</span><span style={{ color: T.textColor }}>{edges.filter((e) => e.from === selected.id).length}</span></div>
               </div>
@@ -1259,7 +1280,7 @@ export default function MissionForge() {
                       const peerId = edge.from === selected.id ? edge.to : edge.from;
                       const peer = nodes.find((n) => n.id === peerId);
                       return (
-                        <div key={edge.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[9px]" style={{ background: "rgba(0,0,0,0.2)", border: `1px solid ${T.borderColor}10` }}>
+                        <div key={edge.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[9px]" style={{ background: `${T.textColor}0d`, border: `1px solid ${T.borderColor}10` }}>
                           <ArrowRight size={9} style={{ color: selected.color }} />
                           <span className="flex-1 truncate" style={{ color: T.textMuted }}>{edge.from === selected.id ? "→" : "←"} {peer?.title || "Unknown"}</span>
                           <button onClick={() => removeEdge(edge.id)} className="opacity-50 hover:opacity-100" style={{ color: "#fb7185" }}><X size={10} /></button>

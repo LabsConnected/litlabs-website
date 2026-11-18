@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import type { TerminalCapability } from "@/lib/capabilities/types";
+import { isSandboxExecutionEnabled } from "@/lib/capabilities/terminal-execution";
 import { getTerminalServerUrl } from "@/lib/terminal-url";
 
 export const runtime = "nodejs";
@@ -81,11 +82,20 @@ async function handler(req: NextRequest) {
       });
     }
 
-    // The server can be alive (status:"ok") while terminal EXECUTION is
-    // disabled by fail-closed isolation policy — production currently runs
-    // this way until verified sandbox isolation exists. Reporting that as a
-    // merely-disconnected terminal hides the real state; surface it.
-    if (health?.terminal?.execution === "disabled") {
+    // The server can be alive (status:"ok") while HOST terminal execution
+    // is disabled by fail-closed isolation policy — production runs this
+    // way permanently: interactive PTY sessions stay off the host. But
+    // host-disabled is no longer the whole story: when the health payload
+    // also reports sandbox execution enabled-and-fresh (terminal.sandbox),
+    // the sandbox-wired surfaces (agent exec, prepare, preview) work, so
+    // fall through to the alive-but-no-session response below instead of
+    // declaring the terminal unavailable. Only when BOTH dimensions are
+    // off do we surface the disabled state — reporting that as a
+    // merely-disconnected terminal would hide the real state.
+    if (
+      health?.terminal?.execution === "disabled" &&
+      !isSandboxExecutionEnabled(health)
+    ) {
       const reason = typeof health?.terminal?.reason === "string"
         ? health.terminal.reason
         : "Terminal execution is disabled on this server.";

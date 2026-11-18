@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getProject } from "@/lib/projects/project-repository";
+import { resolveSourceKind } from "@/lib/projects/project-source";
 import { provisionWorkspaceForProject } from "@/lib/studio/workspace-recovery";
+import {
+  errorCarriesHostExecutionDisabled,
+  hostExecutionDisabledResponse,
+  isHostExecutionPermitted,
+} from "@/lib/host-execution-guard";
+import { isSandboxExecutionAvailable } from "@/lib/terminal-internal-client";
 
 /**
  * POST /api/studio-projects/[projectId]/workspace/prepare
@@ -22,6 +29,34 @@ export async function POST(
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
   if (project.userId !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
+  // Repo gate (B2): a GitHub-backed project whose workspace is not ready
+  // can only be refused by the terminal server's fail-closed isolation
+  // policy in an environment where host execution is not permitted —
+  // that outcome is knowable from project facts alone. Answer with the
+  // standard coded gate response WITHOUT running the doomed attempt:
+  // no terminal round-trip, and the project row is never stamped
+  // "failed" for a deliberate product decision. Callers already map
+  // this exact body to the "not available yet" gate presentation.
+  // A ready workspace falls through (GitHub mirror refresh still runs),
+  // and trusted local environments are unaffected.
+  //
+  // Phase 2: the gate also opens when the terminal server reports
+  // sandboxed execution CURRENTLY available for this user (the web
+  // process cannot observe the canary itself, so it asks). The
+  // availability probe runs only when the host guard would refuse, and
+  // any probe failure keeps the gate closed — fail closed.
+  if (
+    project.workspaceStatus !== "ready" &&
+    resolveSourceKind(project) === "github" &&
+    !isHostExecutionPermitted() &&
+    !(await isSandboxExecutionAvailable(userId))
+  ) {
+    return NextResponse.json(
+      hostExecutionDisabledResponse("workspace.prepare"),
+      { status: 503 },
+    );
+  }
+
   try {
     const workspaceId = await provisionWorkspaceForProject(projectId, userId);
     const refreshed = await getProject(projectId, userId);
@@ -32,6 +67,20 @@ export async function POST(
       branch: refreshed?.workspaceBranch ?? null,
     });
   } catch (err) {
+    // The terminal-server's fail-closed refusal carries the
+    // HOST_EXECUTION_DISABLED code all the way up (attached by the
+    // terminal client, preserved by the provisioning service) — this
+    // catch used to drop it and return an unmapped 500 whose body was
+    // the raw message with the JSON code string embedded, which is
+    // what callers then rendered verbatim. Map it to the standard
+    // 503 + coded body (same shape as /api/agents/commits); genuinely
+    // unexpected errors keep the 500.
+    if (errorCarriesHostExecutionDisabled(err)) {
+      return NextResponse.json(
+        hostExecutionDisabledResponse("workspace.prepare"),
+        { status: 503 },
+      );
+    }
     const message = err instanceof Error ? err.message : "Workspace provisioning failed";
     return NextResponse.json({ error: message }, { status: 500 });
   }

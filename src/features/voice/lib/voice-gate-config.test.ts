@@ -31,8 +31,8 @@ describe("voice-gate-config", () => {
     expect(VOICE_GATE_CONFIG.audioConstraints.channelCount).toBe(1);
   });
 
-  it("defaults to push-to-talk with auto-send off", () => {
+  it("defaults to push-to-talk with auto-send on", () => {
     expect(VOICE_GATE_CONFIG.ptt.defaultMode).toBe("push_to_talk");
-    expect(VOICE_GATE_CONFIG.ptt.autoSendDefault).toBe(false);
+    expect(VOICE_GATE_CONFIG.ptt.autoSendDefault).toBe(true);
   });
 });

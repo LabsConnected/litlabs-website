@@ -39,7 +39,7 @@ export interface ConnectionCapabilities {
   /** "LiTT Managed" or "GitHub" — what the project card should show. */
   sourceLabel: string | null;
   /** Provisioning state of the source, separate from agent execution. */
-  sourceStatus: "provisioning" | "ready" | "error" | "needs_setup" | null;
+  sourceStatus: "provisioning" | "ready" | "error" | "needs_setup" | "unavailable" | null;
   /** Whether the workspace has a Git repository. Managed projects do. */
   versionControl: "git" | "none";
   /** Whether a GitHub repository is connected. Optional by design. */

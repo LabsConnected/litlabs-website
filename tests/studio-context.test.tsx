@@ -338,6 +338,71 @@ describe("useStudioContext error handling", () => {
   });
 });
 
+// ─── Terminal health combined condition (Step 6, F4) ────────────
+//
+// src/lib/capabilities/studio-context.ts decides "terminal healthy"
+// from the /health payload. Since Step 6 the payload carries two
+// execution dimensions — the host verdict (disabled in production) and
+// the sandbox dimension — and the lib accepts the payload when either
+// host execution is enabled OR sandbox execution is enabled-and-fresh,
+// via isSandboxExecutionEnabled / isTerminalExecutionCapable from
+// @/lib/capabilities/terminal-execution. Those predicates are pinned
+// here (this file's other suites cover the React StudioContextProvider
+// of the same name).
+
+describe("terminal-execution predicates (studio-context health condition)", () => {
+  const freshSandbox = {
+    execution: "enabled",
+    state: "verified",
+    freshUntil: new Date(Date.now() + 4 * 60_000).toISOString(),
+  };
+
+  it("sandbox counts only when enabled, verified AND fresh", async () => {
+    const { isSandboxExecutionEnabled } = await import(
+      "@/lib/capabilities/terminal-execution"
+    );
+    expect(
+      isSandboxExecutionEnabled({ terminal: { execution: "disabled", sandbox: freshSandbox } }),
+    ).toBe(true);
+    expect(
+      isSandboxExecutionEnabled({
+        terminal: {
+          execution: "disabled",
+          sandbox: { ...freshSandbox, freshUntil: new Date(Date.now() - 1_000).toISOString() },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isSandboxExecutionEnabled({
+        terminal: { execution: "disabled", sandbox: { ...freshSandbox, state: "failed" } },
+      }),
+    ).toBe(false);
+    expect(
+      isSandboxExecutionEnabled({
+        terminal: { execution: "disabled", sandbox: { ...freshSandbox, execution: "disabled" } },
+      }),
+    ).toBe(false);
+    expect(isSandboxExecutionEnabled({ terminal: { execution: "disabled" } })).toBe(false);
+    expect(isSandboxExecutionEnabled(null)).toBe(false);
+    expect(isSandboxExecutionEnabled(undefined)).toBe(false);
+  });
+
+  it("combined condition: host-disabled alone fails, host-disabled + fresh sandbox passes, host-enabled passes", async () => {
+    const { isTerminalExecutionCapable } = await import(
+      "@/lib/capabilities/terminal-execution"
+    );
+    expect(isTerminalExecutionCapable({ terminal: { execution: "disabled" } })).toBe(false);
+    expect(
+      isTerminalExecutionCapable({
+        terminal: { execution: "disabled", sandbox: freshSandbox },
+      }),
+    ).toBe(true);
+    expect(isTerminalExecutionCapable({ terminal: { execution: "enabled" } })).toBe(true);
+    expect(isTerminalExecutionCapable({})).toBe(false);
+    expect(isTerminalExecutionCapable(null)).toBe(false);
+  });
+});
+
 // ─── Derivation helpers ──────────────────────────────────────────
 
 describe("deriveCreator / deriveWorkspaceStage", () => {

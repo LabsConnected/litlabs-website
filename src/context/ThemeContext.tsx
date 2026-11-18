@@ -28,7 +28,9 @@ export type SkinPreset =
   | "blood"
   | "cosmic"
   | "miami"
-  | "honeycomb";
+  | "honeycomb"
+  | "signature"
+  | "neon-grove";
 
 // Layout style — controls visual structure, not just color
 export type LayoutStyle =
@@ -52,7 +54,9 @@ export type AccentColor =
   | "matrix-green"
   | "sunset-orange"
   | "ocean-blue"
-  | "purple-haze";
+  | "purple-haze"
+  | "signature-green"
+  | "neon-grove";
 
 // Theme structure
 export interface Theme {
@@ -72,19 +76,22 @@ export interface Theme {
   };
 }
 
+// Skin color slots. `textMuted` is optional: most skins derive it from
+// textColor (see mixMuted), but a skin whose design specifies an exact
+// muted tone (Neon Grove, from the approved Projects mockup) carries it.
+export interface SkinColors {
+  bgColor: string;
+  textColor: string;
+  linkColor: string;
+  headerColor: string;
+  borderColor: string;
+  accentColor: string;
+  boxBg: string;
+  textMuted?: string;
+}
+
 // Default dark skins
-const darkSkins: Record<
-  SkinPreset,
-  {
-    bgColor: string;
-    textColor: string;
-    linkColor: string;
-    headerColor: string;
-    borderColor: string;
-    accentColor: string;
-    boxBg: string;
-  }
-> = {
+const darkSkins: Record<SkinPreset, SkinColors> = {
   cyberpunk: {
     bgColor: "#0c0c14",
     textColor: "#d4d4e8",
@@ -238,21 +245,52 @@ const darkSkins: Record<
     accentColor: "#f59e0b",
     boxBg: "#1a1510",
   },
+  // LiTT Signature — DARK variant (owner decisions, 2026-11-14). This entry
+  // used to be LIGHT-LOCKED: it carried the same light tokens as
+  // lightSkins.signature so a mode flip could never repaint the approved
+  // true-white / deep-green design (Larry's phone dark-mode incident, later
+  // made the universal default by the 2026-11-13 all-light program). Larry
+  // superseded the lock for his own choice: Dark must actually switch in
+  // the Signature skin. The first authored dark variant used near-black
+  // green-ink surfaces; Larry rejected those the same day ("the color with
+  // black throws off the color of everything") and picked CHARCOAL —
+  // neutral dark gray surfaces — from a visual comparison. Green survives
+  // only as the voice: his Signature green accent (#2FBF5A) and the lifted
+  // link green (#5AD67E). lightSkins.signature is untouched: Light remains
+  // the original design, byte for byte, and stays the default.
+  signature: {
+    bgColor: "#15171B",
+    textColor: "#F2F4F3",
+    linkColor: "#5AD67E",
+    headerColor: "#D7DBDE",
+    borderColor: "#2E3238",
+    accentColor: "#2FBF5A",
+    boxBg: "#1F2228",
+    textMuted: "#A8ADB5",
+  },
+  // Neon Grove — the approved Projects mockup palette (futuristic dark,
+  // neon green), kept as a selectable pack (2026-11-13). Values
+  // come from the Phase 1 audit's mockup mapping: bg #050D10, cards
+  // #0C2020, text #F5FAF7, muted #A5B8B5, accent #00E85D, bright green
+  // #39FF88. The mockup's border rgba(80,255,150,0.14) is stored as its
+  // hex composite over the pack background (#102F23) so the codebase's
+  // `${borderColor}55` alpha-suffix pattern stays valid. Sidebar
+  // (#09151A) and elevated panels (#11282A) have no skin slot — those
+  // mockup tones exist only in the design reference, not in code.
+  "neon-grove": {
+    bgColor: "#050D10",
+    textColor: "#F5FAF7",
+    linkColor: "#39FF88",
+    headerColor: "#39FF88",
+    borderColor: "#102F23",
+    accentColor: "#00E85D",
+    boxBg: "#0C2020",
+    textMuted: "#A5B8B5",
+  },
 };
 
 // Light mode variants — deep navy text for crisp daytime contrast
-const lightSkins: Record<
-  SkinPreset,
-  {
-    bgColor: string;
-    textColor: string;
-    linkColor: string;
-    headerColor: string;
-    borderColor: string;
-    accentColor: string;
-    boxBg: string;
-  }
-> = {
+const lightSkins: Record<SkinPreset, SkinColors> = {
   cyberpunk: {
     bgColor: "#f5f5fa",
     textColor: "#1a1a2e",
@@ -406,6 +444,34 @@ const lightSkins: Record<
     accentColor: "#f59e0b",
     boxBg: "#ffffff",
   },
+  // LiTT Signature — tokens lifted from the approved homepage mockup
+  // (--bg #FFFFFF, --ink #0E1510, --accent #177A36, --accent-deep #0C5A26,
+  // --line #CFDEC4). This light table is the original Signature design and
+  // never changes; dark mode has its own authored variant in
+  // darkSkins.signature (owner decision, 2026-11-14).
+  signature: {
+    bgColor: "#FFFFFF",
+    textColor: "#0E1510",
+    linkColor: "#177A36",
+    headerColor: "#0C5A26",
+    borderColor: "#CFDEC4",
+    accentColor: "#177A36",
+    boxBg: "#FFFFFF",
+  },
+  // Neon Grove is DARK-LOCKED by design (same precedent as signature's
+  // light-lock): the approved design is a dark design, so the "light"
+  // entry carries the same dark tokens — a mode flip must never repaint
+  // it into a light theme it was never designed as.
+  "neon-grove": {
+    bgColor: "#050D10",
+    textColor: "#F5FAF7",
+    linkColor: "#39FF88",
+    headerColor: "#39FF88",
+    borderColor: "#102F23",
+    accentColor: "#00E85D",
+    boxBg: "#0C2020",
+    textMuted: "#A5B8B5",
+  },
 };
 
 // Accent color overrides
@@ -460,6 +526,21 @@ const accentOverrides: Record<
     headerColor: "#d9f99d",
     accentColor: "#a8ff2f",
   },
+  // LiTT Signature: deep green family from the approved homepage mockup —
+  // links sit on true white, so they use the readable mockup accent green
+  // (#177A36) rather than the pale lime tints used on dark skins.
+  "signature-green": {
+    linkColor: "#177A36",
+    headerColor: "#0C5A26",
+    accentColor: "#177A36",
+  },
+  // Neon Grove: bright green links/headers over the deep-teal dark,
+  // accent is the mockup's primary neon green.
+  "neon-grove": {
+    linkColor: "#39FF88",
+    headerColor: "#39FF88",
+    accentColor: "#00E85D",
+  },
 };
 
 // Visual pack — a complete preset that applies multiple theme settings at once
@@ -482,6 +563,50 @@ export interface VisualPack {
 }
 
 export const VISUAL_PACKS: VisualPack[] = [
+  {
+    // PROVISIONAL NAME — "LiTT Signature" is a working name (Larry can
+    // rename in this one entry). The approved homepage design as a theme:
+    // true-white surfaces worked into deep green, lime accents, soft glow.
+    // themeMode "light" + the "signature" skin's light tokens present the
+    // design as designed; the skin also has an authored dark variant for
+    // users who pick Dark themselves (owner decision, 2026-11-14).
+    id: "litt-signature",
+    name: "LiTT Signature",
+    description:
+      "True-white surfaces worked into deep green with lime accents and a soft glow — the approved homepage design",
+    themeMode: "light",
+    skin: "signature",
+    accent: "signature-green",
+    backgroundMode: "minimal",
+    layoutStyle: "classic",
+    effects: { glow: true, particles: false, motion: true },
+    // The preset must BE the whole look: without a wallpaperId,
+    // applying Signature left the previous wallpaper (and its dark
+    // overlay veil) in place, so the app still rendered dark after
+    // the preset showed "Active" (verified live on Larry's account).
+    wallpaperId: "minimal",
+    overlayOpacity: 0,
+  },
+  {
+    // Neon Grove — from the approved Projects mockup (2026-11-13,
+    // Projects redesign Decisions A–D): futuristic dark, neon green.
+    // Ships as a SELECTABLE pack only; it does NOT replace the LiTT
+    // Signature platform default, and no page forces it (Larry's
+    // all-light ruling, 2026-11-13, superseded the /projects scoping
+    // in Decision A).
+    id: "neon-grove",
+    name: "Neon Grove",
+    description:
+      "Futuristic deep-teal dark with neon-green energy — the approved Projects design standard",
+    themeMode: "dark",
+    skin: "neon-grove",
+    accent: "neon-grove",
+    backgroundMode: "minimal",
+    layoutStyle: "classic",
+    wallpaperId: "minimal",
+    overlayOpacity: 0,
+    effects: { glow: true, particles: false, motion: true },
+  },
   {
     id: "honeycomb-core",
     name: "Honeycomb Core",
@@ -609,14 +734,50 @@ export const VISUAL_PACKS: VisualPack[] = [
   },
 ];
 
-// Default theme
+// Default theme — LiTT Signature (Larry's standing design order,
+// 2026-11-10): the approved white-into-green look is what the app
+// renders BY DEFAULT, field-for-field the litt-signature visual pack.
+// It was previously a dark theme (volcanic/nebula) with Signature as
+// an opt-in preset, so every account that had not explicitly picked
+// Signature rendered dark — the "my theme is not right" complaint.
+// Other presets remain selectable in Settings → Appearance.
 const defaultTheme: Theme = {
-  mode: "dark",
-  skin: "volcanic",
-  accent: "lime",
-  backgroundMode: "nebula",
-  layoutStyle: "glass",
+  mode: "light",
+  skin: "signature",
+  accent: "signature-green",
+  backgroundMode: "minimal",
+  layoutStyle: "classic",
 };
+
+/**
+ * A stored theme that merely repeats a former factory default is NOT
+ * an explicit user choice: the save effect persists the running theme
+ * on mount, so users who never picked anything carry the old default
+ * in storage. Those resolve to the current defaultTheme; anything
+ * else stored — a real choice, or any theme carrying customColors —
+ * wins unchanged. (Extends the migration precedent this file already
+ * applied to the sunset-orange/constellation factory default.)
+ */
+function isLegacyFactoryDefault(t: Theme): boolean {
+  if (t.customColors) return false;
+  if (t.mode !== "dark" || t.skin !== "volcanic") return false;
+  return (
+    (t.accent === "sunset-orange" && t.backgroundMode === "constellation") ||
+    (t.accent === "lime" && t.backgroundMode === "nebula")
+  );
+}
+
+/** Resolve the theme a session starts with from the raw stored value. */
+export function resolveInitialTheme(storedRaw: string | null): Theme {
+  if (!storedRaw) return defaultTheme;
+  try {
+    const saved = JSON.parse(storedRaw) as Theme;
+    if (isLegacyFactoryDefault(saved)) return defaultTheme;
+    return saved;
+  } catch {
+    return defaultTheme;
+  }
+}
 
 // Context
 interface ThemeContextType {
@@ -680,38 +841,89 @@ function mixMuted(hex: string): string {
   return `#${to2(mix(r))}${to2(mix(g))}${to2(mix(b))}`;
 }
 
+/**
+ * The mode actually rendered. "system" follows the OS color scheme
+ * (prefers-color-scheme); the explicit modes render as stored. Before
+ * 2026-11-14 "system" was a label only — it silently behaved like dark.
+ */
+export function resolveEffectiveMode(
+  mode: ThemeMode,
+  systemPrefersDark: boolean,
+): "dark" | "light" {
+  if (mode === "system") return systemPrefersDark ? "dark" : "light";
+  return mode;
+}
+
+export function getResolvedColors(t: Theme, systemPrefersDark = false) {
+  // Get base skin based on the effective (rendered) mode
+  const effectiveMode = resolveEffectiveMode(t.mode, systemPrefersDark);
+  const baseSkins = effectiveMode === "light" ? lightSkins : darkSkins;
+  const skinColors = baseSkins[t.skin];
+
+  // Apply custom colors if set
+  const custom = t.customColors || {};
+
+  // Apply accent override if not custom. One identity exception: the
+  // Signature skin paired with its own signature-green accent is not a
+  // foreign override — the accent IS the skin's identity color, and the
+  // override table only carries the light-mode greens (#177A36/#0C5A26),
+  // which would stomp the authored dark tokens back to light values and
+  // leave headers unreadable on dark surfaces. In dark mode the skin's
+  // own dark link/header/accent tokens win for that pairing. (In light
+  // mode the override and the skin tokens are identical, so nothing
+  // changes there; every other skin/accent pairing is untouched.)
+  const signatureIdentityDark =
+    effectiveMode === "dark" &&
+    t.skin === "signature" &&
+    t.accent === "signature-green";
+  const accent =
+    custom.accentColor || signatureIdentityDark
+      ? null
+      : accentOverrides[t.accent];
+
+  return {
+    bgColor: custom.bgColor || skinColors.bgColor,
+    textColor: custom.textColor || skinColors.textColor,
+    // A skin may specify its exact muted tone (Neon Grove); the rest
+    // derive it from the text color as before.
+    textMuted:
+      skinColors.textMuted ??
+      mixMuted(custom.textColor || skinColors.textColor),
+    linkColor: accent?.linkColor || custom.linkColor || skinColors.linkColor,
+    headerColor:
+      accent?.headerColor || custom.headerColor || skinColors.headerColor,
+    borderColor: custom.borderColor || skinColors.borderColor,
+    accentColor:
+      accent?.accentColor || custom.accentColor || skinColors.accentColor,
+    boxBg: custom.boxBg || skinColors.boxBg,
+    success: "#25e08a",
+    warning: "#ffb020",
+  };
+}
+
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(defaultTheme);
-  const getResolvedColors = (t: Theme) => {
-    // Get base skin based on mode
-    const baseSkins = t.mode === "light" ? lightSkins : darkSkins;
-    const skinColors = baseSkins[t.skin];
 
-    // Apply custom colors if set
-    const custom = t.customColors || {};
+  // Live OS color-scheme for "system" mode: read prefers-color-scheme
+  // once, then follow it as the OS flips.
+  const [systemPrefersDark, setSystemPrefersDark] = useState(false);
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      typeof window.matchMedia !== "function"
+    )
+      return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    setSystemPrefersDark(mq.matches);
+    const onChange = (e: MediaQueryListEvent) =>
+      setSystemPrefersDark(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
-    // Apply accent override if not custom
-    const accent = custom.accentColor ? null : accentOverrides[t.accent];
-
-    return {
-      bgColor: custom.bgColor || skinColors.bgColor,
-      textColor: custom.textColor || skinColors.textColor,
-      textMuted: mixMuted(custom.textColor || skinColors.textColor),
-      linkColor: accent?.linkColor || custom.linkColor || skinColors.linkColor,
-      headerColor:
-        accent?.headerColor || custom.headerColor || skinColors.headerColor,
-      borderColor: custom.borderColor || skinColors.borderColor,
-      accentColor:
-        accent?.accentColor || custom.accentColor || skinColors.accentColor,
-      boxBg: custom.boxBg || skinColors.boxBg,
-      success: "#25e08a",
-      warning: "#ffb020",
-    };
-  };
-
-  const resolvedColors = getResolvedColors(theme);
+  const resolvedColors = getResolvedColors(theme, systemPrefersDark);
   const semanticTokens = {
     background: resolvedColors.bgColor,
     surface: resolvedColors.boxBg,
@@ -739,22 +951,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!mounted) return;
     try {
-      const stored = localStorage.getItem("litlabs-theme");
-      if (!stored) return;
-      const saved = JSON.parse(stored) as Theme;
-      // Move the former factory-default look to the cinematic studio system
-      // without changing themes that a member intentionally customized.
-      if (
-        saved.mode === "dark" &&
-        saved.skin === "volcanic" &&
-        saved.accent === "sunset-orange" &&
-        saved.backgroundMode === "constellation" &&
-        !saved.customColors
-      ) {
-        setTheme(defaultTheme);
-        return;
-      }
-      setTheme(saved);
+      // Stored explicit choices win; a stored repeat of a former
+      // factory default is not a choice and resolves to the current
+      // (LiTT Signature) default — see resolveInitialTheme.
+      setTheme(resolveInitialTheme(localStorage.getItem("litlabs-theme")));
     } catch {
       /* ignore */
     }
@@ -766,7 +966,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       localStorage.setItem("litlabs-theme", JSON.stringify(theme));
       // Apply CSS variables
       const root = document.documentElement;
-      const colors = getResolvedColors(theme);
+      const colors = getResolvedColors(theme, systemPrefersDark);
       root.style.setProperty("--bg-color", colors.bgColor);
       root.style.setProperty("--text-color", colors.textColor);
       root.style.setProperty("--link-color", colors.linkColor);
@@ -779,7 +979,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       root.dataset.layoutStyle = theme.layoutStyle;
       root.dataset.backgroundMode = theme.backgroundMode;
     }
-  }, [theme, mounted]);
+  }, [theme, mounted, systemPrefersDark]);
 
   const setMode = (mode: ThemeMode) => {
     setTheme((prev) => ({ ...prev, mode }));
@@ -873,9 +1073,21 @@ export const ACCENT_MAP: Record<AccentColor, { hex: string }> = {
   "sunset-orange": { hex: "#f97316" },
   "ocean-blue": { hex: "#0ea5e9" },
   "purple-haze": { hex: "#a855f7" },
+  "signature-green": { hex: "#177A36" },
+  "neon-grove": { hex: "#00E85D" },
 };
 
 export { darkSkins, lightSkins, accentOverrides, defaultTheme };
+
+/*
+ * Neon Grove note (2026-11-13): the pack stays registered above as a
+ * user-selectable theme, but NO page scopes itself to it anymore.
+ * Larry's all-light ruling later the same day superseded Decision A's
+ * /projects scoping — every page, /projects included, renders in the
+ * user's normal theme (default LiTT Signature light) via useTheme().
+ * The former getNeonGroveColors() page-scoping helper was removed
+ * with that rework (branch agent/projects-light-unify).
+ */
 
 /* ------------------------------------------------------------------ */
 /*  Global CRT Toggle — single source of truth for scanline overlay    */

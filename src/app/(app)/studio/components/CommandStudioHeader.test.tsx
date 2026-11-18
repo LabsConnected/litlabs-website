@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { INITIAL_RUNTIME_STATE, type ProjectRuntimeState } from "@/lib/projects/runtime-state";
+import {
+  INITIAL_RUNTIME_STATE,
+  HOST_EXECUTION_UNAVAILABLE_LABEL,
+  HOST_EXECUTION_UNAVAILABLE_MESSAGE,
+  HOST_EXECUTION_UNAVAILABLE_SHORT,
+  type ProjectRuntimeState,
+} from "@/lib/projects/runtime-state";
 
 // Mock wallet
 vi.mock("@/context/WalletContext", () => ({
@@ -122,7 +128,9 @@ describe("CommandStudioHeader — truthful status", () => {
     expect(segmented.textContent).toContain("AUTO");
     // The permanent mode-description strip is gone (chrome-stacking fix)
     expect(screen.queryByTestId("execution-mode-guide")).toBeNull();
-    expect(screen.getByTestId("studio-brand")).toBeTruthy();
+    // No brand block in the project header (Larry's directive,
+    // 2026-11-10): projects, Global LiTT, repo workspace status only.
+    expect(screen.queryByTestId("studio-brand")).toBeNull();
     fireEvent.click(screen.getByTestId("studio-dock-toggle"));
     expect(onToggleDock).toHaveBeenCalledTimes(1);
   });
@@ -265,6 +273,29 @@ describe("CommandStudioHeader — truthful status", () => {
     expect(screen.queryByLabelText("Runtime verified")).toBeNull();
   });
 
+  it("names the host-execution blocker instead of a generic not-ready (wave-4)", () => {
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={{
+          ...readyRuntime,
+          phase: "workspace_not_ready",
+          executionAvailable: false,
+          terminalConnected: false,
+          workspaceStatus: "failed",
+          error: { code: "HOST_EXECUTION_DISABLED", message: HOST_EXECUTION_UNAVAILABLE_MESSAGE },
+        }}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+
+    const pill = screen.getByLabelText(HOST_EXECUTION_UNAVAILABLE_LABEL);
+    expect(pill).toBeTruthy();
+    expect(pill.textContent).toContain(HOST_EXECUTION_UNAVAILABLE_SHORT);
+    expect(screen.queryByLabelText("Workspace not ready")).toBeNull();
+  });
+
   it("uses the strongest status only for canonical ready runtime and verified provider", () => {
     mockProviderHealth = { auto: "available" };
     render(
@@ -314,6 +345,26 @@ describe("CommandStudioHeader — mobile scroll affordance (Phase 1 #1)", () => 
   });
 
   it("keeps the dock toggle and overflow menu mounted in the header", () => {
+    // Board-only rebuild: the dock toggle renders only when a dock handler
+    // is provided (the board shell passes none — the Developer dock is
+    // retired there); the classic layout still passes one.
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        onToggleDockAction={vi.fn()}
+        runtime={noProjectRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+    expect(screen.getByTestId("studio-dock-toggle")).toBeTruthy();
+    expect(screen.getByLabelText("More actions")).toBeTruthy();
+  });
+
+  it("board shell header chrome: no dock toggle, no New Chat, no bell, no Owner badge", () => {
+    // Larry's cleanup (2026-11-14): the bell + Owner badge live in the app
+    // top bar beside "LiTT READY"; New Chat lives inside the board chat
+    // panel only; the Studio header keeps neither.
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
@@ -322,7 +373,189 @@ describe("CommandStudioHeader — mobile scroll affordance (Phase 1 #1)", () => 
         capabilities={mockCapabilities}
       />,
     );
-    expect(screen.getByTestId("studio-dock-toggle")).toBeTruthy();
-    expect(screen.getByLabelText("More actions")).toBeTruthy();
+    expect(screen.queryByTestId("studio-dock-toggle")).toBeNull();
+    expect(screen.queryByRole("button", { name: /new chat/i })).toBeNull();
+    expect(screen.queryByLabelText(/notifications/i)).toBeNull();
+    expect(screen.queryByTestId("owner-test-mode-indicator")).toBeNull();
+  });
+
+  it("workspace status popover reports real per-provider health, not subsystem capabilities", () => {
+    mockProviderHealth = {
+      Auto: "available",
+      gemini: "available",
+      groq: "unavailable",
+      openrouter: "unavailable",
+      ollama: "unavailable",
+    };
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={readyRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("agent-status-pill"));
+    const dialog = screen.getByRole("dialog", { name: /workspace status/i });
+    // One of the four health-checked providers is usable — a real count
+    // from the provider health map, not the selected-model boolean.
+    expect(dialog.textContent).toContain("1 of 4 available");
+    expect(dialog.textContent).toContain("Gemini");
+    expect(dialog.textContent).toContain("OpenRouter");
+    // The old row dressed a boolean as a count ("1 connected") and listed
+    // workspace subsystem capabilities (the fixture's connectionSummary)
+    // as if they were AI providers. Neither may appear.
+    expect(dialog.textContent).not.toContain("1 connected");
+    expect(dialog.textContent).not.toContain("AI connected");
+  });
+
+  it("workspace status popover carries exactly one availability count, derived from the provider health map", () => {
+    // Invariant (residual pin): the popover must never present two
+    // availability counts with different memberships — e.g. a second
+    // roll-up row ("Engine — Models N of M") next to the AI Providers
+    // row. There is exactly one count, and it is the provider summary.
+    mockProviderHealth = {
+      Auto: "available",
+      gemini: "available",
+      groq: "available",
+      openrouter: "available",
+      ollama: "unavailable",
+    };
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={readyRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("agent-status-pill"));
+    const dialog = screen.getByRole("dialog", { name: /workspace status/i });
+    const text = dialog.textContent ?? "";
+    expect(text).toContain("3 of 4 available");
+    const counts = text.match(/\d+ of \d+ available/g) ?? [];
+    expect(counts).toEqual(["3 of 4 available"]);
+    expect(text).not.toMatch(/engine/i);
+    expect(text).not.toMatch(/models \d+ of \d+/i);
+  });
+
+  it("workspace status popover says providers are still checking until health is verified", () => {
+    mockProviderHealth = {};
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={readyRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("agent-status-pill"));
+    const dialog = screen.getByRole("dialog", { name: /workspace status/i });
+    expect(dialog.textContent).toContain("AI Providers");
+    expect(dialog.textContent).not.toContain("None connected");
+    expect(dialog.textContent).not.toContain("AI connected");
+  });
+});
+
+describe("CommandStudioHeader — failed run must not sit under a green Ready pill", () => {
+  beforeEach(() => {
+    mockProviderHealth = { auto: "available" };
+  });
+
+  it("shows the Verified pill when the runtime is verified and no run failed", () => {
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={readyRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+    expect(screen.getByLabelText("Runtime verified")).toBeTruthy();
+    expect(screen.getByTestId("agent-status-pill").textContent).toContain("Verified");
+  });
+
+  it("replaces the Ready pill with Last run failed after a failed run", () => {
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={readyRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+        lastRunFailed={true}
+      />,
+    );
+    expect(screen.getByLabelText("Last run failed")).toBeTruthy();
+    expect(screen.getByTestId("agent-status-pill").textContent).toContain("Failed");
+    expect(screen.queryByLabelText("Runtime verified")).toBeNull();
+  });
+
+  it("approval and busy still outrank the failed-run pill", () => {
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={readyRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+        lastRunFailed={true}
+        busy={true}
+      />,
+    );
+    expect(screen.getByTestId("agent-status-pill").textContent).toContain("Working");
+  });
+});
+
+describe("CommandStudioHeader — crossbreed layout switch (Amendment 8)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockProviderHealth = {};
+  });
+
+  it("renders no switch when the layout props are absent", () => {
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={noProjectRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+      />,
+    );
+    expect(screen.queryByTestId("studio-layout-switch")).toBeNull();
+  });
+
+  it("shows Board selected in board mode and reports a flip to Regular", () => {
+    const onLayoutModeChange = vi.fn();
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={noProjectRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+        layoutMode="board"
+        onLayoutModeChange={onLayoutModeChange}
+      />,
+    );
+    expect(screen.getByTestId("studio-layout-switch")).toBeTruthy();
+    expect(screen.getByTestId("studio-layout-mode-board").getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByTestId("studio-layout-mode-classic").getAttribute("aria-selected")).toBe("false");
+    fireEvent.click(screen.getByTestId("studio-layout-mode-classic"));
+    expect(onLayoutModeChange).toHaveBeenCalledWith("classic");
+  });
+
+  it("shows Regular selected in classic mode and reports a flip back to Board", () => {
+    const onLayoutModeChange = vi.fn();
+    render(
+      <CommandStudioHeader
+        onPreviewAction={vi.fn()}
+        runtime={noProjectRuntime}
+        runtimeLoading={false}
+        capabilities={mockCapabilities}
+        layoutMode="classic"
+        onLayoutModeChange={onLayoutModeChange}
+      />,
+    );
+    expect(screen.getByTestId("studio-layout-mode-classic").getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByTestId("studio-layout-mode-board"));
+    expect(onLayoutModeChange).toHaveBeenCalledWith("board");
   });
 });

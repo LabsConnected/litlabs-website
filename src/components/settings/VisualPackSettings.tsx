@@ -2,11 +2,12 @@
 
 import { useTheme, VISUAL_PACKS, type VisualPack } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
-import type { WallpaperId } from "@/lib/wallpapers";
+import type { WallpaperId, WallpaperEffect } from "@/lib/wallpapers";
 import { Check } from "lucide-react";
 import { useState, useCallback } from "react";
 
 const PACK_PREVIEWS: Record<string, string> = {
+  "litt-signature": "radial-gradient(ellipse at 82% 12%, rgba(143,209,79,0.35) 0%, transparent 55%), radial-gradient(ellipse at 12% 88%, rgba(23,122,54,0.18) 0%, transparent 50%), linear-gradient(180deg, #FFFFFF 0%, #EDF3E4 100%)",
   "honeycomb-core": "radial-gradient(ellipse at 50% 50%, #fbbf2415 0%, transparent 60%), radial-gradient(ellipse at 20% 80%, #f59e0b12 0%, transparent 50%), radial-gradient(ellipse at 80% 20%, #d9770612 0%, transparent 50%), linear-gradient(180deg, #0d0a05 0%, #1a1510 100%)",
   "littree-forest": "radial-gradient(ellipse at 80% 80%, #22c55e20 0%, transparent 50%), radial-gradient(ellipse at 20% 20%, #16a34a20 0%, transparent 50%), linear-gradient(180deg, #0a1f0a 0%, #1a2f1a 50%, #0d1a0d 100%)",
   "cyber-lab": "repeating-linear-gradient(0deg, transparent, transparent 60px, #ff00ff08 60px, #ff00ff08 61px), repeating-linear-gradient(90deg, transparent, transparent 60px, #00ffff08 60px, #00ffff08 61px), linear-gradient(180deg, #1a0a1a 0%, #0d1a2e 50%, #0a0f1a 100%)",
@@ -30,18 +31,31 @@ function packMatchesTheme(pack: VisualPack, theme: ReturnType<typeof useTheme>["
 }
 
 export function VisualPackSettings() {
-  const { theme, applyVisualPack } = useTheme();
+  const { theme, applyVisualPack, resolvedColors: T } = useTheme();
   const { updateProfile } = useProfile();
   const [previewing, setPreviewing] = useState<string | null>(null);
 
   const handleApply = useCallback((pack: VisualPack) => {
     applyVisualPack(pack.id);
     if (pack.wallpaperId) {
+      // A pack is one look: align the profile-side wallpaper effect
+      // with the pack's background effect where the two concepts map
+      // 1:1, so a leftover effect from a previous look (e.g.
+      // constellation dots over the light Signature theme) cannot
+      // survive the apply. Unmapped modes leave the effect untouched.
+      const effectForMode: Partial<Record<string, WallpaperEffect>> = {
+        minimal: "none",
+        constellation: "constellation",
+        nebula: "nebula",
+        waves: "waves",
+      };
+      const alignedEffect = effectForMode[pack.backgroundMode];
       updateProfile({
         wallpaper: pack.wallpaperId as WallpaperId,
         wallpaperOverlay: pack.overlayOpacity ?? 0.46,
         wallpaperBlur: pack.layoutStyle === "glass" ? 2 : 0,
         wallpaperFit: "cover",
+        ...(alignedEffect ? { wallpaperEffect: alignedEffect } : {}),
       });
     }
   }, [applyVisualPack, updateProfile]);
@@ -60,13 +74,13 @@ export function VisualPackSettings() {
             onMouseLeave={() => setPreviewing(null)}
             className="group relative overflow-hidden rounded-2xl border p-4 text-left transition-all"
             style={{
-              borderColor: isActive ? "rgba(245,158,11,0.4)" : "rgba(255,255,255,0.08)",
-              backgroundColor: isActive ? "rgba(245,158,11,0.06)" : "rgba(255,255,255,0.02)",
+              borderColor: isActive ? "rgba(180,83,9,0.4)" : `${T.borderColor}66`,
+              backgroundColor: isActive ? "rgba(245,158,11,0.08)" : T.boxBg,
             }}
           >
             {/* Thumbnail preview */}
             <div
-              className="mb-3 h-20 w-full rounded-xl border border-white/5"
+              className="mb-3 h-20 w-full rounded-xl border border-black/10"
               style={{ background: PACK_PREVIEWS[pack.id] ?? "#0a0a0f" }}
             >
               <div className="flex h-full items-end gap-1.5 p-2">
@@ -78,28 +92,28 @@ export function VisualPackSettings() {
 
             {/* Active badge */}
             {isActive && (
-              <span className="absolute right-3 top-3 flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ backgroundColor: "rgba(245,158,11,0.15)", color: "#f59e0b" }}>
+              <span className="absolute right-3 top-3 flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ backgroundColor: "rgba(245,158,11,0.15)", color: "#b45309" }}>
                 <Check size={10} className="pointer-events-none" />
                 Active
               </span>
             )}
 
             {/* Pack info */}
-            <div className="text-sm font-bold text-white/90">{pack.name}</div>
-            <p className="mt-1 text-xs leading-5 text-white/40">{pack.description}</p>
+            <div className="text-sm font-bold" style={{ color: T.textColor }}>{pack.name}</div>
+            <p className="mt-1 text-xs leading-5" style={{ color: T.textMuted }}>{pack.description}</p>
 
             {/* Included settings */}
             <div className="mt-3 flex flex-wrap gap-1.5">
-              <span className="rounded-md bg-white/5 px-2 py-0.5 text-[10px] font-bold capitalize text-white/50">{pack.skin}</span>
-              <span className="rounded-md bg-white/5 px-2 py-0.5 text-[10px] font-bold capitalize text-white/50">{pack.layoutStyle}</span>
+              <span className="rounded-md bg-black/5 px-2 py-0.5 text-[10px] font-bold capitalize" style={{ color: T.textMuted }}>{pack.skin}</span>
+              <span className="rounded-md bg-black/5 px-2 py-0.5 text-[10px] font-bold capitalize" style={{ color: T.textMuted }}>{pack.layoutStyle}</span>
               {pack.effects?.glow && (
-                <span className="rounded-md bg-white/5 px-2 py-0.5 text-[10px] font-bold text-white/50">glow</span>
+                <span className="rounded-md bg-black/5 px-2 py-0.5 text-[10px] font-bold" style={{ color: T.textMuted }}>glow</span>
               )}
             </div>
 
             {/* Preview hint */}
             {isPreviewing && !isActive && (
-              <div className="mt-2 text-[10px] font-bold text-white/30">Click to apply</div>
+              <div className="mt-2 text-[10px] font-bold" style={{ color: T.textMuted }}>Click to apply</div>
             )}
           </button>
         );

@@ -54,22 +54,29 @@ export async function GET(request: NextRequest) {
     .order("created_at", { ascending: false })
     .limit(50);
 
-  // Get model usage stats from model_usage (if table exists)
+  // Get model usage stats from usage_events — the canonical metering store
+  // written by src/lib/metering.ts (one row per user action, with model,
+  // provider, and token counts). The legacy model_usage table has no writer
+  // anywhere in the codebase, so aggregating it always produced zeros.
+  // A usage_events row exists only for a completed user action (failed
+  // provider attempts write cost_events only), so every row counts as a
+  // success. usage_events carries no per-row charged-bits column, so
+  // credits stays 0 — the same effective value the dead table produced;
+  // actual charges live in credit_ledger (summarized above).
   const { data: modelStats } = await supabaseAdmin
-    .from("model_usage")
-    .select("litt_alias, model, provider, total_tokens, credits_cost, success")
+    .from("usage_events")
+    .select("model, provider, input_tokens, output_tokens")
     .eq("user_id", user.id)
-    .gte("called_at", since);
+    .gte("started_at", since);
 
   // Aggregate by model
   const byModel = new Map<string, { calls: number; tokens: number; credits: number; successes: number }>();
   for (const stat of modelStats ?? []) {
-    const key = stat.litt_alias ?? stat.model ?? "unknown";
+    const key = stat.model ?? stat.provider ?? "unknown";
     const existing = byModel.get(key) ?? { calls: 0, tokens: 0, credits: 0, successes: 0 };
     existing.calls += 1;
-    existing.tokens += stat.total_tokens ?? 0;
-    existing.credits += stat.credits_cost ?? 0;
-    if (stat.success) existing.successes += 1;
+    existing.tokens += (stat.input_tokens ?? 0) + (stat.output_tokens ?? 0);
+    existing.successes += 1;
     byModel.set(key, existing);
   }
 
@@ -81,6 +88,28 @@ export async function GET(request: NextRequest) {
     .gte("started_at", since)
     .order("started_at", { ascending: false })
     .limit(20);
+
+  // Studio agent runs are NOT in agent_runs: that table only gets a row
+  // when a marketplace agent's credits are reserved (agent-billing.ts,
+  // called from the Studio messages route only when a marketplace agent
+  // instance is attached). Built-in Studio runs — the runs the Activity
+  // panel shows — are durable ActionRuns in action_runs (run-store.ts),
+  // created by the same messages route for every execution task. Counting
+  // only agent_runs made "Agent runs" read 0 for users whose runs are all
+  // Studio runs. Count both stores so the total reflects real run history.
+  //
+  // Identity differs per store: action_runs.user_id is TEXT holding the
+  // Clerk user id — the messages route passes auth()'s userId (=== the
+  // Clerk id) verbatim into action_runtime_create_run, and the column's
+  // RLS compares auth.uid()::text = user_id. The internal users.id uuid
+  // used for agent_runs / usage_events / credit_ledger above never
+  // appears in action_runs, so counting by user.id matched zero rows for
+  // every user. Key this count on the Clerk id (userId from auth()).
+  const { count: actionRunCount } = await supabaseAdmin
+    .from("action_runs")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .gte("created_at", since);
 
   // credit_ledger records direction (credit|debit) + category — the
   // previous t.type filter matched no rows, so both totals were always 0.
@@ -99,7 +128,7 @@ export async function GET(request: NextRequest) {
     summary: {
       totalCreditsUsed,
       totalCreditsRefunded,
-      totalRuns: recentRuns?.length ?? 0,
+      totalRuns: (recentRuns?.length ?? 0) + (actionRunCount ?? 0),
     },
     modelUsage: Array.from(byModel.entries()).map(([model, stats]) => ({
       model,

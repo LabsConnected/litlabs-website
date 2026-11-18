@@ -126,6 +126,15 @@ export function changedPathsFromStatus(status: GitStatusResult): string[] {
 export async function computeWorkspaceChange(
   probe: WorkspaceChangeProbe | null | undefined,
   checkpoint: CheckpointInfo | null | undefined,
+  opts?: {
+    /**
+     * Round 11: why checkpoint creation failed, when it did (the
+     * transport records it — see WorkspaceTransport.lastCheckpointError).
+     * Surfaced in the unknown reason instead of the failure being
+     * swallowed to a silent null upstream.
+     */
+    checkpointError?: string | null;
+  },
 ): Promise<WorkspaceChangeEvidence> {
   if (!probe) {
     return {
@@ -137,7 +146,9 @@ export async function computeWorkspaceChange(
   if (!checkpoint?.gitSha) {
     return {
       status: "unknown",
-      unknownReason: "No pre-mutation checkpoint was recorded to compare against.",
+      unknownReason: opts?.checkpointError
+        ? `No pre-mutation checkpoint was recorded to compare against. Checkpoint creation failed: ${opts.checkpointError}`
+        : "No pre-mutation checkpoint was recorded to compare against.",
     };
   }
 
@@ -231,5 +242,76 @@ export async function computeWorkspaceChange(
     ...counts,
     checkpointSha: checkpoint.gitSha,
     rollbackAvailable: true,
+  };
+}
+
+/**
+ * Round 11 — volume-listing evidence fallback.
+ *
+ * When the exec-based probe path cannot produce a verdict (no
+ * checkpoint, a 500-class exec failure — the proof's Q2 pattern), the
+ * run used to report "Workspace unknown / 0 files" even though the
+ * workspace volume itself was perfectly readable: the Files panel
+ * reads the same tree through the /ws-files path without exec. This
+ * fallback verifies the concrete claim the run actually made — the
+ * paths its successful mutations declared — against a direct volume
+ * listing. A candidate file that is present on the volume IS a real
+ * workspace change; the fallback reports exactly those files, marked
+ * evidenceSource "volume-listing" with no diff and no rollback (there
+ * is no checkpoint to roll back to).
+ *
+ * Deliberately narrow: it only upgrades an "unknown" primary, only
+ * verifies paths the run's own tool results declared, and returns the
+ * primary untouched when nothing verifies. It never weakens the
+ * terminal gate — it reads through the same file-ops path the Files
+ * panel already uses, not through exec.
+ */
+export interface VolumeListingFallback {
+  /** Workspace-relative paths the run's successful mutations declared. */
+  candidatePaths: string[];
+  /** List one directory of the workspace volume (Files-panel read path). */
+  listDir: (dir: string) => Promise<Array<{ name: string; type: string }>>;
+}
+
+export async function workspaceChangeFromVolumeListing(
+  primary: WorkspaceChangeEvidence,
+  fallback: VolumeListingFallback,
+): Promise<WorkspaceChangeEvidence> {
+  if (primary.status !== "unknown") return primary;
+
+  const byDir = new Map<string, Set<string>>();
+  for (const raw of fallback.candidatePaths) {
+    const clean = raw.replace(/\\/g, "/").replace(/^\/+/, "");
+    const idx = clean.lastIndexOf("/");
+    const dir = idx === -1 ? "." : clean.slice(0, idx) || ".";
+    const base = idx === -1 ? clean : clean.slice(idx + 1);
+    if (!base) continue;
+    if (!byDir.has(dir)) byDir.set(dir, new Set());
+    byDir.get(dir)!.add(base);
+  }
+  if (byDir.size === 0) return primary;
+
+  const verified: string[] = [];
+  for (const [dir, names] of byDir) {
+    let entries: Array<{ name: string; type: string }>;
+    try {
+      entries = await fallback.listDir(dir);
+    } catch {
+      continue;
+    }
+    const present = new Set(
+      entries.filter((e) => e.type === "file").map((e) => e.name),
+    );
+    for (const name of names) {
+      if (present.has(name)) verified.push(dir === "." ? name : `${dir}/${name}`);
+    }
+  }
+  if (verified.length === 0) return primary;
+
+  return {
+    status: "changed",
+    files: [...new Set(verified)].sort(),
+    rollbackAvailable: false,
+    evidenceSource: "volume-listing",
   };
 }

@@ -18,29 +18,83 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import {
+  Bell,
   LogOut,
+  Settings as SettingsIcon,
   UserCircle,
   Wallet as WalletIcon,
-  Settings as SettingsIcon,
-  ChevronDown,
 } from "lucide-react";
-import { useTheme } from "@/context/ThemeContext";
+import { OwnerTestModeIndicator } from "@/components/OwnerTestModeIndicator";
+import { useTheme, resolveEffectiveMode } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
 import { useLittHealth } from "@/hooks/useLittHealth";
 import { planDisplayLabel } from "@/lib/plan-label";
 import {
   getVisibleMainNav,
-  getVisibleMoreNavSections,
+  withActiveProjectContext,
   APP_NAV_SECONDARY,
   isAppNavActive,
   type NavItem,
-  type NavMenuSection,
 } from "@/lib/navigation";
 import { BrandLogo } from "@/components/branding/BrandLogo";
-import GlobalLittEntry from "@/components/litt/GlobalLittEntry";
+
+type ResolvedColors = ReturnType<typeof useTheme>["resolvedColors"];
+
+/**
+ * Studio design palette for the top bar — the `.studio-shell` token
+ * values from globals.css, carried explicitly.
+ *
+ * The Studio page's default presentation is the approved light design
+ * (globals.css `.studio-shell` scope). This bar renders OUTSIDE that
+ * scope, so under a dark account theme it painted black over the light
+ * Studio (wave-3 Finding 1, Larry's screenshot 2026-11-10). Portaled
+ * Studio menus solve the identical problem the identical way — the
+ * light palette is carried explicitly (surface + text tokens). Only
+ * Studio routes take this palette, and only while the effective theme
+ * mode is LIGHT: since 2026-11-14 the Studio itself follows the
+ * theme in Dark mode (the globals.css STUDIO DARK RE-SCOPE), so in
+ * Dark the bar follows the active theme like every other route —
+ * carrying the light palette there repainted the white-bar patchwork
+ * Larry reported. The values are pinned to the CSS tokens by
+ * AppShell.topbar.test.ts so the two can never drift apart silently.
+ */
+export const STUDIO_TOP_BAR_COLORS: Partial<ResolvedColors> = {
+  bgColor: "#ffffff", // --studio-surface
+  boxBg: "#ffffff", // --studio-elevated
+  borderColor: "#86ac72", // --studio-border
+  textColor: "#0e1510", // --text-primary
+  textMuted: "#52684f", // --text-muted
+  linkColor: "#177a36", // --color-accent
+  headerColor: "#0e1510",
+  accentColor: "#177a36", // --color-accent
+};
+
+export function topBarColorsFor(
+  resolvedColors: ResolvedColors,
+  isStudio: boolean,
+  effectiveDark = false,
+): ResolvedColors {
+  return isStudio && !effectiveDark
+    ? { ...resolvedColors, ...STUDIO_TOP_BAR_COLORS }
+    : resolvedColors;
+}
+
+/** Live OS color-scheme, mirroring ThemeProvider's own listener, so
+ *  "system" mode resolves the same way here as in the theme. */
+function useSystemPrefersDark(): boolean {
+  const [prefersDark, setPrefersDark] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    setPrefersDark(mq.matches);
+    const onChange = (e: MediaQueryListEvent) => setPrefersDark(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return prefersDark;
+}
 
 /* ─── Identity Dock ────────────────────────────────────────────────── */
 
@@ -51,8 +105,11 @@ import GlobalLittEntry from "@/components/litt/GlobalLittEntry";
  * (below the bar, right-aligned) with Profile / Wallet / Settings /
  * Account / Sign out. Signed-out state shows a Sign in button.
  */
-function IdentityDock() {
-  const T = useTheme().resolvedColors;
+function IdentityDock({ T: TProp }: { T?: ResolvedColors }) {
+  const themeColors = useTheme().resolvedColors;
+  // TopBar passes the route-effective colors (Studio palette on Studio
+  // routes) so the account menu matches the bar it drops from.
+  const T = TProp ?? themeColors;
   const { isSignedIn, isLoaded, signOut } = useClerkAuth();
   const { user } = useAppUser();
   const [plan, setPlan] = useState("Free");
@@ -120,6 +177,10 @@ function IdentityDock() {
     role === "Owner" ? T.accentColor : role === "Free" ? T.textMuted : "#a78bfa";
   const avatarUrl = user.imageUrl;
 
+  // Settings lives HERE, in the account menu (Studio Finish Spec,
+  // Larry 2026-11-14 — supersedes the same-day board-only cleanup that
+  // kept it in the primary nav): it is out of the top navigation and
+  // reached from this menu on desktop and the More menu on the phone.
   const menuItems = [
     { label: "Profile", href: "/profile", icon: UserCircle },
     { label: "Wallet", href: "/wallet", icon: WalletIcon },
@@ -273,155 +334,82 @@ function TopNavItem({
   );
 }
 
-/* ─── More menu (secondary destinations) ────────────────────────────── */
+/* ─── Notifications bell ─────────────────────────────────────────────
+ * Lives in the TOP ROW beside the LiTT status (Larry, board-only
+ * cleanup 2026-11-14) — it moved up from the Studio header, which no
+ * longer carries its own bell or Owner badge. Polls the same
+ * /api/notifications/count endpoint the header used (truthful; falls
+ * back to no badge on error). */
+function NotificationsBell({ T }: { T: ResolvedColors }) {
+  const [notifCount, setNotifCount] = useState<number | null>(null);
 
-/**
- * MoreNavMenu — the "More" overflow item in the canonical nav.
- * Opens a grouped product-navigation dropdown. Account destinations stay in
- * the avatar menu. Portaled to document.body because the mobile nav strip is
- * overflow-x:auto and the blurred header is a containing block for fixed
- * descendants — an in-place dropdown would clip on both.
- */
-function MoreNavMenu({
-  sections,
-  active,
-  T,
-}: {
-  sections: NavMenuSection[];
-  active: boolean;
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-}) {
-  const [open, setOpen] = useState(false);
-  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const pathname = usePathname();
-
-  // Close on route change (a picked destination navigates away)
-  useEffect(() => setOpen(false), [pathname]);
-
-  // Close on outside click / Escape
   useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (btnRef.current?.contains(target)) return;
-      if ((target as Element).closest?.("[data-more-menu]")) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  const toggle = () => {
-    if (!open) {
-      const r = btnRef.current?.getBoundingClientRect();
-      if (r) {
-        setAnchor({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
+    let cancelled = false;
+    const fetchNotifs = async () => {
+      try {
+        const res = await fetch("/api/notifications/count", { credentials: "include" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setNotifCount(typeof data.count === "number" ? data.count : null);
+      } catch {
+        if (!cancelled) setNotifCount(null);
       }
-    }
-    setOpen((v) => !v);
-  };
+    };
+    void fetchNotifs();
+    const id = window.setInterval(fetchNotifs, 45_000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
 
   return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={toggle}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-current={active ? "page" : undefined}
-        data-testid="nav-more"
-        className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[13px] font-bold transition-all"
-        style={{
-          background: active ? `${T.accentColor}14` : "transparent",
-          color: active ? T.textColor : T.textMuted,
-          boxShadow: active ? `inset 0 -2px 0 ${T.accentColor}` : "none",
-        }}
-      >
-        More
-        <ChevronDown
-          size={14}
-          style={{
-            transform: open ? "rotate(180deg)" : "none",
-            transition: "transform 150ms",
-            color: active ? T.accentColor : undefined,
-          }}
-        />
-      </button>
-      {open &&
-        anchor &&
-        typeof document !== "undefined" &&
-        createPortal(
-          <div
-            data-more-menu
-            role="menu"
-            aria-label="More"
-            className="w-64 rounded-xl border p-2 shadow-2xl"
-            style={{
-              position: "fixed",
-              top: anchor.top,
-              right: anchor.right,
-              zIndex: 60,
-              borderColor: `${T.borderColor}30`,
-              background: `${T.bgColor}f8`,
-              backdropFilter: "blur(16px)",
-            }}
-          >
-            {sections.map((section) => (
-              <div key={section.id} className="not-first:mt-2">
-                <div className="px-2.5 pb-1 pt-1 text-[9px] font-black uppercase tracking-[0.14em]" style={{ color: T.textMuted }}>
-                  {section.label}
-                </div>
-                {section.items.map((item) => {
-                  if (!item.href) return null;
-                  const Icon = item.icon;
-                  return (
-                    <Link
-                      key={item.label}
-                      href={item.href}
-                      role="menuitem"
-                      onClick={() => setOpen(false)}
-                      className="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-xs font-bold transition hover:bg-white/5"
-                      style={{ color: T.textMuted }}
-                    >
-                      <Icon size={14} className="shrink-0" />
-                      {item.label}
-                    </Link>
-                  );
-                })}
-              </div>
-            ))}
-          </div>,
-          document.body,
-        )}
-    </>
+    <Link
+      href="/studio"
+      className="relative hidden min-h-9 min-w-9 shrink-0 place-items-center rounded-lg transition-all hover:bg-black/5 sm:grid"
+      style={{ color: T.textMuted }}
+      aria-label={`Notifications${notifCount ? ` (${notifCount} unread)` : ""}`}
+      title="Notifications"
+      data-testid="topbar-notifications-bell"
+    >
+      <Bell size={15} />
+      {notifCount ? (
+        <span
+          className="absolute -right-0.5 -top-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full px-1 text-[8px] font-black"
+          style={{ backgroundColor: "#ef4444", color: "#fff" }}
+        >
+          {notifCount > 99 ? "99+" : notifCount}
+        </span>
+      ) : null}
+    </Link>
   );
 }
 
 function TopBar() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { resolvedColors: T } = useTheme();
+  const { resolvedColors, theme } = useTheme();
   const { isSignedIn } = useClerkAuth();
   const { balance, displayBalance, isLoading: walletLoading, isError: walletError } = useWallet();
   const littHealth = useLittHealth();
+  const systemPrefersDark = useSystemPrefersDark();
 
   // Studio manages its own mobile chrome (header, bottom nav, composer),
   // so the scrollable nav strip is skipped there — the single-row bar
   // (logo + status + account) still renders.
   const isStudio = pathname?.startsWith("/studio") ?? false;
+  // On Studio routes the bar wears the Studio design (see
+  // STUDIO_TOP_BAR_COLORS) while the effective mode is light; in Dark
+  // the Studio follows the theme, so the bar does too.
+  const effectiveDark = resolveEffectiveMode(theme.mode, systemPrefersDark) === "dark";
+  const T = topBarColorsFor(resolvedColors, isStudio, effectiveDark);
 
   const checkActive = (href?: string) => isAppNavActive(pathname, searchParams, href);
-  const mainItems = getVisibleMainNav();
-  const moreSections = getVisibleMoreNavSections();
-  const moreActive = moreSections.some((section) => section.items.some((i) => i.href && checkActive(i.href)));
-
+  // Studio destinations in the top bar carry the active project
+  // (?project=) from the current URL — without this, navigating to
+  // Assets/Agents/Missions from inside a project dropped the param and
+  // Studio re-resolved to a different project (audit ART-20261111-082).
+  const mainItems = withActiveProjectContext(
+    getVisibleMainNav(),
+    searchParams?.get("project"),
+  );
   return (
     <header
       // Studio owns a viewport-locked, overflow-hidden layout. A sticky
@@ -433,14 +421,27 @@ function TopBar() {
         background: `${T.bgColor}e6`,
         backdropFilter: "blur(14px)",
         borderBottom: `1px solid ${T.borderColor}20`,
-        boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
+        // The Studio header's own soft green shadow on Studio routes;
+        // the deep neutral shadow belongs to the dark themes.
+        boxShadow: isStudio ? "0 4px 20px rgba(14,60,26,0.08)" : "0 8px 32px rgba(0,0,0,0.25)",
       }}
     >
-      {/* Main bar row */}
-      <div className="flex h-14 items-center gap-2 px-3 md:gap-3 md:px-4">
-        <BrandLogo href="/dashboard" size={30} showText={false} variant="full" />
+      {/* Main bar row — Studio routes run one step denser (h-12), and
+          the wide brand mark sits on a dark chip there: the asset is
+          white artwork on black, so on the light Studio bar it washed
+          out to a smudge at small sizes. The chip keeps the artwork on
+          its native background at a legible size. */}
+      <div className={`flex ${isStudio ? "h-12" : "h-14"} items-center gap-2 px-3 md:gap-3 md:px-4`}>
+        <BrandLogo
+          href="/studio"
+          size={isStudio ? 34 : 30}
+          showText={false}
+          variant="full"
+          className={isStudio ? "rounded-lg bg-[#050505] px-1.5 py-1 shadow-sm ring-1 ring-black/15" : ""}
+        />
 
-        {/* Desktop nav — canonical main items + More overflow */}
+        {/* Desktop nav — canonical main items, all visible (the More
+            overflow menu was emptied and removed, Larry 2026-11-16) */}
         <nav className="ml-2 hidden items-center gap-0.5 md:flex" aria-label="Primary">
           {mainItems.map((item) => (
             <TopNavItem
@@ -450,7 +451,6 @@ function TopBar() {
               T={T}
             />
           ))}
-          <MoreNavMenu sections={moreSections} active={moreActive} T={T} />
         </nav>
 
         <div className="flex-1" />
@@ -491,7 +491,7 @@ function TopBar() {
             {walletLoading ? (
               <span
                 className="inline-block h-3 w-14 animate-pulse rounded align-middle"
-                style={{ background: "rgba(255,255,255,0.08)" }}
+                style={{ background: isStudio ? "rgba(14,60,26,0.08)" : "rgba(255,255,255,0.08)" }}
                 aria-label="Loading balance"
               />
             ) : walletError ? (
@@ -502,8 +502,14 @@ function TopBar() {
           </span>
         )}
 
+        {/* Notifications + Owner — the top-row cluster beside LiTT
+            status (moved up from the Studio header, 2026-11-14). The
+            Owner indicator self-hides for non-owners. */}
+        <NotificationsBell T={T} />
+        <OwnerTestModeIndicator placement="inline" />
+
         {/* Identity dock — avatar + account menu */}
-        <IdentityDock />
+        <IdentityDock T={T} />
       </div>
 
       {/* Mobile nav strip — horizontally scrollable, skipped on Studio */}
@@ -524,7 +530,6 @@ function TopBar() {
               T={T}
             />
           ))}
-          <MoreNavMenu sections={moreSections} active={moreActive} T={T} />
         </nav>
       )}
     </header>
@@ -547,7 +552,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Suspense fallback={<div className="h-14 shrink-0" />}>
         <TopBar />
       </Suspense>
-      <Suspense fallback={null}><GlobalLittEntry /></Suspense>
+      {/* Global LiTT floating entry removed app-wide (Larry, 2026-11-13):
+          entry point only — the GlobalLittProvider, routes, and backend
+          are untouched; Studio chat is the operator surface now. */}
 
       {/* Main content */}
       <main

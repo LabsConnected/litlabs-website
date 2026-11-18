@@ -7,6 +7,73 @@ import { getAdminSupabase } from "@/lib/supabase-admin";
 
 export type FeedTab = "for-you" | "following" | "trending";
 
+/**
+ * Canonical projectRef shape for Discover posts — the full object the
+ * Composer sends and PostCard renders (mirrors ProjectRefDTO in
+ * src/components/feed/types.ts). Stored in the posts.project_ref TEXT
+ * column as a JSON string; no separate columns, no migration.
+ */
+export interface ProjectRefDTO {
+  projectId: string | null;
+  name: string;
+  url: string | null;
+}
+
+function isHttpsUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const u = new URL(value);
+    return u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validate an untrusted projectRef (request body or parsed storage) into the
+ * canonical object. Returns null for anything malformed — a ref without a
+ * displayable name is not a ref. Non-https urls are dropped to null, matching
+ * the API's https-only rule for media/link/music URLs.
+ */
+export function normalizeProjectRef(value: unknown): ProjectRefDTO | null {
+  if (!value || typeof value !== "object") return null;
+  const ref = value as { projectId?: unknown; name?: unknown; url?: unknown };
+  const name = typeof ref.name === "string" ? ref.name.trim().slice(0, 200) : "";
+  if (!name) return null;
+  const projectId =
+    typeof ref.projectId === "string" && ref.projectId.trim()
+      ? ref.projectId.trim().slice(0, 200)
+      : null;
+  const url = isHttpsUrl(ref.url) ? ref.url : null;
+  return { projectId, name, url };
+}
+
+/** Storage form for posts.project_ref (TEXT): the canonical object as JSON. */
+export function serializeProjectRef(ref: ProjectRefDTO | null): string | null {
+  return ref ? JSON.stringify(ref) : null;
+}
+
+/**
+ * Read form for posts.project_ref (TEXT). Parses the JSON object written by
+ * serializeProjectRef back to the canonical object. Legacy values stored
+ * before refs were JSON — a bare plain project id — are tolerated and
+ * surface as an id-only ref with an empty name rather than being dropped.
+ * Malformed JSON or a JSON value that isn't a valid ref yields null.
+ */
+export function parseProjectRef(raw: string | null | undefined): ProjectRefDTO | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("{")) {
+    try {
+      return normalizeProjectRef(JSON.parse(trimmed) as unknown);
+    } catch {
+      return null;
+    }
+  }
+  return { projectId: trimmed.slice(0, 200), name: "", url: null };
+}
+
 export interface PostAuthorDTO {
   id: string;
   username: string;
@@ -30,7 +97,7 @@ export interface PostDTO {
     viewerVotedOptionId: string | null;
     totalVotes: number;
   } | null;
-  projectRef: string | null;
+  projectRef: ProjectRefDTO | null;
   music: { title: string; artist: string | null; url: string | null } | null;
   counts: { likes: number; comments: number; reposts: number; saves: number; shares: number };
   viewer: { liked: boolean; reaction: string | null; reposted: boolean; saved: boolean };
@@ -231,7 +298,7 @@ async function hydratePostDTOs(posts: any[], viewerDbId: string | null): Promise
             totalVotes: options.reduce((s, o) => s + o.votes, 0),
           }
         : null,
-      projectRef: p.project_ref ?? null,
+      projectRef: parseProjectRef(p.project_ref),
       music:
         p.music_title || p.music_url
           ? { title: p.music_title ?? "", artist: p.music_artist ?? null, url: p.music_url ?? null }

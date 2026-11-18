@@ -136,13 +136,13 @@ export function MicMixerPanel({ accentColor = "var(--color-accent)" }: MicMixerP
     <div className="space-y-3">
       {/* Input device */}
       <div>
-        <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
           Input device
         </span>
         <select
           value={selectedDeviceId ?? "default"}
           onChange={(e) => onSelectDevice(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none"
+          className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-xs text-zinc-900 outline-none"
         >
           <option value="default">System default</option>
           {devices.map((d) => (
@@ -152,12 +152,12 @@ export function MicMixerPanel({ accentColor = "var(--color-accent)" }: MicMixerP
           ))}
         </select>
         {deviceChanged && (
-          <p className="mt-1 text-[10px] text-amber-400">
+          <p className="mt-1 text-[10px] text-amber-600">
             Applies on your next voice session — restart the mic to switch now.
           </p>
         )}
         {devices.length === 0 && (
-          <p className="mt-1 text-[10px] text-white/40">
+          <p className="mt-1 text-[10px] text-zinc-500">
             No devices listed yet — grant microphone permission in Studio, or test the mic above.
           </p>
         )}
@@ -166,10 +166,10 @@ export function MicMixerPanel({ accentColor = "var(--color-accent)" }: MicMixerP
       {/* Input gain + live level meter */}
       <div>
         <div className="flex items-center justify-between">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
             Input gain
           </span>
-          <span className="text-[10px] font-bold text-white/60">
+          <span className="text-[10px] font-bold text-zinc-600">
             {Math.round(inputGain * 100)}%
           </span>
         </div>
@@ -183,7 +183,7 @@ export function MicMixerPanel({ accentColor = "var(--color-accent)" }: MicMixerP
           className="mt-1 w-full"
           style={{ accentColor }}
         />
-        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-black/10">
           <div
             className="h-full rounded-full transition-[width] duration-100"
             style={{ width: `${muted ? 0 : levelPercent}%`, backgroundColor: meterColor }}
@@ -194,10 +194,10 @@ export function MicMixerPanel({ accentColor = "var(--color-accent)" }: MicMixerP
       {/* Output volume */}
       <div>
         <div className="flex items-center justify-between">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
             Output volume (LiTT&apos;s voice)
           </span>
-          <span className="text-[10px] font-bold text-white/60">
+          <span className="text-[10px] font-bold text-zinc-600">
             {Math.round(outputVolume * 100)}%
           </span>
         </div>
@@ -239,7 +239,7 @@ export function MicMixerPanel({ accentColor = "var(--color-accent)" }: MicMixerP
         </button>
       </div>
 
-      <p className="text-[10px] text-white/40">
+      <p className="text-[10px] text-zinc-500">
         Gain shapes what LiTT hears (VAD runs post-gain). Volume shapes what you hear.
       </p>
     </div>

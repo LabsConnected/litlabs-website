@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { canonicalSurfaceToPersist, resolveStageSurface } from "./stage-surfaces";
+import {
+  canonicalSurfaceToPersist,
+  resolveStageSurface,
+  DIRECTIVE_STAGE_ORDER,
+  directiveStageToSurface,
+  surfaceToDirectiveStage,
+} from "./stage-surfaces";
 
 /**
  * Phase 3 regression — single-writer surface persistence.
@@ -132,5 +138,25 @@ describe("canonicalSurfaceToPersist", () => {
         storedSurface: "code",
       }),
     ).toBeNull();
+  });
+});
+
+describe("Directive stage adapter (Phase 2)", () => {
+  it("stage order is exactly Plan, Canvas & Design, Code, Preview, Media", () => {
+    expect(DIRECTIVE_STAGE_ORDER).toEqual(["plan", "canvas-design", "code", "preview", "media"]);
+  });
+
+  it("each stage drives one primary surface and round-trips", () => {
+    for (const stage of DIRECTIVE_STAGE_ORDER) {
+      expect(surfaceToDirectiveStage(directiveStageToSurface(stage))).toBe(stage);
+    }
+    expect(directiveStageToSurface("canvas-design")).toBe("design");
+    expect(directiveStageToSurface("media")).toBe("images");
+  });
+
+  it("non-stage surfaces have no Directive stage (they live in the sidebar, bottom panel, or secondary cluster)", () => {
+    for (const surface of ["files", "assets", "deploy", "activity", "browser", "terminal"] as const) {
+      expect(surfaceToDirectiveStage(surface)).toBeNull();
+    }
   });
 });

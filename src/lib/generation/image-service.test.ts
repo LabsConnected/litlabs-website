@@ -35,6 +35,24 @@ vi.mock("@/lib/media", () => ({
         free: false,
       };
     }
+    if (id === "openai") {
+      return {
+        id: "openai",
+        label: "OpenAI",
+        supportedFormats: ["image"],
+        cost: () => 5,
+        free: false,
+      };
+    }
+    if (id === "cloudflare") {
+      return {
+        id: "cloudflare",
+        label: "Cloudflare",
+        supportedFormats: ["image"],
+        cost: () => 0,
+        free: true,
+      };
+    }
     return undefined;
   },
 }));
@@ -142,6 +160,12 @@ function makeDeps(overrides: Partial<ImageServiceDeps> = {}) {
         if (job.id === jobId) job.metadata = { ...job.metadata, ...updates };
       }
     },
+    getJob: async (jobId) => {
+      for (const job of jobs.values()) {
+        if (job.id === jobId) return job;
+      }
+      return null;
+    },
     getBalances: async () => ({ total: 1000 }),
     debit: async (_clerkId, amount, _reason, key) => {
       calls.debit.push({ amount, key });
@@ -199,6 +223,32 @@ describe("generateImage", () => {
     expect(calls.dispatch).toBe(1);
     expect(calls.debit).toHaveLength(1);
     expect(calls.debit[0]).toMatchObject({ amount: 50, key: "image:charge:op_1" });
+  });
+
+  it("round 14: a completion that does not read back is flagged, not reported as a persisted asset", async () => {
+    // Simulates the lion-proof failure at the service boundary: the
+    // completion writes were issued, but the row still reads
+    // "processing" with no durable URL (the flip silently failed in
+    // the jobs layer). The generation itself succeeded — the service
+    // must still return the image — but it must NOT claim a
+    // persisted asset: assetPersistenceFailed is set and no job id
+    // is reported as the asset.
+    const { deps } = makeDeps({
+      getJob: async (jobId) => makeJob({ id: jobId, status: "processing", metadata: {} }),
+    });
+    const result = await generateImage(
+      { userId: "user_abc", projectId: "proj_1", requestId: "op_1" },
+      paidInput,
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.assetPersistenceFailed).toBe(true);
+      expect(result.generationJobId).toBeNull();
+      expect(result.assetId).toBeNull();
+      expect(result.downloadUrl).toBe("https://provider/x.png");
+    }
   });
 
   it("replays a completed operation — no second generation, no second debit", async () => {
@@ -294,6 +344,146 @@ describe("generateImage", () => {
       expect(result.cost).toBe(0);
     }
     expect(calls.dispatch).toBe(1);
+    expect(calls.debit).toHaveLength(0);
+  });
+});
+
+describe("generateImage — provider fallthrough to the no-key last resort", () => {
+  // Regression for the 2026-11-15 production proof (build 4bd24248):
+  // the approved Studio image.generate died with the raw error
+  // "OpenAI error: ... Incorrect API key provided ..." even though a
+  // wired no-key provider existed. In production the auto-free chain
+  // was exactly ["openai"] (Cloudflare/Alibaba keys unset) and the
+  // present-but-dead OpenAI key passed isProviderConfigured, so the
+  // sole chain member's auth failure was terminal. Pollinations is
+  // now the terminal entry of AUTO_FREE_ORDER and of the manual-pin
+  // fallthrough, so a dead key can never be the terminal answer while
+  // any provider can still serve.
+  //
+  // Provider "configured" state is read from module-level env consts,
+  // so each test re-imports the service with a stubbed env (the same
+  // pattern the handleCloudflareImage suite below uses).
+  const PROVIDER_ENV_KEYS = [
+    "OPENAI_API_KEY",
+    "FAL_KEY",
+    "RECRAFT_API_KEY",
+    "GEMINI_API_KEY",
+    "TOGETHER_API_KEY",
+    "HUGGING_FACE_API_KEY",
+    "CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_AI_API_TOKEN",
+    "ALIBABA_DASHSCOPE_API_KEY",
+    "ALIBABA_MODELSTUDIO_WORKSPACE_ID",
+  ];
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  async function importGenerateImage(env: Record<string, string>) {
+    vi.resetModules();
+    for (const key of PROVIDER_ENV_KEYS) vi.stubEnv(key, env[key] ?? "");
+    const mod = await import("./image-service");
+    return mod.generateImage;
+  }
+
+  function recordingDispatch(failures: Record<string, Error>) {
+    const order: string[] = [];
+    const dispatch = async (providerId: string, _input: unknown, prompt: string) => {
+      order.push(providerId);
+      const failure = failures[providerId];
+      if (failure) throw failure;
+      return {
+        id: `res_${providerId}`,
+        status: 200,
+        title: prompt.slice(0, 60),
+        format: "image" as const,
+        downloadUrl: `https://provider/${providerId}.png`,
+      };
+    };
+    return { dispatch, order };
+  }
+
+  const deadOpenAiKey = new Error(
+    'OpenAI error: { "error": { "message": "Incorrect API key provided: sk-proj-***" } }',
+  );
+
+  it("auto-free: a dead OpenAI key falls through to Pollinations and the operation succeeds", async () => {
+    const generateImageFresh = await importGenerateImage({ OPENAI_API_KEY: "sk-test-dead" });
+    const { dispatch, order } = recordingDispatch({ openai: deadOpenAiKey });
+    const { deps, calls } = makeDeps({ dispatch: dispatch as ImageServiceDeps["dispatch"] });
+
+    const result = await generateImageFresh(
+      { userId: "user_abc", requestId: "op_fallthrough_auto" },
+      { prompt: "a lion", generationMode: "auto-free" },
+      deps,
+    );
+
+    expect(order).toEqual(["openai", "pollinations"]);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.providerId).toBe("pollinations");
+      expect(result.free).toBe(true);
+      expect(result.cost).toBe(0);
+    }
+    // The serving provider is free — the dead provider's price is never charged.
+    expect(calls.debit).toHaveLength(0);
+  });
+
+  it("manual pin: a dead pinned OpenAI key falls through the chain to Pollinations", async () => {
+    const generateImageFresh = await importGenerateImage({ OPENAI_API_KEY: "sk-test-dead" });
+    const { dispatch, order } = recordingDispatch({ openai: deadOpenAiKey });
+    const { deps, calls } = makeDeps({ dispatch: dispatch as ImageServiceDeps["dispatch"] });
+
+    const result = await generateImageFresh(
+      { userId: "user_abc", requestId: "op_fallthrough_pin" },
+      { prompt: "a lion", providerId: "openai" },
+      deps,
+    );
+
+    expect(order).toEqual(["openai", "pollinations"]);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.providerId).toBe("pollinations");
+    expect(calls.debit).toHaveLength(0);
+  });
+
+  it("auto-free with no keys configured at all still serves via Pollinations", async () => {
+    const generateImageFresh = await importGenerateImage({});
+    const { dispatch, order } = recordingDispatch({});
+    const { deps } = makeDeps({ dispatch: dispatch as ImageServiceDeps["dispatch"] });
+
+    const result = await generateImageFresh(
+      { userId: "user_abc", requestId: "op_fallthrough_nokeys" },
+      { prompt: "a lion", generationMode: "auto-free" },
+      deps,
+    );
+
+    expect(order).toEqual(["pollinations"]);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.providerId).toBe("pollinations");
+  });
+
+  it("when every provider including the last resort fails, the error names all of them", async () => {
+    const generateImageFresh = await importGenerateImage({ OPENAI_API_KEY: "sk-test-dead" });
+    const { dispatch, order } = recordingDispatch({
+      openai: deadOpenAiKey,
+      pollinations: new Error("Pollinations upstream rate limit (429)"),
+    });
+    const { deps, calls } = makeDeps({ dispatch: dispatch as ImageServiceDeps["dispatch"] });
+
+    const result = await generateImageFresh(
+      { userId: "user_abc", requestId: "op_fallthrough_allfail" },
+      { prompt: "a lion", generationMode: "auto-free" },
+      deps,
+    );
+
+    expect(order).toEqual(["openai", "pollinations"]);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toContain("All configured image providers failed");
+      expect(result.error).toContain("Tried: openai, pollinations");
+    }
     expect(calls.debit).toHaveLength(0);
   });
 });

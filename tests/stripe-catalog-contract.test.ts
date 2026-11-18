@@ -13,36 +13,36 @@ import {
 // (which requires Supabase and Stripe integration tests).
 
 describe("Stripe catalog — verified plan products", () => {
-  it("Creator Lite: $9.99/month recurring (test-mode pending live)", () => {
+  it("Creator Lite: $9.99/month recurring (live)", () => {
     expect(VERIFIED_STRIPE_PLANS.creator_lite.priceCents).toBe(999);
     expect(VERIFIED_STRIPE_PLANS.creator_lite.priceMode).toBe("recurring");
     expect(VERIFIED_STRIPE_PLANS.creator_lite.envVar).toBe("STRIPE_PRICE_CREATOR_LITE");
-    expect(VERIFIED_STRIPE_PLANS.creator_lite.stripeStatus).toBe("test_mode_pending_live");
+    expect(VERIFIED_STRIPE_PLANS.creator_lite.stripeStatus).toBe("exists");
     expect(PLANS.creator_lite.monthlyPriceCents).toBe(999);
     expect(PLANS.creator_lite.billingType).toBe("subscription");
   });
 
-  it("Creator: $19.99/month recurring (test-mode pending live)", () => {
+  it("Creator: $19.99/month recurring (live)", () => {
     expect(VERIFIED_STRIPE_PLANS.creator_beta.priceCents).toBe(1999);
     expect(VERIFIED_STRIPE_PLANS.creator_beta.priceMode).toBe("recurring");
     expect(VERIFIED_STRIPE_PLANS.creator_beta.envVar).toBe("STRIPE_PRICE_CREATOR_BETA");
-    expect(VERIFIED_STRIPE_PLANS.creator_beta.stripeStatus).toBe("test_mode_pending_live");
+    expect(VERIFIED_STRIPE_PLANS.creator_beta.stripeStatus).toBe("exists");
     expect(PLANS.creator_beta.monthlyPriceCents).toBe(1999);
     expect(PLANS.creator_beta.billingType).toBe("subscription");
   });
 
-  it("Pro Builder Beta: $39/month recurring", () => {
-    expect(VERIFIED_STRIPE_PLANS.pro_builder_beta.priceCents).toBe(3900);
+  it("Pro Builder Beta: $39.99/month recurring", () => {
+    expect(VERIFIED_STRIPE_PLANS.pro_builder_beta.priceCents).toBe(3999);
     expect(VERIFIED_STRIPE_PLANS.pro_builder_beta.priceMode).toBe("recurring");
     expect(VERIFIED_STRIPE_PLANS.pro_builder_beta.envVar).toBe("STRIPE_PRICE_PRO_BUILDER_BETA");
-    expect(PLANS.pro_builder_beta.monthlyPriceCents).toBe(3900);
+    expect(PLANS.pro_builder_beta.monthlyPriceCents).toBe(3999);
     expect(PLANS.pro_builder_beta.billingType).toBe("subscription");
   });
 
-  it("Founding Member: $149 one-time", () => {
+  it("Founding Member: $149 one-time (retired, envVar removed)", () => {
     expect(VERIFIED_STRIPE_PLANS.founder.priceCents).toBe(14900);
     expect(VERIFIED_STRIPE_PLANS.founder.priceMode).toBe("one_time");
-    expect(VERIFIED_STRIPE_PLANS.founder.envVar).toBe("STRIPE_PRICE_FOUNDER");
+    expect(VERIFIED_STRIPE_PLANS.founder.envVar).toBeNull();
     expect(PLANS.founder.monthlyPriceCents).toBe(14900);
     expect(PLANS.founder.billingType).toBe("one_time");
   });

@@ -68,7 +68,20 @@ export default function AnimatedBackground() {
   const wallpaper = getWallpaperById(profile.wallpaper);
   const customWallpaper = profile.wallpaper === "custom" && profile.customWallpaperUrl;
   const showWallpaper = profile.wallpaper !== "mesh" && (profile.wallpaper !== "custom" || customWallpaper);
-  const wallpaperEffect = profile.wallpaperEffect ?? "none";
+  // Theme wins over stale profile wallpaper state (the coupling defect:
+  // theme and profile each store a "background effect", and a light
+  // theme could be sabotaged by a leftover dark veil / dot layer):
+  //  - a "minimal" theme background effect means NO profile effect
+  //    layer draws on top of the wallpaper;
+  //  - under a light theme the near-black overlay veil below is not
+  //    applied — it exists to dim photo wallpapers for light text on
+  //    dark themes, and over a light wallpaper it renders the whole
+  //    app grey (verified live: Pure Minimal + Light/Sigature still
+  //    rendered slate because overlay 0.46 + a constellation profile
+  //    effect survived every settings change).
+  const wallpaperEffect =
+    mode === "minimal" ? "none" : (profile.wallpaperEffect ?? "none");
+  const showDarkVeil = theme.mode !== "light" && profile.wallpaperOverlay > 0;
   const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
@@ -474,10 +487,12 @@ export default function AnimatedBackground() {
               }}
               onError={() => setImageFailed(true)}
             >
-          <div
-            className="absolute inset-0"
-            style={{ backgroundColor: `rgba(2, 4, 10, ${profile.wallpaperOverlay})` }}
-          />
+          {showDarkVeil && (
+            <div
+              className="absolute inset-0"
+              style={{ backgroundColor: `rgba(2, 4, 10, ${profile.wallpaperOverlay})` }}
+            />
+          )}
           {/* Effect overlay layer — rendered on top of the wallpaper image.
               CSS classes defined in globals.css. Respects prefers-reduced-motion. */}
           {wallpaperEffect !== "none" && !imageFailed && (

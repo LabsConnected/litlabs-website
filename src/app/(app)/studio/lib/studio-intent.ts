@@ -5,8 +5,8 @@ export type StudioIntent =
   | "generate_code"
   | "generate_image"
   | "generate_video"
+  | "generate_music"
   | "open_terminal"
-  | "run_command"
   | "connect_github"
   | "start_blank_project"
   | "open_files"
@@ -38,8 +38,15 @@ export interface IntentResult {
 const MUTATION_VERB = /\b(modif(?:y|ication)|change|edit|update|rewrite|replace|remove|delete|add|create|build|deploy|publish)\b/i;
 const MUTATION_TARGET = /\b(file|content|text|paragraph|code|project|site|page|hero|section|button|component|approval|diff)\b/i;
 
-export function extractMediaPrompt(input: string, media: "image" | "video"): string {
+export function extractMediaPrompt(input: string, media: "image" | "video" | "music"): string {
   const text = input.trim();
+  if (media === "music") {
+    return (
+      text
+        .replace(/^(?:please\s+)?(?:generate|create|make|compose|write|produce)\s+(?:(?:me|us)\s+)?(?:(?:a|an|the)\s+)?(?:song|track|beat|anthem|ballad|jingle|melody|tune|music)?\s*(?:about\s+|of\s+|for\s+|with\s+)?/i, "")
+        .trim() || text
+    );
+  }
   if (media === "video") {
     return (
       text
@@ -150,12 +157,16 @@ const INTENT_PATTERNS: IntentPattern[] = [
       /^(open|show|go to)\b.*\bsettings\b/i,
     ],
   },
-  {
-    intent: "run_command",
-    patterns: [
-      /^run\b\s+\S/i,
-    ],
-  },
+  // No run_command intent on purpose (Step 6 fix, 2026-11-14): the old
+  // /^run\b/ shortcut could only open the Terminal panel and print a
+  // canned line — it carried no command text, so it structurally could
+  // not execute anything, yet it swallowed every "Run …" request
+  // before the agent loop ever saw it and the turn closed with a
+  // synthesized "Done — No files changed" card. Shell-command requests
+  // now reach the agent, which runs them for real through
+  // terminal.execute (the kernel classifies them taskKind "exec").
+  // Same rule as deploy/publish: never short-circuit a request the
+  // shortcut cannot actually perform.
   {
     intent: "generate_video",
     tool: "video",
@@ -178,6 +189,23 @@ const INTENT_PATTERNS: IntentPattern[] = [
       /\bmake\b.*\bwallpaper\b/i,
       // P1-1: natural phrasings — "generate a picture", "make me a logo".
       /\b(generate|create|make)\b.*\b(picture|photo|logo|drawing|artwork|illustration|banner|poster)\b/i,
+    ],
+  },
+  {
+    intent: "generate_music",
+    tool: "music",
+    patterns: [
+      // Tight: the verb directly shapes the music noun ("make a beat",
+      // "write an anthem", "generate a full song").
+      /\b(?:generate|create|make|compose|write|produce)\s+(?:(?:me|us)\s+)?(?:(?:a|an|the)\s+)?(?:(?:short|full(?:[ -]length)?|instrumental)\s+)?(?:song|track|beat|anthem|ballad|jingle|melody|tune)\b/i,
+      // "make music" / "generate music" — but never a music VIDEO: that
+      // is a video request and must not land in the Music Studio.
+      /\b(?:generate|create|make|compose)\s+(?:(?:me|us)\s+)?(?:(?:a|an|the)\s+)?music\b(?!\s+(?:video|clip)\b)/i,
+      // Loose: a style phrase may sit between verb and noun ("compose an
+      // orchestral track", "make a dark trap song"). The gap is bounded
+      // and may not cross a video/clip mention, so "make a music video
+      // of my song" is never claimed as a music request.
+      /\b(?:generate|create|make|compose|write|produce)\b(?:(?!\b(?:video|clip)\b)[^.?!]){0,40}?\b(?:song|beat|anthem|ballad|jingle|track)\b/i,
     ],
   },
   {
@@ -262,18 +290,16 @@ function buildIntentResult(
       };
     case "open_settings":
       return { intent, message: "Opening Settings." };
-    case "run_command":
-      return {
-        intent,
-        tool: "terminal",
-        message: "Opening Terminal to run that command.",
-      };
     case "generate_image":
       // P1-1: prefill the REAL surface with the cleaned-up prompt, not the
       // raw sentence — same as generate_video below.
       return { intent, tool, message: "", prompt: extractMediaPrompt(originalText, "image") };
     case "generate_video":
       return { intent, tool, message: "", prompt: extractMediaPrompt(originalText, "video") };
+    case "generate_music":
+      // Same P1-1 contract as image/video: the cleaned request is staged
+      // in the real Music Studio — the pane carries no prompt of its own.
+      return { intent, tool, message: "", prompt: extractMediaPrompt(originalText, "music") };
     case "generate_code":
       return { intent, message: "" };
     default:
@@ -299,6 +325,8 @@ export interface StudioIntentHandlers {
   onOpenImageStudio?: (prompt: string) => void;
   /** Open the real Video Studio surface with the prompt prefilled. */
   onOpenVideoStudio?: (prompt: string) => void;
+  /** Open the real Music Studio surface with the request staged. */
+  onOpenMusicStudio?: (prompt: string) => void;
 }
 
 /**
@@ -325,6 +353,10 @@ export function dispatchStudioIntent(
   }
   if (intent.intent === "generate_video") {
     handlers.onOpenVideoStudio?.(intent.prompt ?? "");
+    return;
+  }
+  if (intent.intent === "generate_music") {
+    handlers.onOpenMusicStudio?.(intent.prompt ?? "");
     return;
   }
   if (intent.intent === "open_files" || intent.intent === "file_question") {
@@ -370,14 +402,14 @@ export function buildIntentResponseMessage(
   if (intent.intent === "start_blank_project") {
     return "Opening the new-project dialog.";
   }
-  if (intent.intent === "run_command") {
-    return "Opening Terminal to run that command.";
-  }
   if (intent.intent === "generate_image") {
     return "Opening the image generator.";
   }
   if (intent.intent === "generate_video") {
     return "Opening the video generator.";
+  }
+  if (intent.intent === "generate_music") {
+    return "Opening the music studio.";
   }
   if (intent.intent === "project_health") {
     return runtime.terminalConnected

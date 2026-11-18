@@ -9,6 +9,7 @@
  * operations. The browser calls Next.js, which calls terminal-server.
  */
 
+import { createPreviewToken } from "@/lib/projects/preview-token";
 import { resolveTerminalInternalUrl } from "@/lib/terminal-url";
 
 const INTERNAL_KEY = () => process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
@@ -57,16 +58,30 @@ export interface WorkspaceGetResponse {
  * Budgets: prepare can clone a repo and copy a template (generous);
  * preview start/restart can npm-install and boot a dev server; everything
  * else is a quick status check.
+ *
+ * Start/restart get 330s, matching the Studio preview panel's start-POST
+ * budget (StudioPreviewPanel.tsx, raised there by PR #1007). The 120s
+ * these used to carry was the binding constraint of the 2026-11-15
+ * round-5 failure: the terminal's start handler legitimately blocks
+ * longer than 120s — it queues on the per-workspace lock behind a
+ * prepare's sandbox create + whole-tree mirror, and can install inline
+ * (300s exec budget) before booting the dev server — so the web route
+ * aborted healthy starts at 120s and reported "Terminal server timed
+ * out after 120s: POST /internal/workspace/{id}/preview/start" while
+ * the terminal kept working. The panel aborting its own POST first is
+ * safe (it polls status instead); this client giving up first was not,
+ * because it converted a live start into a hard failure.
  */
 export const TERMINAL_TIMEOUTS = {
   prepareWorkspace: 180_000,
-  startPreview: 120_000,
-  restartPreview: 120_000,
+  startPreview: 330_000,
+  restartPreview: 330_000,
   getWorkspace: 20_000,
   getPreviewStatus: 20_000,
   stopPreview: 20_000,
   getPreviewLogs: 20_000,
   runtimeSnapshot: 10_000,
+  sandboxAvailability: 5_000,
 } as const;
 
 /**
@@ -129,7 +144,21 @@ export async function prepareWorkspaceInternal(
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => "Unknown error");
-    throw new Error(`Workspace prepare failed (${resp.status}): ${text}`);
+    // Thread the terminal-server's machine code (e.g. the fail-closed
+    // 503's HOST_EXECUTION_DISABLED) onto the error, mirroring
+    // startPreviewInternal — callers key truthful UI states off it
+    // instead of parsing it back out of the message text.
+    let errorCode: string | null = null;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed?.code) errorCode = String(parsed.code);
+      else if (parsed?.errorCode) errorCode = String(parsed.errorCode);
+    } catch {
+      // Not JSON — fall through
+    }
+    const err = new Error(`Workspace prepare failed (${resp.status}): ${text}`);
+    if (errorCode) (err as { code?: string }).code = errorCode;
+    throw err;
   }
 
   return (await resp.json()) as WorkspacePrepareResponse;
@@ -232,11 +261,14 @@ export async function startPreviewInternal(
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => "Unknown error");
-    // Try to extract errorCode from the terminal-server's error response
+    // Try to extract the machine code from the terminal-server's error
+    // response — its fail-closed refusals send `code`; other surfaces
+    // have used `errorCode`. Accept either.
     let errorCode: string | null = null;
     try {
       const parsed = JSON.parse(text);
       if (parsed?.errorCode) errorCode = String(parsed.errorCode);
+      else if (parsed?.code) errorCode = String(parsed.code);
     } catch {
       // Not JSON — fall through
     }
@@ -357,10 +389,17 @@ export async function stopPreviewInternal(
 
 /**
  * Restart a preview dev server on the terminal server.
+ *
+ * Round 13: accepts the caller's freshly resolved project env, like
+ * startPreviewInternal — the terminal's restart route takes it and
+ * prefers it over the runtime's persisted env, so an explicit
+ * restart after a secret change picks the new keys up instead of
+ * silently reusing the old ones.
  */
 export async function restartPreviewInternal(
   workspaceId: string,
   userId: string,
+  options?: { projectEnv?: Record<string, string> },
 ): Promise<PreviewStartResponse> {
   const key = INTERNAL_KEY();
   if (key.length < 32) {
@@ -376,7 +415,7 @@ export async function restartPreviewInternal(
         "Content-Type": "application/json",
         "X-Internal-Service-Key": key,
       },
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({ userId, projectEnv: options?.projectEnv }),
     },
     TERMINAL_TIMEOUTS.restartPreview,
     "POST /internal/workspace/{id}/preview/restart",
@@ -425,13 +464,39 @@ export async function getPreviewLogsInternal(
   return data.logs ?? [];
 }
 
+export interface PreviewProxyScope {
+  userId: string;
+  projectId: string;
+}
+
 /**
  * Build the public preview proxy URL for a workspace.
  * The browser uses this URL to access the running dev server.
+ *
+ * Phase 2 build-list fix #3: when the caller knows the owner and
+ * project, the URL carries a SIGNED preview token minted for exactly
+ * that (user, project, workspace) instead of the shared global
+ * PREVIEW_ACCESS_TOKEN — the global credential must never reach a
+ * browser. Signed tokens expire after 5 minutes, so a scoped URL is a
+ * short-lived capability, not a durable link (callers re-mint on
+ * read). When no scope is supplied — or minting is unavailable in this
+ * environment — the historical global-token behavior is preserved:
+ * the terminal accepts both channels during the transition.
  */
-export function buildPreviewProxyUrl(workspaceId: string): string {
+export function buildPreviewProxyUrl(workspaceId: string, scope?: PreviewProxyScope): string {
   const base = TERMINAL_BASE().replace(/\/+$/, "");
-  const token = process.env.PREVIEW_ACCESS_TOKEN ?? "";
+  let token = process.env.PREVIEW_ACCESS_TOKEN ?? "";
+  if (scope) {
+    try {
+      token = createPreviewToken(scope.userId, {
+        projectId: scope.projectId,
+        workspaceId,
+      }).token;
+    } catch {
+      // Minting unavailable (e.g. TERMINAL_AUTH_SECRET unset locally):
+      // fall back to the legacy channel rather than breaking preview.
+    }
+  }
   const tokenParam = token ? `?token=${encodeURIComponent(token)}` : "";
 
   const candidate = `${base}/preview/${encodeURIComponent(workspaceId)}${tokenParam}`;
@@ -487,4 +552,82 @@ export async function getRuntimeSnapshotInternal(): Promise<unknown> {
   }
 
   return (await resp.json()) as unknown;
+}
+
+export interface SandboxAvailability {
+  provider: string | null;
+  routingEnabled: boolean;
+  verified: boolean;
+  allowed: boolean;
+  reason: string;
+}
+
+const SANDBOX_AVAILABILITY_UNAVAILABLE: SandboxAvailability = {
+  provider: null,
+  routingEnabled: false,
+  verified: false,
+  allowed: false,
+  reason: "availability-unavailable",
+};
+
+const SANDBOX_AVAILABILITY_CACHE_TTL_MS = 12_000;
+const sandboxAvailabilityCache = new Map<
+  string,
+  { value: SandboxAvailability; expiresAt: number }
+>();
+
+/**
+ * Ask the terminal server whether sandboxed execution is CURRENTLY
+ * available for a user (Phase 2 build-list §3.2). This is the web
+ * process's only window into the sandbox gate: the web process cannot
+ * observe the canary or runner state itself, and no web-side env flag
+ * may substitute for this answer.
+ *
+ * FAIL CLOSED: any error, timeout, non-OK status, or unparseable body
+ * yields { allowed: false }. Results are cached per user for ~12s so
+ * the Studio's polling routes do not hammer the terminal server; a
+ * stale "allowed" can only ever be seconds old, and the terminal
+ * re-checks its own gate on every routed call.
+ */
+export async function getSandboxAvailability(userId: string): Promise<SandboxAvailability> {
+  const cached = sandboxAvailabilityCache.get(userId);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  let value: SandboxAvailability = SANDBOX_AVAILABILITY_UNAVAILABLE;
+  try {
+    const key = INTERNAL_KEY();
+    const base = TERMINAL_BASE();
+    if (key.length >= 32 && base) {
+      const url = `${base}/internal/sandbox/availability?userId=${encodeURIComponent(userId)}`;
+      const resp = await fetchWithTimeout(
+        url,
+        { method: "GET", headers: { "X-Internal-Service-Key": key } },
+        TERMINAL_TIMEOUTS.sandboxAvailability,
+        "GET /internal/sandbox/availability",
+      );
+      if (resp.ok) {
+        const body = (await resp.json()) as Partial<SandboxAvailability>;
+        value = {
+          provider: typeof body.provider === "string" ? body.provider : null,
+          routingEnabled: body.routingEnabled === true,
+          verified: body.verified === true,
+          allowed: body.allowed === true,
+          reason: typeof body.reason === "string" ? body.reason : "availability-unavailable",
+        };
+      }
+    }
+  } catch {
+    value = SANDBOX_AVAILABILITY_UNAVAILABLE;
+  }
+
+  sandboxAvailabilityCache.set(userId, {
+    value,
+    expiresAt: Date.now() + SANDBOX_AVAILABILITY_CACHE_TTL_MS,
+  });
+  return value;
+}
+
+/** Convenience for gate sites: true only on a fresh allowed:true. */
+export async function isSandboxExecutionAvailable(userId: string): Promise<boolean> {
+  return (await getSandboxAvailability(userId)).allowed;
 }

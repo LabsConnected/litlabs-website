@@ -129,14 +129,70 @@ export function stationActionToToolDefinition(action: StationAction): LiTTToolDe
 /** Station action ids already synced into the tool registry (idempotent sync). */
 const SYNCED_ACTION_IDS = new Set<string>();
 
+/** Station action ids this sync actually registered (not collision-skipped). */
+const STATION_ADVERTISED_IDS = new Set<string>();
+
+/**
+ * Station actions whose arguments resolve result ids from creator-state
+ * `lastResults`, mapped to the station generate that populates that store.
+ *
+ * `lastResults` is written ONLY by the station generate (image.ts pushes
+ * `img_<requestId>` refs via pushCreatorResult). The agent loop's
+ * image.generate TOOL is a different implementation: it returns provider
+ * ids (`pollinations_<ts>`) and never touches creator-state. When the
+ * station generate loses the tool-registry collision to that tool — the
+ * additive rule above — the loop therefore contains result consumers
+ * whose id store can never be populated, and every call fails
+ * deterministically ("not a known result id and not a public URL",
+ * round-11 diagnosis Q1). The save call is also redundant there: the
+ * registry auto-insert already persisted the image under generate's own
+ * approval.
+ *
+ * Rule: advertise a result consumer only when its station generate is
+ * (or will be) the registered generate. The station actions themselves
+ * stay registered for their station/UI callers, whose generate DOES
+ * populate the store — this gates only the tool-registry advertisement.
+ */
+const RESULT_CONSUMER_GENERATE: Readonly<Record<string, string>> = {
+  "image.selectResult": "image.generate",
+  "image.saveAsset": "image.generate",
+  "image.sendToCanvas": "image.generate",
+};
+
+/**
+ * Whether the station generate `generateId` is (or will be, in this
+ * sync) the tool-registry's registered generate — i.e. its creator-state
+ * result store can actually be populated through the loop.
+ */
+function stationGenerateIsAdvertised(
+  generateId: string,
+  actions: readonly StationAction[],
+): boolean {
+  if (STATION_ADVERTISED_IDS.has(generateId)) return true;
+  // Already processed and not registered by us: it lost its collision.
+  if (SYNCED_ACTION_IDS.has(generateId)) return false;
+  if (!actions.some((a) => a.id === generateId)) return false;
+  // Not yet processed: it will register only if no tool holds the id.
+  return !toolRegistry.get(generateId);
+}
+
 /**
  * Register every station action as a tool-registry tool. Idempotent — safe
  * to call twice. On an id collision the existing tool keeps its
  * advertisement (additive, never clobbering the stabilized registry).
  */
 export function syncStationActionsToToolRegistry(): void {
-  for (const action of listStationActions()) {
+  const actions = listStationActions();
+  for (const action of actions) {
     if (SYNCED_ACTION_IDS.has(action.id)) continue;
+    const generateId = RESULT_CONSUMER_GENERATE[action.id];
+    if (generateId && !stationGenerateIsAdvertised(generateId, actions)) {
+      // The loop's generate cannot populate this action's result store,
+      // so the call could only fail. Do not advertise it to the loop;
+      // the station action remains available to station/UI callers.
+      SYNCED_ACTION_IDS.add(action.id);
+      continue;
+    }
     if (toolRegistry.get(action.id)) {
       // Collision: the existing tool keeps its advertisement.
       SYNCED_ACTION_IDS.add(action.id);
@@ -184,5 +240,6 @@ export function syncStationActionsToToolRegistry(): void {
       handler as (inputs: Record<string, unknown>) => Promise<unknown>,
     );
     SYNCED_ACTION_IDS.add(action.id);
+    STATION_ADVERTISED_IDS.add(action.id);
   }
 }

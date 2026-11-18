@@ -1,22 +1,23 @@
 import type { Metadata } from "next";
 import { buildMetadata } from "@/lib/seo";
 import { SafeEmailText } from "@/components/SafeEmail";
+import "@/app/public-pages-tlc.css";
 
 export const metadata: Metadata = buildMetadata({
   title: "Cookie Policy",
-  description: "Cookie Policy for LiTTree LabStudios AI creative operating system and social creator platform.",
+  description: "Cookie Policy for LiTTree LabStudios — home of LiTT, the AI Project Operator.",
   path: "/cookies",
   index: true,
 });
 
 export default function CookiesPage() {
   return (
-    <div className="min-h-screen pb-20 font-mono text-xs" style={{ backgroundColor: "var(--bg-color)", color: "var(--text-color)" }}>
+    <div className="litt-legal min-h-screen pb-20 font-mono text-xs" style={{ backgroundColor: "var(--bg-color)", color: "var(--text-color)" }}>
       <div className="max-w-3xl mx-auto px-4 py-12">
         <div className="lit-box p-6 mb-8" style={{ borderColor: "var(--border-color)", backgroundColor: "var(--bg-card)" }}>
           <div className="lit-header -mx-6 -mt-6 mb-4" style={{ color: "white" }}>🍪 Cookie Policy</div>
           <p className="text-[10px] opacity-60 uppercase tracking-widest">
-            Last Updated: June 5, 2026 · Transparency First
+            Last Updated: November 10, 2026 · Transparency First
           </p>
         </div>
 
@@ -48,10 +49,11 @@ export default function CookiesPage() {
               <div className="border p-3" style={{ borderColor: "var(--border-color)" }}>
                 <h3 className="font-bold text-xs mb-1" style={{ color: "var(--link-color)" }}>📊 Analytics</h3>
                 <p className="opacity-80">
-                  We may use Vercel Analytics to collect basic, anonymous usage
-                  metrics (page views, performance). Vercel Analytics does not
-                  use cross-site tracking cookies. No advertising or marketing
-                  cookies are used.
+                  We use privacy-conscious, first-party analytics to collect
+                  basic, anonymous usage metrics (page views, feature usage).
+                  Analytics events are only sent after you consent via our
+                  cookie banner. No cross-site tracking, advertising, or
+                  marketing cookies are used.
                 </p>
               </div>
             </div>

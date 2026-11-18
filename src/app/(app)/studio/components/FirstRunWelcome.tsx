@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { ArrowRight, Loader2, Sparkles } from "lucide-react";
 import LiTTPresence from "./LiTTPresence";
-import GlobalLittStudioEntry from "@/components/global-litt/GlobalLittStudioEntry";
 
 /**
  * FirstRunWelcome — the dedicated welcome screen for fresh users.
@@ -177,10 +176,8 @@ export default function FirstRunWelcome({
           No setup needed. Just describe it and go.
         </p>
 
-        {/* Global LiTT entry — available even before any project exists */}
-        <div className="mt-2 flex justify-center">
-          <GlobalLittStudioEntry />
-        </div>
+        {/* Global LiTT entry removed 2026-11-13 (Larry): the Studio
+            chat covers that role; backend and routes untouched. */}
       </div>
     </div>
   );

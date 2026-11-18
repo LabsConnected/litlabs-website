@@ -46,7 +46,9 @@ function currentMode() {
 /** No primary workspace stage tab is active — the signature of the
     Builder surface (contextual work mode + workSurface "builder"). */
 function expectBuilderSurfaceActive() {
-  for (const id of ["canvas", "code", "preview"]) {
+  // Phase 2: the tab row presents the five Directive stages; on the
+  // Builder surface none of them is active.
+  for (const id of ["plan", "canvas-design", "code", "preview", "media"]) {
     const tab = screen.queryByTestId(`workspace-tab-${id}`);
     expect(tab, `workspace-tab-${id} should be rendered`).toBeTruthy();
     expect(tab!.className, `workspace-tab-${id} should be inactive`).not.toContain("glass-active");
@@ -498,6 +500,17 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     expect(previewBtn.className).toContain("glass-active");
   });
 
+  it("opens with the LiTT panel expanded on the Chat tab (owner always-show rule)", async () => {
+    // Larry's rule (2026-11-12): the chat panel always shows on open —
+    // expanded, on the Chat tab. A legacy localStorage collapse value
+    // (written automatically by the old behaviour) must not pin it shut
+    // on a fresh visit.
+    localStorage.setItem("littree:studio:litt-collapsed", "true");
+    await renderCommandStudio();
+    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
+    expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
+  });
+
   describe("serverProjectId resolution (fresh-conversation 409 race)", () => {
     // Regression coverage for the fresh-account "stale revision" 409 on
     // message #1: capabilities.projectId resolves via an async fetch that
@@ -687,10 +700,11 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     it("direct ?tool=build mounts the Builder surface with the workspace chrome", async () => {
       setUrl("tool=build");
       await renderCommandStudio();
-      // The primary workspace row remains visible. Plan is a contextual
-      // surface, not a fourth competing primary workspace mode.
-      expect(screen.queryByTestId("workspace-tab-plan")).toBeNull();
-      expect(screen.getByTestId("workspace-tab-canvas")).toBeTruthy();
+      // The primary workspace row remains visible with the five
+      // Directive stage tabs (Phase 2); the Builder surface activates
+      // none of them.
+      expect(screen.getByTestId("workspace-tab-plan")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-canvas-design")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-code")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-preview")).toBeTruthy();
       expectBuilderSurfaceActive();
@@ -832,7 +846,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       const view = await renderCommandStudio();
       expectBuilderSurfaceActive();
       const user = userEvent.setup();
-      const canvasBtn = screen.getByTestId("workspace-tab-canvas");
+      const canvasBtn = screen.getByTestId("workspace-tab-canvas-design");
       await user.click(canvasBtn);
       await waitFor(() => expect(canvasBtn.className).toContain("glass-active"));
       await waitFor(() => expect(currentTool()).toBe("canvas"));
@@ -865,21 +879,21 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(codeBtn.className).toContain("glass-active");
     });
 
-    it("opening and closing the Files dock tab does not leave Builder", async () => {
+    it("opening and closing Files (LiTT panel tab) does not leave Builder", async () => {
       setUrl("tool=build");
       const view = await renderCommandStudio();
       expectBuilderSurfaceActive();
       const user = userEvent.setup();
-      // Files is a dock tab — opening it must not change the
-      // active Builder surface or the canonical URL.
-      await user.click(screen.getByTestId("dock-collapsed-toggle"));
-      await user.click(screen.getByTestId("dock-tab-files"));
-      expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "true");
+      // Files lives in the LiTT panel's top row now (the dock's Files
+      // tab is retired) — opening it must not change the active
+      // Builder surface or the canonical URL.
+      await user.click(screen.getByTestId("litt-tab-files"));
+      expect(screen.getByTestId("litt-files-panel")).toHaveAttribute("data-active", "true");
       act(() => view.rerender(<CommandStudio />));
       expectBuilderSurfaceActive();
       expect(currentTool()).toBe("build");
-      // Close the dock
-      await user.click(screen.getByTestId("dock-close"));
+      // Back to Chat — still on Builder.
+      await user.click(screen.getByTestId("litt-tab-chat"));
       act(() => view.rerender(<CommandStudio />));
       expectBuilderSurfaceActive();
       expect(currentTool()).toBe("build");
@@ -1064,11 +1078,14 @@ describe("CommandStudio — mounted Work-surface routing", () => {
   });
 
   describe("canonical workspace tabs", () => {
-    it("renders exactly four workspace tabs: Plan, Canvas, Code, Preview", async () => {
+    it("renders exactly the five Directive stage tabs: Plan, Canvas & Design, Code, Preview, Media", async () => {
       await renderCommandStudio();
-      expect(screen.getByTestId("workspace-tab-canvas")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-plan")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-canvas-design")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-code")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-preview")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-media")).toBeTruthy();
+      expect(screen.getAllByTestId(/^workspace-tab-/)).toHaveLength(5);
     });
 
     it("Preview tab is active by default (preview is primary surface)", async () => {
@@ -1077,9 +1094,9 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(previewBtn.className).toContain("glass-active");
     });
 
-    it("clicking Canvas switches to canvas stage", async () => {
+    it("clicking Canvas & Design switches to the Canvas & Design stage", async () => {
       const { user } = await renderCommandStudio();
-      const canvasBtn = screen.getByTestId("workspace-tab-canvas");
+      const canvasBtn = screen.getByTestId("workspace-tab-canvas-design");
       await user.click(canvasBtn);
       await waitFor(() => {
         expect(canvasBtn.className).toContain("glass-active");
@@ -1104,16 +1121,20 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       });
     });
 
-    it("keeps Plan contextual while the primary workspace stays reduced", async () => {
+    it("Plan is a first-class stage tab (Phase 2) and activates the Plan stage", async () => {
       const { user } = await renderCommandStudio();
       // Go to Code first.
       await user.click(screen.getByTestId("workspace-tab-code"));
-      // Plan is no longer a persistent competing tab. The contextual route
-      // remains available through existing Studio routing and the primary
-      // row exposes only Design / Code / Preview.
-      expect(screen.queryByTestId("workspace-tab-plan")).toBeNull();
-      expect(screen.getByTestId("workspace-tab-canvas")).toBeTruthy();
+      // Phase 2 supersedes the old "Plan is contextual only" rule:
+      // Plan is one of the five presented stages, in the same row.
+      expect(screen.getByTestId("workspace-tab-plan")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-canvas-design")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-code")).toBeTruthy();
+      const planBtn = screen.getByTestId("workspace-tab-plan");
+      await user.click(planBtn);
+      await waitFor(() => {
+        expect(planBtn.className).toContain("glass-active");
+      });
       const previewBtn = screen.getByTestId("workspace-tab-preview");
       await user.click(previewBtn);
       await waitFor(() => {
@@ -1201,9 +1222,9 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       const { user } = await renderCommandStudio();
       // Collapse LiTT
       await user.click(screen.getByTestId("litt-panel-collapse"));
-      // The reduced primary workspace tabs should still be present.
-      expect(screen.queryByTestId("workspace-tab-plan")).toBeNull();
-      expect(screen.getByTestId("workspace-tab-canvas")).toBeTruthy();
+      // The five Directive stage tabs should still be present.
+      expect(screen.getByTestId("workspace-tab-plan")).toBeTruthy();
+      expect(screen.getByTestId("workspace-tab-canvas-design")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-code")).toBeTruthy();
       expect(screen.getByTestId("workspace-tab-preview")).toBeTruthy();
     });
@@ -1211,7 +1232,8 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     it("unified dock replaces the desktop Context Drawer", async () => {
       await renderCommandStudio();
       // The old desktop Context Drawer is gone from the desktop topology;
-      // Activity/Files/Terminal/Inspector/Media live in the bottom dock.
+      // Activity/Terminal/Inspector/Media live in the bottom dock;
+      // Files lives in the LiTT panel's top row.
       expect(screen.queryByTestId("context-drawer")).toBeNull();
     });
 
@@ -1223,13 +1245,14 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.getByTestId("dock-content-activity")).toBeTruthy();
     });
 
-    it("clicking the dock Files tab activates the Files panel", async () => {
+    it("the LiTT panel Files tab activates the Files panel; the dock has no Files tab", async () => {
       const { user } = await renderCommandStudio();
       await user.click(screen.getByTestId("studio-dock-toggle"));
-      await user.click(screen.getByTestId("dock-tab-files"));
-      expect(screen.getByTestId("dock-tab-files")).toHaveAttribute("aria-selected", "true");
-      expect(screen.getByTestId("dock-tab-activity")).toHaveAttribute("aria-selected", "false");
-      expect(screen.getByTestId("dock-content-files")).toBeTruthy();
+      expect(screen.queryByTestId("dock-tab-files")).toBeNull();
+      await user.click(screen.getByTestId("litt-tab-files"));
+      expect(screen.getByTestId("litt-tab-files")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByTestId("litt-tab-chat")).toHaveAttribute("aria-pressed", "false");
+      expect(screen.getByTestId("litt-files-panel")).toHaveAttribute("data-active", "true");
     });
 
     it("Ctrl+Shift+A opens the dock on the Activity tab", async () => {
@@ -1251,13 +1274,13 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     it("switching dock tabs reflects the active tab truthfully", async () => {
       const { user } = await renderCommandStudio();
       await user.click(screen.getByTestId("studio-dock-toggle"));
-      // Open on Files
-      await user.click(screen.getByTestId("dock-tab-files"));
-      expect(screen.getByTestId("dock-tab-files")).toHaveAttribute("aria-selected", "true");
+      // Open on Media
+      await user.click(screen.getByTestId("dock-tab-media"));
+      expect(screen.getByTestId("dock-tab-media")).toHaveAttribute("aria-selected", "true");
       // Switch to Inspector inside the dock
       await user.click(screen.getByTestId("dock-tab-inspector"));
       expect(screen.getByTestId("dock-tab-inspector")).toHaveAttribute("aria-selected", "true");
-      expect(screen.getByTestId("dock-tab-files")).toHaveAttribute("aria-selected", "false");
+      expect(screen.getByTestId("dock-tab-media")).toHaveAttribute("aria-selected", "false");
       expect(screen.getByTestId("dock-content-inspector")).toBeTruthy();
     });
 
@@ -1267,9 +1290,9 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       // The collapsed drawer has one entry point; contextual tabs appear
       // after opening it.
       await user.click(screen.getByTestId("dock-collapsed-toggle"));
-      await user.click(screen.getByTestId("dock-tab-files"));
+      await user.click(screen.getByTestId("dock-tab-media"));
       expect(screen.getByTestId("studio-dock")).toHaveAttribute("data-open", "true");
-      expect(screen.getByTestId("dock-tab-files")).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByTestId("dock-tab-media")).toHaveAttribute("aria-selected", "true");
     });
 
     it("dock close button closes the dock", async () => {
@@ -1354,16 +1377,34 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.getByTestId("litt-mobile-sheet")).not.toBeVisible();
     });
 
-    it("mobile chat shows the compact Build status bar instead of the Mission card stack", async () => {
+    it("mobile chat shows the compact Build status control in the sheet chrome instead of the Mission card stack", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
       const { user } = await renderCommandStudio();
       // The chat sheet is open on entry, already on the Chat tab.
       await user.click(screen.getByTestId("litt-mobile-tab-chat"));
 
-      // Mobile density redesign: one ~36px status bar, no card stack.
+      // Clean-open: one ~36px light status control in the sheet's header
+      // chrome (not a dark bar over the transcript), no card stack.
       expect(screen.getByTestId("mobile-build-status")).toBeVisible();
+      expect(screen.getByTestId("litt-mobile-build-status-slot")).toContainElement(
+        screen.getByTestId("mobile-build-status"),
+      );
       expect(screen.queryByTestId("mission-card-mission")).toBeNull();
       expect(screen.queryByTestId("mission-card-actions")).toBeNull();
+    });
+
+    it("mobile Build status control opens the Build sheet with the Mission cards", async () => {
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
+      const { user } = await renderCommandStudio();
+      await user.click(screen.getByTestId("litt-mobile-tab-chat"));
+
+      await user.click(screen.getByTestId("mobile-build-status"));
+      const sheet = screen.getByTestId("mobile-build-sheet");
+      expect(sheet).toBeVisible();
+      // The MissionCards surface renders inside the sheet (with no active
+      // mission in this harness it shows its empty state — the individual
+      // cards are covered by MissionCards.test.tsx).
+      expect(sheet).toContainElement(screen.getByTestId("mission-cards"));
     });
 
     it("desktop keeps the MissionCards stack in the Activity dock tab, not the LiTT panel", async () => {
@@ -1379,19 +1420,11 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.queryByTestId("mobile-build-status")).toBeNull();
     });
 
-    it("laptop tier defaults to the collapsed LiTT rail when no preference is stored", async () => {
-      // F1 workspace-first: LiTT opens on the 64px ambient HUD rail (no
-      // permanent desktop column) unless the user has an explicit persisted
-      // preference. Expanding opens the floating overlay panel.
-      globalThis.__TEST_VIEWPORT_WIDTH__ = 1200;
-      await renderCommandStudio();
-      await waitFor(() => {
-        expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
-      });
-    });
-
-    it("laptop tier does not override an explicit stored preference", async () => {
-      localStorage.setItem("littree:studio:litt-collapsed", "false");
+    it("laptop tier defaults to the expanded LiTT panel when no preference is stored", async () => {
+      // Larry's rule (2026-11-12, superseding the F1 collapsed-rail
+      // default): LiTT opens EXPANDED — the permanent left column shows
+      // on first open. The 64px rail is only a state the user picks by
+      // collapsing.
       globalThis.__TEST_VIEWPORT_WIDTH__ = 1200;
       await renderCommandStudio();
       await waitFor(() => {
@@ -1399,12 +1432,23 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       });
     });
 
-    it("desktop tier (>=1440px) defaults to the collapsed LiTT rail when no preference is stored", async () => {
-      // F1 workspace-first: same collapsed-rail default on desktop.
-      globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    it("laptop tier does not override an explicit session preference", async () => {
+      // A deliberate in-session collapse is stored session-scoped and
+      // honoured on reload within the session.
+      sessionStorage.setItem("littree:studio:litt-collapsed", "true");
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 1200;
       await renderCommandStudio();
       await waitFor(() => {
         expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "true");
+      });
+    });
+
+    it("desktop tier (>=1440px) defaults to the expanded LiTT panel when no preference is stored", async () => {
+      // Same always-show default on desktop (Larry's rule, 2026-11-12).
+      globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+      await renderCommandStudio();
+      await waitFor(() => {
+        expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-collapsed", "false");
       });
     });
 

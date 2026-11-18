@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useEffect, useRef, useState, useCallback } from "react";
+import { FormEvent, useEffect, useRef, useState, useCallback, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   Camera,
@@ -29,7 +29,7 @@ import {
 import { useStudioModelStore, MODELS, type SelectedModel, type ProviderHealth } from "../stores/useStudioModelStore";
 import { useUserPlan } from "../hooks/useUserPlan";
 import { useHiddenAgents, visibleAgents } from "@/lib/agent-visibility";
-import { ChevronDown, Check, Lock } from "lucide-react";
+import { ChevronDown, Check, Lock, Search } from "lucide-react";
 import Link from "next/link";
 import { useStudioAttachments } from "../hooks/useStudioAttachments";
 import AttachmentMenu from "./AttachmentMenu";
@@ -55,7 +55,7 @@ const STATUS_LABELS: Record<VoiceState, string> = {
   muted: "Muted",
   permission_denied: "Microphone permission denied",
   unsupported: "Voice not supported in this browser",
-  error: "",
+  error: "Voice unavailable",
 };
 
 export interface ComposerContextLine {
@@ -196,15 +196,20 @@ export default function CommandComposer({
     errorMessage,
     stopSpeaking,
     voiceOutputState,
+    voiceAvailable,
   } = useVoiceSession();
 
   // Canonical voice pipeline: final transcript -> onSend -> speakText.
+  // The handler RETURNS its promise (B-02): VoiceSessionContext releases
+  // the "sending" state when it settles, so a failed send or a TTS-off
+  // speakText early-return can no longer wedge the mic — and a rejection
+  // surfaces there instead of being swallowed here.
   useEffect(() => {
-    setOnTurn((text) => {
-      void onSend(text).then((result) => {
-        if (result?.reply) speakText(result.reply);
-      }).catch(() => {});
-    });
+    setOnTurn((text) =>
+      onSend(text).then((result) => {
+        if (result?.reply) void speakText(result.reply);
+      }),
+    );
   }, [onSend, setOnTurn, speakText]);
 
   // Unified dictation: finalized transcripts write directly into the composer.
@@ -337,23 +342,69 @@ export default function CommandComposer({
   // Note: legacy handleFile removed — universal attachment system handles all file types.
   // Camera snapshots from CameraTool still use the `snapshots` state directly.
 
-  // Mic button state.
+  // Mic button state. The button itself carries the voice truth via its
+  // aria-label and title: when the session has failed — including the
+  // auth/close-4001 class, whose self-diagnosed explanation the session
+  // context puts in errorMessage — the button says "Voice unavailable"
+  // and its title carries that diagnosis, instead of the failure living
+  // only in a status line (or nowhere visible at all).
   const micState = (() => {
     switch (voiceState) {
-      case "idle": return { icon: Mic, color: "var(--text-muted)", disabled: false, onClick: startVoice };
+      case "idle": return {
+        icon: Mic, color: "var(--text-muted)", disabled: false, onClick: startVoice,
+        ariaLabel: "Start voice",
+        title: voiceAvailable
+          ? "Start voice"
+          : "Voice unavailable — the voice service could not be reached on this deployment. Tap to try again.",
+      };
       case "requesting_permission":
-      case "connecting": return { icon: Loader2, color: "var(--text-muted)", disabled: true, onClick: undefined };
+      case "connecting": return {
+        icon: Loader2, color: "var(--text-muted)", disabled: true, onClick: undefined,
+        ariaLabel: STATUS_LABELS[voiceState], title: STATUS_LABELS[voiceState],
+      };
       case "listening":
-      case "user_speaking": return { icon: Mic, color: "var(--color-accent)", disabled: false, onClick: stopVoice };
-      case "processing": return { icon: Loader2, color: "var(--color-accent)", disabled: true, onClick: undefined };
-      case "transcript_ready": return { icon: Mic, color: "var(--color-accent)", disabled: false, onClick: startVoice };
-      case "sending": return { icon: Loader2, color: "var(--color-accent)", disabled: true, onClick: undefined };
-      case "assistant_speaking": return { icon: Square, color: "#e3b341", disabled: false, onClick: interrupt };
-      case "muted": return { icon: MicOff, color: "#e3b341", disabled: false, onClick: toggleMute };
-      case "permission_denied": return { icon: MicOff, color: "#ef4444", disabled: false, onClick: startVoice };
-      case "unsupported": return { icon: MicOff, color: "#ef4444", disabled: true, onClick: undefined };
-      case "error": return { icon: MicOff, color: "#ef4444", disabled: false, onClick: startVoice };
-      default: return { icon: Mic, color: "var(--text-muted)", disabled: false, onClick: startVoice };
+      case "user_speaking": return {
+        icon: Mic, color: "var(--color-accent)", disabled: false, onClick: stopVoice,
+        ariaLabel: "Stop voice", title: "Stop voice",
+      };
+      case "processing": return {
+        icon: Loader2, color: "var(--color-accent)", disabled: true, onClick: undefined,
+        ariaLabel: STATUS_LABELS.processing, title: STATUS_LABELS.processing,
+      };
+      case "transcript_ready": return {
+        icon: Mic, color: "var(--color-accent)", disabled: false, onClick: startVoice,
+        ariaLabel: "Start voice", title: "Start voice",
+      };
+      case "sending": return {
+        icon: Loader2, color: "var(--color-accent)", disabled: true, onClick: undefined,
+        ariaLabel: STATUS_LABELS.sending, title: STATUS_LABELS.sending,
+      };
+      case "assistant_speaking": return {
+        icon: Square, color: "#e3b341", disabled: false, onClick: interrupt,
+        ariaLabel: "Stop voice", title: "Stop voice",
+      };
+      case "muted": return {
+        icon: MicOff, color: "#e3b341", disabled: false, onClick: toggleMute,
+        ariaLabel: "Stop voice", title: "Muted — tap to unmute",
+      };
+      case "permission_denied": return {
+        icon: MicOff, color: "#ef4444", disabled: false, onClick: startVoice,
+        ariaLabel: "Microphone permission denied — tap to retry",
+        title: errorMessage ?? "Microphone permission denied — allow microphone access, then tap to retry.",
+      };
+      case "unsupported": return {
+        icon: MicOff, color: "#ef4444", disabled: true, onClick: undefined,
+        ariaLabel: STATUS_LABELS.unsupported, title: STATUS_LABELS.unsupported,
+      };
+      case "error": return {
+        icon: MicOff, color: "#ef4444", disabled: false, onClick: startVoice,
+        ariaLabel: "Voice unavailable — tap to retry",
+        title: errorMessage ?? "Voice unavailable — connection rejected. Tap to retry.",
+      };
+      default: return {
+        icon: Mic, color: "var(--text-muted)", disabled: false, onClick: startVoice,
+        ariaLabel: "Start voice", title: "Start voice",
+      };
     }
   })();
   const MicIcon = micState.icon;
@@ -365,9 +416,9 @@ export default function CommandComposer({
       data-testid="studio-command-composer"
       className={`glass-shell relative flex w-full min-w-0 shrink-0 flex-col gap-1.5 border-t px-2.5 ${compact ? "py-1.5" : "py-2"} pb-[calc(.5rem+env(safe-area-inset-bottom))] sm:pb-2`}
       style={{
-        backgroundColor: "rgba(13,9,22,0.88)",
-        borderColor: "rgba(155,77,255,0.12)",
-        boxShadow: "0 -8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(155,77,255,0.06)",
+        backgroundColor: "var(--studio-elevated)",
+        borderColor: "var(--studio-border)",
+        boxShadow: "0 -8px 32px rgba(14,60,26,0.10)",
       }}
     >
       {/* Context line: workspace · repository · branch.
@@ -435,7 +486,7 @@ export default function CommandComposer({
                 <button
                   type="button"
                   onClick={() => clearSelectionChip(index, sel)}
-                  className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md transition hover:bg-white/10"
+                  className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md transition hover:bg-black/5"
                   style={{ color: "var(--text-muted)" }}
                   aria-label={`Clear selection: ${sel.label}`}
                   title="Clear selection"
@@ -451,18 +502,18 @@ export default function CommandComposer({
         contextLine?.selectedElement && (
           <div
             className="flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[10px]"
-            style={{ borderColor: "rgba(155,77,255,0.24)", backgroundColor: "rgba(155,77,255,0.07)" }}
+            style={{ borderColor: "rgba(23,122,54,0.3)", backgroundColor: "rgba(23,122,54,0.08)" }}
             data-testid="selected-preview-context"
           >
-            <MousePointer2 size={11} className="shrink-0" style={{ color: "#c4b5fd" }} aria-hidden="true" />
+            <MousePointer2 size={11} className="shrink-0" style={{ color: "#0c5a26" }} aria-hidden="true" />
             <span className="min-w-0 flex-1 truncate" style={{ color: "var(--text-secondary)" }}>
-              Editing <strong style={{ color: "#c4b5fd" }}>{contextLine.selectedElement}</strong>
+              Editing <strong style={{ color: "#0c5a26" }}>{contextLine.selectedElement}</strong>
             </span>
             {onClearSelectedElement && (
               <button
                 type="button"
                 onClick={onClearSelectedElement}
-                className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md hover:bg-white/8"
+                className="grid min-h-8 min-w-8 shrink-0 place-items-center rounded-md hover:bg-black/5"
                 aria-label="Clear selected preview element"
                 title="Clear selection"
               >
@@ -518,12 +569,12 @@ export default function CommandComposer({
       <div
         className={`glass-panel relative flex flex-wrap items-end gap-1.5 px-2 py-2 transition-all ${dragOver ? "glass-active" : ""}`}
         style={{
-          borderColor: dragOver ? "rgba(168,85,247,0.5)" : "rgba(155,77,255,0.15)",
-          backgroundColor: dragOver ? "rgba(168,85,247,0.08)" : "rgba(20,15,31,0.72)",
+          borderColor: dragOver ? "rgba(23,122,54,0.55)" : "var(--studio-border)",
+          backgroundColor: dragOver ? "rgba(23,122,54,0.08)" : "var(--bg-main)",
           maxWidth: "var(--studio-composer-max-w)",
           width: "100%",
           margin: "0 auto",
-          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04), 0 8px 24px rgba(0,0,0,0.3)",
+          boxShadow: "0 8px 24px rgba(14,60,26,0.08)",
         }}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -531,8 +582,8 @@ export default function CommandComposer({
       >
         {/* Drag overlay */}
         {dragOver && (
-          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-2xl" style={{ backgroundColor: "rgba(168,85,247,0.08)" }}>
-            <span className="text-[11px] font-bold" style={{ color: "#c084fc" }}>
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-2xl" style={{ backgroundColor: "rgba(23,122,54,0.08)" }}>
+            <span className="text-[11px] font-bold" style={{ color: "#0c5a26" }}>
               Drop files to attach
             </span>
           </div>
@@ -548,9 +599,9 @@ export default function CommandComposer({
           }}
           className="relative grid h-11 w-11 shrink-0 place-items-center rounded-xl border transition"
           style={{
-            color: showAttach ? "#c084fc" : "var(--text-muted)",
+            color: showAttach ? "#177a36" : "var(--text-muted)",
             borderColor: showAttach ? "var(--studio-border-strong)" : "transparent",
-            backgroundColor: showAttach ? "rgba(168,85,247,0.08)" : "transparent",
+            backgroundColor: showAttach ? "rgba(23,122,54,0.08)" : "transparent",
           }}
           aria-label="Attach files, media, or links"
           title="Attach"
@@ -563,7 +614,7 @@ export default function CommandComposer({
           {attachments.length > 0 && (
             <span
               className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[8px] font-black"
-              style={{ backgroundColor: "#a855f7", color: "#fff" }}
+              style={{ backgroundColor: "#177a36", color: "#fff" }}
             >
               {attachments.length}
             </span>
@@ -608,7 +659,7 @@ export default function CommandComposer({
           ref={unifiedTriggerRef}
           type="button"
           onClick={() => setUnifiedOpen((v) => !v)}
-          className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border px-2 sm:px-2.5 transition hover:bg-white/5"
+          className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl border px-2 sm:px-2.5 transition hover:bg-black/5"
           style={{
             borderColor: "var(--studio-border-strong)",
             color: agentAccent,
@@ -703,7 +754,7 @@ export default function CommandComposer({
         <button
           type="button"
           onClick={() => setTtsPopoverOpen((v) => !v)}
-          className="pointer-events-auto hidden sm:flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
+          className="pointer-events-auto hidden sm:flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-black/5"
           style={{
             color: ttsEnabled ? "#65f4ff" : "var(--text-muted)",
             boxShadow: voiceOutputState === "speaking" ? "0 0 0 2px rgba(101,244,255,0.3)" : undefined,
@@ -733,7 +784,7 @@ export default function CommandComposer({
         <button
           type="button"
           onClick={() => setCameraPreviewOpen((v) => !v)}
-          className="pointer-events-auto hidden sm:flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
+          className="pointer-events-auto hidden sm:flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-black/5"
           style={{
             color: cameraPreviewOpen ? "var(--color-accent)" : "var(--text-muted)",
             boxShadow: cameraPreviewOpen ? "0 0 0 2px color-mix(in srgb, var(--color-accent) 30%, transparent)" : undefined,
@@ -748,10 +799,10 @@ export default function CommandComposer({
         <button
           type="button"
           onClick={() => setShareMenuOpen((v) => !v)}
-          className="pointer-events-auto hidden sm:flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-white/10"
+          className="pointer-events-auto hidden sm:flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all hover:bg-black/5"
           style={{
-            color: shareMenuOpen || liveActive ? "#a855f7" : "var(--text-muted)",
-            boxShadow: shareMenuOpen ? "0 0 0 2px rgba(168,85,247,0.3)" : undefined,
+            color: shareMenuOpen || liveActive ? "#177a36" : "var(--text-muted)",
+            boxShadow: shareMenuOpen ? "0 0 0 2px rgba(23,122,54,0.35)" : undefined,
           }}
           aria-label={shareMenuOpen ? "Close share menu" : "Open share menu"}
           title="Share — screen, window, tab, or Live Voice"
@@ -776,7 +827,7 @@ export default function CommandComposer({
           onClick={micState.onClick}
           disabled={micState.disabled}
           className={`pointer-events-auto flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full transition-all ${
-            !micState.disabled && "hover:bg-white/10"
+            !micState.disabled && "hover:bg-black/5"
           } ${micState.disabled && "cursor-not-allowed"}`}
           style={{
             color: micState.color,
@@ -785,7 +836,8 @@ export default function CommandComposer({
                 ? "0 0 0 2px color-mix(in srgb, var(--color-accent) 30%, transparent)"
                 : undefined,
           }}
-          aria-label={voiceState === "idle" ? "Start voice" : "Stop voice"}
+          aria-label={micState.ariaLabel}
+          title={micState.title}
         >
           <MicIcon
             size={18}
@@ -799,32 +851,14 @@ export default function CommandComposer({
           />
         </button>
 
-        {/* LiTT presence indicator — idle green ring, thinking spinning ring */}
-        <div
-          className="relative flex h-11 w-11 shrink-0 items-center justify-center"
-          aria-label={busy ? "LiTT is thinking" : "LiTT is ready"}
-          title={busy ? "LiTT is thinking…" : "LiTT is ready"}
-        >
-          {/* Outer animated ring */}
-          <div
-            className={`absolute inset-1 rounded-full ${busy ? "animate-spin" : ""}`}
-            style={{
-              border: `2px solid ${busy ? "var(--litt-primary)" : "color-mix(in srgb, var(--color-accent) 40%, transparent)"}`,
-              borderTopColor: busy ? "transparent" : "color-mix(in srgb, var(--color-accent) 80%, transparent)",
-              transition: "border-color 0.3s ease",
-            }}
-          />
-          {/* Inner glow dot */}
-          <div
-            className="h-2 w-2 rounded-full transition-all"
-            style={{
-              backgroundColor: busy ? "var(--litt-primary)" : "var(--color-accent)",
-              boxShadow: busy
-                ? "0 0 8px var(--litt-primary), 0 0 16px var(--litt-primary)"
-                : "0 0 4px color-mix(in srgb, var(--color-accent) 60%, transparent)",
-            }}
-          />
-        </div>
+        {/* REMOVED (spec §2c, Larry 2026-11-16): the glowing circle
+            that sat here between the mic and the send arrow — the
+            LiTT presence indicator (an idle/working status ring with
+            a glowing inner dot, not wired to any action; it only
+            reflected `busy`). Larry: "no need for this", and no pink /
+            glowing ornament stays in the composer row. Busy state is
+            still carried by the send button itself (it becomes the
+            cancel control while a run is live). */}
 
         {/* Send */}
         <button
@@ -903,7 +937,7 @@ export default function CommandComposer({
             <button
               type="button"
               onClick={cancelRecording}
-              className="ml-auto rounded px-2 py-0.5 text-[10px] font-bold hover:bg-white/10"
+              className="ml-auto rounded px-2 py-0.5 text-[10px] font-bold hover:bg-black/5"
               style={{ color: "var(--text-muted)" }}
               aria-label="Cancel recording"
             >
@@ -930,6 +964,16 @@ export default function CommandComposer({
         <div className="px-1 text-[10px] font-bold" style={{ color: "#ef4444" }} role="alert">
           {STATUS_LABELS[voiceState]}
           {errorMessage && <span className="ml-1">— {errorMessage}</span>}
+        </div>
+      )}
+
+      {/* Notice set while idle (B-11): #882's "didn't hear anything"
+          message is written to errorMessage at the moment the state
+          returns to idle — rendering errors only in error states made
+          it invisible. It clears on the next mic start. */}
+      {voiceState === "idle" && errorMessage && (
+        <div className="px-1 text-[10px] font-bold" style={{ color: "#ef4444" }} role="alert">
+          {errorMessage}
         </div>
       )}
 
@@ -1020,7 +1064,7 @@ function TtsPopover({
         <button
           type="button"
           onClick={toggleTts}
-          className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition hover:bg-white/5"
+          className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition hover:bg-black/5"
           style={{ color: "var(--text-primary)" }}
         >
           <span>Read replies aloud</span>
@@ -1035,7 +1079,7 @@ function TtsPopover({
           <button
             type="button"
             onClick={stopSpeaking}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition hover:bg-white/5"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition hover:bg-black/5"
             style={{ color: "#e3b341" }}
           >
             <Square size={12} className="pointer-events-none" />
@@ -1049,7 +1093,7 @@ function TtsPopover({
         <button
           type="button"
           onClick={toggleAutoSend}
-          className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition hover:bg-white/5"
+          className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition hover:bg-black/5"
           style={{ color: "var(--text-primary)" }}
         >
           <span>Auto-send voice</span>
@@ -1085,6 +1129,18 @@ const BYOK_MODEL_IDS = ["gpt-4o", "claude-sonnet"];
 /** Advanced LiTT aliases shown in a collapsible ADVANCED section. */
 const ADVANCED_LITT_IDS = ["litt-fast", "litt-balanced", "litt-reasoning", "litt-code", "litt-research"];
 
+function providerHealthColor(health: ProviderHealth): string {
+  return health === "available"
+    ? "#72f238"
+    : health === "degraded"
+      ? "#e3b341"
+      : health === "locked"
+        ? "#a78bfa"
+        : health === "unknown"
+          ? "#8a8f98"
+          : "#ef4444";
+}
+
 function UnifiedSelectorPopover({
   rect,
   activeAgentId,
@@ -1103,8 +1159,57 @@ function UnifiedSelectorPopover({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const { hasAccess, loading } = useUserPlan();
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [tab, setTab] = useState<"model" | "assistant">("model");
+  const [query, setQuery] = useState("");
+
+  // Live viewport, visualViewport-aware: when the on-screen keyboard
+  // opens, visualViewport shrinks and reports the keyboard inset, so a
+  // bottom sheet can sit directly above the keyboard instead of behind
+  // it or floating at a stale height.
+  const [viewport, setViewport] = useState(() => ({
+    width: typeof window !== "undefined" ? window.innerWidth : 1024,
+    height: typeof window !== "undefined" ? window.innerHeight : 768,
+    keyboardInset: 0,
+  }));
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const update = () => {
+      setViewport({
+        width: vv ? vv.width : window.innerWidth,
+        height: vv ? vv.height : window.innerHeight,
+        keyboardInset: vv
+          ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+          : 0,
+      });
+    };
+    update();
+    vv?.addEventListener("resize", update);
+    vv?.addEventListener("scroll", update);
+    window.addEventListener("resize", update);
+    return () => {
+      vv?.removeEventListener("resize", update);
+      vv?.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, []);
+
+  // Under the sm breakpoint the selector becomes a bottom sheet; above
+  // it, a compact popover anchored to the composer.
+  const isSheet = viewport.width < 640;
+
+  // Scroll-lock the background conversation while the sheet is open so
+  // swiping the model list never drags the chat behind it.
+  useEffect(() => {
+    if (!isSheet) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [isSheet]);
 
   // Live local Ollama models from /api/llm/health — fetched when the picker
   // opens so availability + capabilities reflect the device right now, not
@@ -1153,292 +1258,457 @@ function UnifiedSelectorPopover({
     };
   }, [onClose]);
 
-  const left = Math.min(rect.left, window.innerWidth - 280);
-  const popoverHeight = 420;
-  const gap = 8;
-  const roomAbove = rect.top - gap;
-  const top = roomAbove >= popoverHeight
-    ? rect.top - popoverHeight - gap
-    : rect.bottom + gap;
+  // Selecting a model applies it through the existing store (the parent
+  // calls selectModel) and closes the selector — one tap, done.
+  const handleModelSelect = (m: SelectedModel) => {
+    onModelSelect(m);
+    onClose();
+  };
+  // Picking an assistant keeps the selector open on the Model tab so the
+  // two choices stay one short flow.
+  const handleAgentSelect = (id: AgentId) => {
+    onAgentSelect(id);
+    setTab("model");
+  };
 
-  // LiTT Auto model
+  // ── Model groups, search-filtered ────────────────────────────────
+  const q = query.trim().toLowerCase();
+  const searching = q.length > 0;
+  const matches = (m: SelectedModel) =>
+    !searching || `${m.label} ${m.name} ${m.provider}`.toLowerCase().includes(q);
+
   const littAutoModel = MODELS.find((m) => m.id === "litt-auto");
-  const isLittAutoSelected = selectedModelId === "litt-auto";
+  const showLittAuto = !!littAutoModel && matches(littAutoModel);
 
-  // BYOK models
-  const byokModels = MODELS.filter((m) => BYOK_MODEL_IDS.includes(m.id));
-
-  // Advanced LiTT aliases
-  const advancedModels = MODELS.filter((m) => ADVANCED_LITT_IDS.includes(m.id));
-
-  // Advanced provider models (everything else that's not litt-alias or byok)
+  const byokModels = MODELS.filter((m) => BYOK_MODEL_IDS.includes(m.id)).filter(matches);
+  // Free provider models get their own section up top — they were
+  // previously buried inside Advanced even though they are the
+  // commonly-used free options.
+  const freeModels = MODELS.filter(
+    (m) => m.category === "advanced" && m.cost === "free",
+  ).filter(matches);
+  const localFiltered = (localModels ?? []).filter(matches);
+  const advancedModels = MODELS.filter((m) => ADVANCED_LITT_IDS.includes(m.id)).filter(matches);
   const advancedProviderModels = MODELS.filter(
-    (m) => m.category === "advanced",
-  );
+    (m) => m.category === "advanced" && m.cost !== "free",
+  ).filter(matches);
+  // While searching, Advanced matches surface immediately — making the
+  // user expand a collapsed section mid-search would hide the answer.
+  const advancedVisible = showAdvanced || searching;
+  const hasAdvanced =
+    advancedModels.length > 0 || advancedProviderModels.length > 0;
+  const noModelResults =
+    searching &&
+    !showLittAuto &&
+    byokModels.length === 0 &&
+    freeModels.length === 0 &&
+    localFiltered.length === 0 &&
+    !hasAdvanced;
 
   // Hidden built-in agents (e.g. Spark) stay out of the mode list.
   const { hiddenAgents } = useHiddenAgents();
   const visibleModes = visibleAgents(MODE_ITEMS, hiddenAgents);
 
-  return (
+  // Current-selection summary for the header: the active assistant and
+  // the active model, named on every open.
+  const selectedModelLabel =
+    MODELS.find((m) => m.id === selectedModelId)?.label ??
+    localModels?.find((m) => m.id === selectedModelId)?.label ??
+    selectedModelId;
+  const activeAgentLabel = AGENT_META[activeAgentId]?.displayName ?? activeAgentId;
+
+  // Reopening shows the active selection: scroll the active model row
+  // into view inside the (only) scrolling list.
+  useEffect(() => {
+    if (tab !== "model" || searching) return;
+    const active = listRef.current?.querySelector('[data-active-model="true"]');
+    active?.scrollIntoView?.({ block: "nearest" });
+  }, [tab, searching, localModels]);
+
+  // ── Placement ────────────────────────────────────────────────────
+  // Desktop popover: anchored to the trigger, sized from the ACTUAL
+  // space on the chosen side of the viewport, and clamped so it can
+  // never render outside the viewport. When the space above is short
+  // it opens below with its height capped to the space below — never
+  // at a fixed height spilling past the screen edge (the old 420px
+  // fallback bug).
+  const POPOVER_WIDTH = 320;
+  const VIEWPORT_MARGIN = 8;
+  const ANCHOR_GAP = 8;
+  const DESKTOP_MAX_HEIGHT = 480;
+  const roomAbove = rect.top - ANCHOR_GAP - VIEWPORT_MARGIN;
+  const roomBelow = viewport.height - rect.bottom - ANCHOR_GAP - VIEWPORT_MARGIN;
+  const placeAbove = roomAbove >= roomBelow;
+  const desktopMaxHeight = Math.max(
+    200,
+    Math.min(DESKTOP_MAX_HEIGHT, placeAbove ? roomAbove : roomBelow),
+  );
+  const desktopLeft = Math.max(
+    VIEWPORT_MARGIN,
+    Math.min(
+      rect.left,
+      Math.max(VIEWPORT_MARGIN, viewport.width - POPOVER_WIDTH - VIEWPORT_MARGIN),
+    ),
+  );
+  const placementStyle: CSSProperties = isSheet
+    ? {
+        bottom: viewport.keyboardInset,
+        // ~70% of the visible screen (visualViewport height, so the
+        // keyboard-open state shrinks the sheet with the visible area).
+        maxHeight: Math.min(viewport.height, Math.round(viewport.height * 0.7)),
+        paddingBottom: "env(safe-area-inset-bottom)",
+      }
+    : {
+        left: desktopLeft,
+        width: POPOVER_WIDTH,
+        maxHeight: desktopMaxHeight,
+        ...(placeAbove
+          ? {
+              bottom:
+                (typeof window !== "undefined" ? window.innerHeight : viewport.height) -
+                rect.top +
+                ANCHOR_GAP,
+            }
+          : { top: rect.bottom + ANCHOR_GAP }),
+      };
+
+  const sectionHeader = (label: string) => (
     <div
-      ref={ref}
-      role="dialog"
-      aria-label="Select assistant and model"
-      className="fixed z-[200] max-h-[420px] w-[280px] overflow-y-auto rounded-xl border shadow-2xl backdrop-blur-md studio-anim-dropdown"
-      style={{
-        left,
-        top,
-        backgroundColor: "var(--studio-elevated)",
-        borderColor: "var(--studio-border-strong)",
-      }}
+      className="px-3 pb-1 pt-2.5 text-[9px] font-black uppercase tracking-[0.18em]"
+      style={{ color: "var(--text-muted)" }}
     >
-      {/* ── MODE section ────────────────────────────────────────── */}
+      {label}
+    </div>
+  );
+
+  const modelRow = (
+    m: SelectedModel,
+    opts?: { dot?: string; small?: boolean; meta?: ReactNode; title?: string },
+  ) => {
+    const isActive = selectedModelId === m.id;
+    return (
+      <button
+        key={m.id}
+        type="button"
+        onClick={() => handleModelSelect(m)}
+        title={opts?.title}
+        data-active-model={isActive || undefined}
+        aria-current={isActive || undefined}
+        className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-black/5"
+        style={{ backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent" }}
+      >
+        <span className={`${opts?.small ? "text-sm" : "text-base"} shrink-0`}>{m.icon}</span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>{m.label}</div>
+          {opts?.meta}
+        </div>
+        {opts?.dot && (
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: opts.dot }} aria-hidden />
+        )}
+        {isActive && <Check size={12} className="shrink-0" style={{ color: "var(--litt-primary)" }} />}
+      </button>
+    );
+  };
+
+  const costMeta = (m: SelectedModel) => (
+    <div className="flex items-center gap-1.5 text-[9px]" style={{ color: "var(--text-muted)" }}>
+      <span>{m.provider}</span>
+      <span>·</span>
+      <span style={{ color: m.cost === "paid" ? "#e3b341" : "var(--text-muted)" }}>
+        {m.cost === "paid" ? "PAID" : m.cost === "free" ? "FREE" : "AUTO"}
+      </span>
+      <span>·</span>
+      <span>{m.speed}</span>
+    </div>
+  );
+
+  return (
+    <>
+      {isSheet && (
+        <div
+          data-testid="unified-selector-backdrop"
+          onClick={onClose}
+          className="fixed inset-0 z-[199]"
+          style={{ backgroundColor: "rgba(10, 20, 12, 0.35)" }}
+        />
+      )}
       <div
-        className="sticky top-0 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em]"
+        ref={ref}
+        role="dialog"
+        aria-modal={isSheet || undefined}
+        aria-label="Select assistant and model"
+        data-testid="unified-selector"
+        className={
+          isSheet
+            ? "fixed inset-x-0 z-[200] flex flex-col rounded-t-2xl border-t shadow-2xl studio-anim-dropdown"
+            : "fixed z-[200] flex flex-col rounded-xl border shadow-2xl backdrop-blur-md studio-anim-dropdown"
+        }
         style={{
-          color: "var(--text-secondary)",
-          borderBottom: "1px solid var(--studio-border)",
-          backgroundColor: "var(--studio-elevated)",
+          ...placementStyle,
+          // Portaled to <body> — outside .studio-shell, so the palette
+          // is carried explicitly from the theme's published root
+          // variables (ThemeProvider sets them from the resolved skin),
+          // which follow the effective mode: the light Signature whites
+          // in Light, Larry's charcoal in Dark.
+          backgroundColor: "var(--box-bg)",
+          borderColor: "var(--border-color)",
+          color: "var(--text-color)",
+          ["--text-primary" as string]: "var(--text-color)",
+          ["--text-secondary" as string]: "color-mix(in srgb, var(--text-color) 76%, var(--bg-color))",
+          ["--text-muted" as string]: "color-mix(in srgb, var(--text-color) 58%, var(--bg-color))",
+          ["--studio-elevated" as string]: "var(--box-bg)",
+          ["--studio-border" as string]: "var(--border-color)",
+          ["--studio-border-strong" as string]: "color-mix(in srgb, var(--border-color) 55%, var(--text-color) 45%)",
+          ["--color-accent" as string]: "var(--accent-color)",
         }}
       >
-        Mode
-      </div>
-
-      {/* LiTT — main agent */}
-      {visibleModes.map((item) => {
-        const meta = AGENT_META[item.id];
-        if (!meta) return null;
-        const accent = meta.color;
-        const isActive = activeAgentId === item.id;
-        const unlocked = loading || hasAccess(meta.minimumPlan);
-        return (
-          <div key={item.id}>
+        {/* ── Header: current selection + sections + search.
+               Never scrolls — only the list below does. ─────────── */}
+        <div className="shrink-0" style={{ borderBottom: "1px solid var(--studio-border)" }}>
+          <div className="flex items-center gap-2 px-3 pb-1 pt-2.5">
+            <div className="min-w-0 flex-1">
+              <div className="text-[9px] font-black uppercase tracking-[0.18em]" style={{ color: "var(--text-muted)" }}>
+                Now using
+              </div>
+              <div className="truncate text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>
+                {activeAgentLabel} · {selectedModelLabel}
+              </div>
+            </div>
             <button
               type="button"
-              disabled={!unlocked}
-              onClick={() => unlocked && onAgentSelect(item.id)}
-              className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
-              style={{ backgroundColor: isActive ? `${accent}10` : "transparent" }}
+              onClick={onClose}
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5"
+              style={{ color: "var(--text-muted)" }}
+              aria-label="Close assistant and model selector"
             >
-              <span
-                className="relative grid h-7 w-7 shrink-0 place-items-center rounded-lg overflow-hidden text-[11px] font-black"
-                style={{ backgroundColor: `${accent}20`, color: accent }}
-              >
-                {unlocked ? (
-                  <Image
-                    src="/brand/litt-robot-avatar-96.png"
-                    alt={meta.displayName}
-                    fill
-                    sizes="28px"
-                    className="object-cover"
-                  />
-                ) : (
-                  <Lock size={11} />
-                )}
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>
-                  {meta.displayName}
-                </div>
-                <div className="text-[10px] truncate" style={{ color: "var(--text-muted)" }}>
-                  {unlocked ? item.description : `Requires ${planLabel(meta.minimumPlan)}`}
-                </div>
-              </div>
-              {isActive && unlocked && (
-                <Check size={12} className="shrink-0" style={{ color: accent }} />
-              )}
+              <X size={14} className="pointer-events-none" />
             </button>
-            {!unlocked && (
-              <Link
-                href={`/pricing?upgrade=${meta.minimumPlan}`}
-                onClick={onClose}
-                className="flex items-center gap-1 px-3 pb-2 pl-[3.25rem] text-[10px] font-bold transition hover:opacity-80"
-                style={{ color: accent }}
+          </div>
+
+          {/* Assistant Mode and Model are separate sections — two tabs,
+              never one crammed list. */}
+          <div role="tablist" aria-label="Assistant or model" className="flex gap-1 px-3 pb-2">
+            {(
+              [
+                { id: "model", label: "Model" },
+                { id: "assistant", label: "Assistant" },
+              ] as const
+            ).map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.id}
+                data-testid={`selector-tab-${t.id}`}
+                onClick={() => setTab(t.id)}
+                className="rounded-lg px-3 py-1.5 text-[11px] font-bold transition"
+                style={{
+                  backgroundColor: tab === t.id ? "color-mix(in srgb, var(--color-accent) 12%, transparent)" : "transparent",
+                  color: tab === t.id ? "var(--text-primary)" : "var(--text-muted)",
+                }}
               >
-                Upgrade to {planLabel(meta.minimumPlan)} →
-              </Link>
-            )}
+                {t.label}
+              </button>
+            ))}
           </div>
-        );
-      })}
 
-      {/* LiTT Auto — autonomous mode (model alias, not agent) */}
-      {littAutoModel && (
-        <button
-          type="button"
-          onClick={() => onModelSelect(littAutoModel)}
-          className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5"
-          style={{ backgroundColor: isLittAutoSelected ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent" }}
-        >
-          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-accent/15 text-sm">
-            {littAutoModel.icon}
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>
-              LiTT Auto
-            </div>
-            <div className="text-[10px] truncate" style={{ color: "var(--text-muted)" }}>
-              Autonomous mode — routes automatically
-            </div>
-          </div>
-          {isLittAutoSelected && <Check size={12} className="shrink-0" style={{ color: "var(--litt-primary)" }} />}
-        </button>
-      )}
-
-      {/* ── MODEL section ───────────────────────────────────────── */}
-      <div
-        className="sticky top-0 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em]"
-        style={{
-          color: "var(--text-secondary)",
-          borderBottom: "1px solid var(--studio-border)",
-          backgroundColor: "var(--studio-elevated)",
-        }}
-      >
-        Model
-      </div>
-
-      {byokModels.map((m) => {
-        const isActive = selectedModelId === m.id;
-        const health = providerHealth[m.provider] ?? "available";
-        const healthColor = health === "available" ? "#72f238" : health === "degraded" ? "#e3b341" : health === "locked" ? "#a78bfa" : "#ef4444";
-        return (
-          <button
-            key={m.id}
-            type="button"
-            onClick={() => onModelSelect(m)}
-            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5"
-            style={{ backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent" }}
-          >
-            <span className="text-base shrink-0">{m.icon}</span>
-            <div className="min-w-0 flex-1">
-              <div className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>{m.label}</div>
-              <div className="flex items-center gap-1.5 text-[9px]" style={{ color: "var(--text-muted)" }}>
-                <span>{m.provider}</span>
-                <span>·</span>
-                <span style={{ color: m.cost === "paid" ? "#e3b341" : "var(--text-muted)" }}>
-                  {m.cost === "paid" ? "PAID" : m.cost === "free" ? "FREE" : "AUTO"}
-                </span>
-                <span>·</span>
-                <span>{m.speed}</span>
+          {tab === "model" && (
+            <div className="px-3 pb-2.5">
+              <div className="relative">
+                <Search
+                  size={13}
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2"
+                  style={{ color: "var(--text-muted)" }}
+                />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search models"
+                  aria-label="Search models"
+                  data-testid="model-search-input"
+                  className="w-full rounded-lg border py-2 pl-8 pr-2 text-[12px] outline-none"
+                  style={{
+                    borderColor: "var(--studio-border)",
+                    backgroundColor: "var(--studio-elevated)",
+                    color: "var(--text-primary)",
+                  }}
+                />
               </div>
             </div>
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: healthColor }} aria-hidden />
-            {isActive && <Check size={12} className="shrink-0" style={{ color: "var(--litt-primary)" }} />}
-          </button>
-        );
-      })}
+          )}
+        </div>
 
-      {/* ── LOCAL section — live Ollama models on this device ─────── */}
-      {localModels && localModels.length > 0 && (
-        <>
-          <div
-            className="px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.18em]"
-            style={{ color: "var(--text-muted)", borderTop: "1px solid var(--studio-border)" }}
-          >
-            Local — this device
-          </div>
-          {localModels.map((m) => {
-            const isActive = selectedModelId === m.id;
-            return (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => onModelSelect(m)}
-                title={m.description}
-                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5"
-                style={{ backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent" }}
-              >
-                <span className="text-base shrink-0">{m.icon}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>{m.label}</div>
-                  <div className="flex items-center gap-1.5 text-[9px]" style={{ color: "var(--text-muted)" }}>
-                    <span>{m.name}</span>
-                    <span>·</span>
-                    <span>FREE</span>
-                    {m.description && (
-                      <>
-                        <span>·</span>
-                        <span className="truncate">{m.description}</span>
-                      </>
+        {/* ── The ONLY scrolling region ─────────────────────────── */}
+        <div
+          ref={listRef}
+          data-testid="unified-selector-list"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-1"
+        >
+          {tab === "assistant" ? (
+            <>
+              {sectionHeader("Assistant mode")}
+              {visibleModes.map((item) => {
+                const meta = AGENT_META[item.id];
+                if (!meta) return null;
+                const accent = meta.color;
+                const isActive = activeAgentId === item.id;
+                const unlocked = loading || hasAccess(meta.minimumPlan);
+                return (
+                  <div key={item.id}>
+                    <button
+                      type="button"
+                      disabled={!unlocked}
+                      onClick={() => unlocked && handleAgentSelect(item.id)}
+                      className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-60"
+                      style={{ backgroundColor: isActive ? `${accent}10` : "transparent" }}
+                    >
+                      <span
+                        className="relative grid h-7 w-7 shrink-0 place-items-center rounded-lg overflow-hidden text-[11px] font-black"
+                        style={{ backgroundColor: `${accent}20`, color: accent }}
+                      >
+                        {unlocked ? (
+                          <Image
+                            src="/brand/litt-robot-avatar-96.png"
+                            alt={meta.displayName}
+                            fill
+                            sizes="28px"
+                            className="object-cover"
+                          />
+                        ) : (
+                          <Lock size={11} />
+                        )}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>
+                          {meta.displayName}
+                        </div>
+                        <div className="truncate text-[10px]" style={{ color: "var(--text-muted)" }}>
+                          {unlocked ? item.description : `Requires ${planLabel(meta.minimumPlan)}`}
+                        </div>
+                      </div>
+                      {isActive && unlocked && (
+                        <Check size={12} className="shrink-0" style={{ color: accent }} />
+                      )}
+                    </button>
+                    {!unlocked && (
+                      <Link
+                        href={`/pricing?upgrade=${meta.minimumPlan}`}
+                        onClick={onClose}
+                        className="flex items-center gap-1 px-3 pb-2 pl-[3.25rem] text-[10px] font-bold transition hover:opacity-80"
+                        style={{ color: accent }}
+                      >
+                        Upgrade to {planLabel(meta.minimumPlan)} →
+                      </Link>
                     )}
                   </div>
-                </div>
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: "#72f238" }} aria-hidden />
-                {isActive && <Check size={12} className="shrink-0" style={{ color: "var(--litt-primary)" }} />}
-              </button>
-            );
-          })}
-        </>
-      )}
+                );
+              })}
+            </>
+          ) : (
+            <>
+              {/* LiTT Auto — the recommended default, always first. */}
+              {showLittAuto &&
+                modelRow(littAutoModel!, {
+                  meta: (
+                    <div className="truncate text-[10px]" style={{ color: "var(--text-muted)" }}>
+                      Autonomous mode — routes automatically
+                    </div>
+                  ),
+                })}
 
-      {/* ── ADVANCED section (collapsible) ──────────────────────── */}
-      <button
-        type="button"
-        onClick={() => setShowAdvanced((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-white/5"
-        style={{ color: "var(--text-muted)" }}
-      >
-        <ChevronDown
-          size={10}
-          className="pointer-events-none transition-transform"
-          style={{ transform: showAdvanced ? "rotate(180deg)" : "rotate(0deg)" }}
-        />
-        <span className="text-[10px] font-bold uppercase tracking-wider">Advanced Models</span>
-      </button>
+              {byokModels.length > 0 && (
+                <>
+                  {sectionHeader("Your keys — BYOK")}
+                  {byokModels.map((m) => modelRow(m, { dot: providerHealthColor(providerHealth[m.provider] ?? "unknown"), meta: costMeta(m) }))}
+                </>
+              )}
 
-      {showAdvanced && (
-        <>
-          {/* LiTT aliases (Fast, Balanced, Reasoning, Code, Research) */}
-          {advancedModels.map((m) => {
-            const isActive = selectedModelId === m.id;
-            return (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => onModelSelect(m)}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-white/5"
-                style={{ backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent" }}
-              >
-                <span className="text-sm shrink-0">{m.icon}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>{m.label}</div>
-                  <div className="text-[9px] truncate" style={{ color: "var(--text-muted)" }}>
-                    {m.description}
-                  </div>
-                </div>
-                {isActive && <Check size={10} className="shrink-0" style={{ color: "var(--litt-primary)" }} />}
-              </button>
-            );
-          })}
+              {freeModels.length > 0 && (
+                <>
+                  {sectionHeader("Free models")}
+                  {freeModels.map((m) => modelRow(m, { dot: providerHealthColor(providerHealth[m.provider] ?? "unknown"), meta: costMeta(m) }))}
+                </>
+              )}
 
-          {/* Raw provider models */}
-          {advancedProviderModels.map((m) => {
-            const isActive = selectedModelId === m.id;
-            const health = providerHealth[m.provider] ?? "available";
-            const healthColor = health === "available" ? "#72f238" : health === "degraded" ? "#e3b341" : health === "locked" ? "#a78bfa" : "#ef4444";
-            return (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => onModelSelect(m)}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-white/5"
-                style={{ backgroundColor: isActive ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent" }}
-              >
-                <span className="text-sm shrink-0">{m.icon}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[11px] font-bold" style={{ color: "var(--text-primary)" }}>{m.label}</div>
-                  <div className="text-[9px]" style={{ color: "var(--text-muted)" }}>
-                    {m.provider} · {m.cost === "free" ? "FREE" : "PAID"}
-                  </div>
+              {localFiltered.length > 0 && (
+                <>
+                  {sectionHeader("Local — this device")}
+                  {localFiltered.map((m) =>
+                    modelRow(m, {
+                      dot: "#72f238",
+                      title: m.description,
+                      meta: (
+                        <div className="flex items-center gap-1.5 text-[9px]" style={{ color: "var(--text-muted)" }}>
+                          <span>{m.name}</span>
+                          <span>·</span>
+                          <span>FREE</span>
+                          {m.description && (
+                            <>
+                              <span>·</span>
+                              <span className="truncate">{m.description}</span>
+                            </>
+                          )}
+                        </div>
+                      ),
+                    }),
+                  )}
+                </>
+              )}
+
+              {hasAdvanced && !searching && (
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanced((v) => !v)}
+                  aria-expanded={showAdvanced}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-black/5"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  <ChevronDown
+                    size={10}
+                    className="pointer-events-none transition-transform"
+                    style={{ transform: showAdvanced ? "rotate(180deg)" : "rotate(0deg)" }}
+                  />
+                  <span className="text-[10px] font-bold uppercase tracking-wider">Advanced Models</span>
+                </button>
+              )}
+              {hasAdvanced && searching && sectionHeader("Advanced models")}
+
+              {advancedVisible && (
+                <>
+                  {advancedModels.map((m) =>
+                    modelRow(m, {
+                      small: true,
+                      meta: (
+                        <div className="truncate text-[9px]" style={{ color: "var(--text-muted)" }}>
+                          {m.description}
+                        </div>
+                      ),
+                    }),
+                  )}
+                  {advancedProviderModels.map((m) =>
+                    modelRow(m, {
+                      dot: providerHealthColor(providerHealth[m.provider] ?? "unknown"),
+                      small: true,
+                      meta: (
+                        <div className="text-[9px]" style={{ color: "var(--text-muted)" }}>
+                          {m.provider} · {m.cost === "free" ? "FREE" : "PAID"}
+                        </div>
+                      ),
+                    }),
+                  )}
+                </>
+              )}
+
+              {noModelResults && (
+                <div className="px-3 py-4 text-[11px]" style={{ color: "var(--text-muted)" }}>
+                  No models match “{query.trim()}”.
                 </div>
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: healthColor }} aria-hidden />
-                {isActive && <Check size={10} className="shrink-0" style={{ color: "var(--litt-primary)" }} />}
-              </button>
-            );
-          })}
-        </>
-      )}
-    </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </>
   );
 }

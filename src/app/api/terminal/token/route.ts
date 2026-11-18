@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { resolveTerminalBrowserBaseUrl } from "@/lib/terminal-url";
-import { verifyProjectWorkspace, updateProjectWorkspace } from "@/lib/projects/project-repository";
+import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { getWorkspaceInternal } from "@/lib/terminal-internal-client";
 import { isFeatureEnabled } from "@/config/feature-flags";
 import { isTerminalOwnerUser } from "@/lib/terminal-owner";
@@ -16,8 +16,12 @@ export const runtime = "nodejs";
  * Issues a terminal token. If projectId is provided, verifies that the
  * user owns the project, that Supabase says the workspace is ready, AND
  * that the workspace still exists on the terminal server. If the terminal
- * server lost the workspace (restart, ephemeral storage), resets the
- * Supabase workspace status so the client can re-provision.
+ * server lost the workspace (restart, ephemeral storage), reports
+ * WORKSPACE_NOT_READY so the client can re-provision — without demoting
+ * the stored workspace status (see the registry-miss branch below).
+ *
+ * When the terminal gate refuses (public access flag off, user not a
+ * terminal owner), the refusal is a coded 200 — see the gate below.
  */
 export async function GET(request: NextRequest) {
   const { userId } = await auth(request);
@@ -28,10 +32,23 @@ export async function GET(request: NextRequest) {
   // Public terminal access is off until container isolation is verified.
   // Checked before any workspace lookup or token minting. Terminal owners
   // bypass the flag (the terminal server still enforces isolation itself).
+  //
+  // The refusal is answered as a coded 200, not an error status: it is a
+  // standing policy verdict (the fail-soft shape the workspace-state route
+  // uses for expected unavailable states), and the browser logs EVERY
+  // error-status response as a console error — so a 403 here put a red
+  // "Failed to load resource" row in the console on every Studio load for
+  // a state that is neither transient nor a failure. The gate itself is
+  // unchanged: no token is minted, and the verdict is latched client-side
+  // for the session (terminal-client.ts), so this stays one quiet request.
   if (!isFeatureEnabled("terminalRuntime") && !isTerminalOwnerUser(userId)) {
     return NextResponse.json(
-      { code: "TERMINAL_DISABLED", error: "The terminal is not available yet." },
-      { status: 403, headers: { "Cache-Control": "no-store" } },
+      {
+        code: "TERMINAL_DISABLED",
+        error: "The terminal is not available yet.",
+        terminalAvailable: false,
+      },
+      { status: 200, headers: { "Cache-Control": "no-store" } },
     );
   }
 
@@ -58,8 +75,8 @@ export async function GET(request: NextRequest) {
         // Supabase says the workspace is ready, but the terminal server is
         // the source of truth for whether the workspace actually exists.
         // Verify before issuing the token — if the terminal server lost the
-        // workspace (restart, ephemeral /tmp storage), reset Supabase so the
-        // client's self-heal flow can re-provision.
+        // workspace (restart, ephemeral /tmp storage), report not-ready so
+        // the client's self-heal flow can re-provision.
         let ws;
         try {
           ws = await getWorkspaceInternal(workspaceId, userId);
@@ -76,12 +93,15 @@ export async function GET(request: NextRequest) {
           );
         }
         if (!ws) {
-          // A failed reset write must surface (outer catch → 409 with the
-          // real error), not be misreported as a terminal-server failure.
-          await updateProjectWorkspace(projectId, userId, {
-            workspaceStatus: "not_prepared",
-            workspaceError: "Workspace lost on terminal server — needs re-provisioning",
-          });
+          // Registry miss — report not-ready WITHOUT stamping
+          // workspaceStatus "not_prepared". That demotion is what PR #989
+          // removed from the provisioning path: a single failed liveness
+          // check can be a transient probe failure or a restart-window
+          // gap, and a demoted row falls out of reach of the GitHub-mirror
+          // heal in workspace-recovery.ts, which only engages for "ready"
+          // rows. Leaving the row untouched keeps every recovery path
+          // available; the client's prepare flow re-registers the
+          // descriptor.
           return NextResponse.json(
             {
               code: "WORKSPACE_NOT_READY",

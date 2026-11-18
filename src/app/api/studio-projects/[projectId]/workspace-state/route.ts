@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
+import { getProject, verifyProjectWorkspace, ProjectVerificationError } from "@/lib/projects/project-repository";
+import {
+  extractEmbeddedErrorCode,
+  HOST_EXECUTION_DISABLED_CODE,
+  isHostExecutionPermitted,
+} from "@/lib/host-execution-guard";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { requireTerminalBaseUrl, terminalNotConfiguredResponse } from "@/lib/terminal-config";
+import { isSandboxExecutionAvailable } from "@/lib/terminal-internal-client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -143,16 +149,121 @@ async function isTouched(workspaceId: string, userId: string): Promise<boolean> 
   });
 }
 
+/**
+ * The refusal code a failed workspace carries, if any. Two sources, in
+ * order:
+ *  1. The machine code embedded in the stored workspaceError text (the
+ *     terminal-server's fail-closed 503 survives storage only as
+ *     serialized JSON — see extractEmbeddedErrorCode).
+ *  2. Deterministic derivation: a repo-backed (github) project whose
+ *     workspace preparation settled failed/error on a deployment where
+ *     host execution is not permitted can NEVER be prepared there —
+ *     prepareWorkspace for a git source asserts host execution on the
+ *     terminal server, which fails closed on every hosted deployment.
+ *     Settled stored messages that carry no embedded code (e.g.
+ *     "Provisioning timed out" from the stale-provisioning settle) must
+ *     not hide that: the refusal is a fact about the deployment and the
+ *     source kind, not about the stored text. Managed projects are
+ *     excluded — their workspaces prepare through a different path and
+ *     a restart can genuinely succeed.
+ */
+function deriveWorkspaceRefusalCode(
+  project: {
+    workspaceError?: string | null;
+    workspaceStatus?: string | null;
+    sourceType?: string | null;
+  },
+  // Phase 2: when the terminal reports sandboxed execution available
+  // for the user, the deterministic refusal no longer holds — the
+  // failure is retryable through the sandbox. An embedded code still
+  // wins (it records what actually happened); this only suppresses the
+  // derived fallback.
+  //
+  // Stored-refusal fix (2026-11-14): a stored HOST_EXECUTION_DISABLED
+  // code is the ONE exception. It records a prepare refused by the
+  // pre-sandbox host policy — a deploy-time state, not a fact about
+  // the project. When the sandbox now reports available for this
+  // user, that stored verdict is stale: returning it keeps every
+  // Studio surface banner-gated forever, because the only event that
+  // clears the stored error is a successful prepare, and surfaces
+  // reading this refusal never attempt one. Suppress it so the
+  // failure reads as retryable and prepare can actually run.
+  sandboxAvailable = false,
+): string | null {
+  const embedded = extractEmbeddedErrorCode(project.workspaceError);
+  if (embedded === HOST_EXECUTION_DISABLED_CODE && sandboxAvailable) return null;
+  if (embedded) return embedded;
+  if (
+    project.sourceType === "github" &&
+    (project.workspaceStatus === "failed" || project.workspaceStatus === "error") &&
+    !isHostExecutionPermitted() &&
+    !sandboxAvailable
+  ) {
+    return HOST_EXECUTION_DISABLED_CODE;
+  }
+  return null;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> },
 ) {
   const { userId } = await auth(request);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const terminalUnavailable = terminalNotConfiguredResponse();
-  if (terminalUnavailable) return terminalUnavailable;
 
   const { projectId } = await params;
+
+  // Read the project record FIRST (DB-only, failure-tolerant): the
+  // refusal truth below must not be hostage to the terminal-config gate
+  // or to which error verifyProjectWorkspace happens to throw. #901's
+  // recovery sat behind both, and on a deployment without a configured
+  // terminal base URL the pane never learned the refusal at all.
+  let project: Awaited<ReturnType<typeof getProject>> = null;
+  try {
+    project = await getProject(projectId, userId);
+  } catch {
+    project = null;
+  }
+  // Phase 2 availability probe: only for the exact shape the refusal
+  // derivation covers (repo-backed + settled failure + host guard
+  // refusing) — every other project derives exactly as before, with
+  // no terminal round-trip. The probe fails closed, so an unreachable
+  // terminal keeps today's coded refusal. Stored-refusal fix
+  // (2026-11-14): the probe also runs when the stored error embeds a
+  // code — a stored HOST_EXECUTION_DISABLED is exactly the verdict
+  // the probe can now retire (see deriveWorkspaceRefusalCode).
+  const sandboxAvailable =
+    project &&
+    project.sourceType === "github" &&
+    (project.workspaceStatus === "failed" || project.workspaceStatus === "error") &&
+    !isHostExecutionPermitted()
+      ? await isSandboxExecutionAvailable(userId)
+      : false;
+  const storedRefusalCode = project
+    ? deriveWorkspaceRefusalCode(project, sandboxAvailable)
+    : null;
+
+  const terminalUnavailable = terminalNotConfiguredResponse();
+  if (terminalUnavailable) {
+    // No terminal probing is possible — but a derivable refusal is
+    // still the truthful state of this workspace, and the preview pane
+    // needs it to suppress a Restart that can never succeed. Report it
+    // in the same fail-soft coded-200 shape the verify-error branch
+    // uses; only a project with no derivable refusal keeps the 503.
+    if (storedRefusalCode) {
+      return NextResponse.json(
+        {
+          code: HOST_EXECUTION_DISABLED_CODE,
+          workspaceErrorCode: storedRefusalCode,
+          scaffolded: false,
+          touched: false,
+          starterContent: false,
+        },
+        { status: 200 },
+      );
+    }
+    return terminalUnavailable;
+  }
 
   try {
     const { workspaceId } = await verifyProjectWorkspace(projectId, userId);
@@ -174,6 +285,36 @@ export async function GET(
     return NextResponse.json({ scaffolded, touched, starterContent });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to get workspace state";
+    // "No workspace yet" is an EXPECTED state for a project whose
+    // prepare never succeeded — not a server fault. It used to return
+    // 500 by design (code discarded), logging as a console error on
+    // every Studio mount. Return the same fail-soft fallback body
+    // with a 200 and the code attached; only unexpected throws 500.
+    if (
+      err instanceof ProjectVerificationError &&
+      (err.code === "WORKSPACE_NOT_PROVISIONED" || err.code === "WORKSPACE_NOT_READY")
+    ) {
+      // Also name the underlying refusal (storedRefusalCode, derived
+      // from the project record read at the top of this handler): the
+      // stored workspaceError carries the terminal-server's machine
+      // code only as embedded JSON text, and settled failure messages
+      // may carry no code at all — deriveWorkspaceRefusalCode covers
+      // both. Naming it here gives the preview pane a reliable second
+      // channel: the preview payload threads the code only when the
+      // stored status/error still carry it, and settles code-less on
+      // real paths. A failed lookup must not break the fail-soft 200:
+      // the code is simply null then.
+      return NextResponse.json(
+        {
+          code: err.code,
+          workspaceErrorCode: storedRefusalCode,
+          scaffolded: false,
+          touched: false,
+          starterContent: false,
+        },
+        { status: 200 },
+      );
+    }
     // Fail-soft: the caller treats an error as "unknown" and keeps the
     // default center surface. Never block Studio loading on this check.
     return NextResponse.json(

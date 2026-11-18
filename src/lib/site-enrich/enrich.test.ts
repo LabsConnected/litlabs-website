@@ -114,6 +114,23 @@ describe("audit", () => {
     expect(audit.placeholderRefs).toContain("https://via.placeholder.com/600x400");
   });
 
+  it("flags a LOCAL placeholder reference even when the placeholder file exists", () => {
+    // Production defect 2026-11-11 (LiTT Food Court): two slots shipped
+    // pointing at assets/images/placeholder.svg. The file EXISTS in the
+    // project, so the existence check passed it as "resolved" and the
+    // audit never flagged it — the gate saw a clean page.
+    const html = `<img src="assets/images/placeholder.svg" alt="Fresh & Local">
+      <div style="background-image:url('assets/images/placeholder.svg')"></div>
+      <img src="assets/images/real.jpg">`;
+    const audit = auditStaticSiteHtml(
+      html,
+      new Set(["index.html", "assets/images/placeholder.svg", "assets/images/real.jpg"]),
+    );
+    expect(audit.placeholderRefs).toContain("assets/images/placeholder.svg");
+    expect(audit.brokenRefs).toEqual([]);
+    expect(audit.issues.join(" ")).toMatch(/placeholder/);
+  });
+
   it("treats existing assets as resolved", () => {
     const audit = auditStaticSiteHtml(
       `<div class="hero"><img src="assets/images/hero.jpg"></div>`,
@@ -306,6 +323,72 @@ describe("enrichStaticSiteVisuals", () => {
     expect(report.placeholdersUsed).toBe(1);
     expect(html).toContain('src="assets/images/placeholder.svg"');
     expect(html).not.toContain("data-litt-image");
+  });
+
+  it("repairs a model-authored local placeholder.svg ref into a real photo", async () => {
+    // The Food Court shape: the model wrote the finished page with two
+    // <img src="assets/images/placeholder.svg"> slots directly (no
+    // data-litt-image marker). The repair pass must treat the local
+    // placeholder as a slot to fill, not as an existing asset to keep.
+    const transport = makeTransport({
+      "index.html": `<html><body><h1>LiTT Food Court</h1><img src="assets/images/placeholder.svg" alt="street food stall"></body></html>`,
+      "assets/images/placeholder.svg": "<svg></svg>",
+    });
+    mockInsertAssetFromUrl.mockResolvedValue({
+      success: true,
+      path: "assets/images/repaired.jpg",
+      sitePath: "assets/images/repaired.jpg",
+    });
+    vi.stubGlobal("fetch", vi.fn(async (u: RequestInfo | URL) => fakeImageResponse(String(u))));
+
+    const report = await enrichStaticSiteVisuals(transport as never, {});
+    const html = transport.files.get("index.html")!;
+    expect(html).not.toContain("placeholder.svg");
+    expect(report.placeholdersUsed).toBe(0);
+    expect(report.unresolvedPlaceholders).toEqual([]);
+  });
+
+  it("reports a model-authored placeholder ref as unresolved when it cannot be repaired", async () => {
+    const transport = makeTransport({
+      "index.html": `<img src="assets/images/placeholder.svg" alt="street food stall">`,
+      "assets/images/placeholder.svg": "<svg></svg>",
+    });
+    mockInsertAssetFromUrl.mockResolvedValue({ success: false, error: "download failed" });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 503, headers: new Map() })));
+
+    const report = await enrichStaticSiteVisuals(transport as never, {});
+    // The honest placeholder stays (never a broken <img>) — but the
+    // report must name it as UNRESOLVED so the run cannot claim a
+    // visually complete build.
+    expect(transport.files.get("index.html")).toContain("placeholder.svg");
+    expect(report.unresolvedPlaceholders).toContain("assets/images/placeholder.svg");
+  });
+
+  it("reports the SVG fallback slot as an unresolved placeholder", async () => {
+    const transport = makeTransport({
+      "index.html": `<img data-litt-image="anything" alt="x">`,
+    });
+    mockInsertAssetFromUrl.mockResolvedValue({ success: false, error: "download failed" });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 503, headers: new Map() })));
+
+    const report = await enrichStaticSiteVisuals(transport as never, {});
+    expect(report.placeholdersUsed).toBe(1);
+    expect(report.unresolvedPlaceholders).toContain("assets/images/placeholder.svg");
+  });
+
+  it("reports zero unresolved placeholders when every slot resolves", async () => {
+    const transport = makeTransport({
+      "index.html": `<html><body><img data-litt-image="coffee beans roast" alt="Beans"></body></html>`,
+    });
+    mockInsertAssetFromUrl.mockResolvedValue({
+      success: true,
+      path: "assets/images/coffee-beans.jpg",
+      sitePath: "assets/images/coffee-beans.jpg",
+    });
+    vi.stubGlobal("fetch", vi.fn(async (u: RequestInfo | URL) => fakeImageResponse(String(u))));
+
+    const report = await enrichStaticSiteVisuals(transport as never, {});
+    expect(report.unresolvedPlaceholders).toEqual([]);
   });
 
   it("falls through to the next provider when a probe-ok download fails", async () => {

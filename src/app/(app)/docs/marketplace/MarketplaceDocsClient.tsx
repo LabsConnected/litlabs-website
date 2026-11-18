@@ -40,12 +40,15 @@ export default function MarketplaceDocsClient() {
       <DocH2 id="what-it-is">What you&apos;ll find</DocH2>
       <DocP>
         Each listing describes one capability: what it does, what it needs
-        (like a GitHub connection), and what it costs. Every card has one
-        clear state:{" "}
-        <strong>Install</strong>{" "}when it&apos;s ready to add,{" "}
-        <strong>Installed</strong>{" "}once you&apos;ve added it, or{" "}
-        <strong>Coming soon</strong>{" "}while it&apos;s still being built.
-        Tap a card for the full details — version, requirements, and provider.
+        (like a GitHub connection), and what it will cost. Right now every
+        listing is labeled{" "}
+        <strong>Coming soon</strong>{" "}— nothing on the Marketplace is
+        installable yet, and no listing charges anything today. The current
+        beta listings are: Brand Kit Generator, Build and Test Workflow,
+        GitHub Code Review, Landing Page Builder, Repository Search, Social
+        Content Planner, Supabase Setup, Vercel Deployment, and Writing
+        Polish. Tap a card for the full details — version, requirements, and
+        provider.
       </DocP>
 
       <DocH2 id="installing">When installs go live</DocH2>

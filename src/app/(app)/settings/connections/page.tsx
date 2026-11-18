@@ -7,6 +7,7 @@ import { IntegrationCard, IntegrationSummaryBar } from "@/components/settings/In
 import Link from "next/link";
 import { Loader2, ArrowLeft, Activity, KeyRound, Check, AlertCircle } from "lucide-react";
 import GitHubPATDrawer from "./GitHubPATDrawer";
+import NetlifyTokenDrawer from "./NetlifyTokenDrawer";
 
 type MetaStatus = {
   connected: boolean;
@@ -26,6 +27,8 @@ export default function ConnectionsPage() {
   const [metaStatus, setMetaStatus] = useState<MetaStatus | null>(null);
   const [patDrawerOpen, setPatDrawerOpen] = useState(false);
   const [patStatus, setPatStatus] = useState<{ connected: boolean; accountName: string | null; scopes: string[] } | null>(null);
+  const [netlifyDrawerOpen, setNetlifyDrawerOpen] = useState(false);
+  const [netlifyStatus, setNetlifyStatus] = useState<{ connected: boolean; accountName: string | null } | null>(null);
 
   const fetchMetaStatus = useCallback(async () => {
     try {
@@ -51,10 +54,25 @@ export default function ConnectionsPage() {
     }
   }, []);
 
+  const fetchNetlifyStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/netlify/token", { credentials: "include" });
+      if (res.ok) {
+        const data = await res.json() as { connected: boolean; accountName?: string };
+        setNetlifyStatus({ connected: data.connected, accountName: data.accountName ?? null });
+      } else {
+        setNetlifyStatus({ connected: false, accountName: null });
+      }
+    } catch {
+      setNetlifyStatus({ connected: false, accountName: null });
+    }
+  }, []);
+
   useEffect(() => {
     void fetchMetaStatus();
     void fetchPATStatus();
-  }, [fetchMetaStatus, fetchPATStatus]);
+    void fetchNetlifyStatus();
+  }, [fetchMetaStatus, fetchPATStatus, fetchNetlifyStatus]);
 
   const handleAction = (actionId: string, actionType: string) => {
     if (actionType === "connect" && actionId === "install") {
@@ -197,6 +215,58 @@ export default function ConnectionsPage() {
               </div>
             </Section>
 
+            {/* Netlify — publish target for Studio projects */}
+            <Section title="Netlify" description="Publish Studio projects to your own Netlify account (Deploy → Netlify)">
+              <div
+                className="rounded-xl border p-4"
+                style={{ background: T.boxBg, borderColor: `${T.borderColor}30` }}
+              >
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="flex h-9 w-9 items-center justify-center rounded-lg"
+                      style={{ background: `${T.accentColor}15` }}
+                    >
+                      <KeyRound size={16} style={{ color: T.accentColor }} />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold" style={{ color: T.headerColor }}>
+                        Personal Access Token
+                      </h3>
+                      <span className="text-[10px] opacity-50">One site per project, updated on every deploy</span>
+                    </div>
+                  </div>
+                  {netlifyStatus?.connected && (
+                    <div
+                      className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-bold text-emerald-400"
+                    >
+                      <Check size={10} /> Connected
+                    </div>
+                  )}
+                </div>
+
+                {netlifyStatus?.connected && netlifyStatus.accountName && (
+                  <div className="mb-3 rounded-lg border px-3 py-2 text-[11px]" style={{ borderColor: `${T.borderColor}20`, background: T.bgColor }}>
+                    <span className="opacity-50">Account:</span>{" "}
+                    <span className="font-bold" style={{ color: T.textColor }}>{netlifyStatus.accountName}</span>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setNetlifyDrawerOpen(true)}
+                  className="w-full rounded-lg border px-3 py-2 text-[11px] font-bold transition-all hover:opacity-80"
+                  style={{
+                    borderColor: `${T.accentColor}30`,
+                    color: T.accentColor,
+                    backgroundColor: `${T.accentColor}08`,
+                  }}
+                >
+                  {netlifyStatus?.connected ? "Manage Netlify Token" : "Connect Netlify"}
+                </button>
+              </div>
+            </Section>
+
             {runtime.length > 0 && (
               <Section title="Runtime" description="Terminal and workspace execution">
                 {runtime.map((i) => (
@@ -265,6 +335,7 @@ export default function ConnectionsPage() {
       </div>
 
       <GitHubPATDrawer open={patDrawerOpen} onClose={() => setPatDrawerOpen(false)} onConnectionChange={fetchPATStatus} />
+      <NetlifyTokenDrawer open={netlifyDrawerOpen} onClose={() => setNetlifyDrawerOpen(false)} onConnectionChange={fetchNetlifyStatus} />
     </div>
   );
 }

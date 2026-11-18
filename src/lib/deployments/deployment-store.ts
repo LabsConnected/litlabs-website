@@ -35,6 +35,10 @@ interface DeploymentRow {
   content_hash: string | null;
   error_class: string | null;
   error_message: string | null;
+  /** Added by the netlify_deployment_external_site migration; absent on older rows/DBs. */
+  external_site_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 function rowToRecord(row: DeploymentRow): DeploymentRecord {
@@ -52,6 +56,9 @@ function rowToRecord(row: DeploymentRow): DeploymentRecord {
     contentHash: row.content_hash,
     errorClass: row.error_class,
     errorMessage: row.error_message,
+    externalSiteId: row.external_site_id ?? null,
+    createdAt: row.created_at ?? null,
+    updatedAt: row.updated_at ?? null,
   };
 }
 
@@ -66,6 +73,7 @@ function patchToRow(patch: Partial<DeploymentRecord>): Record<string, unknown> {
   if (patch.contentHash !== undefined) row.content_hash = patch.contentHash;
   if (patch.errorClass !== undefined) row.error_class = patch.errorClass;
   if (patch.errorMessage !== undefined) row.error_message = patch.errorMessage;
+  if (patch.externalSiteId !== undefined) row.external_site_id = patch.externalSiteId;
   return row;
 }
 
@@ -120,18 +128,34 @@ export const supabaseDeploymentStore: DeploymentStore = {
 
   async create(input: DeploymentCreateInput) {
     const db = requireDb();
-    const { data, error } = await db
-      .from(TABLE)
-      .insert({
-        user_id: input.userId,
-        project_id: input.projectId,
-        workspace_id: input.workspaceId,
-        status: input.status,
-        target: input.target,
-        content_hash: input.contentHash ?? null,
-      })
-      .select()
-      .single();
+    const baseRow = {
+      user_id: input.userId,
+      project_id: input.projectId,
+      workspace_id: input.workspaceId,
+      status: input.status,
+      target: input.target,
+      content_hash: input.contentHash ?? null,
+    };
+    const withSite =
+      input.externalSiteId != null
+        ? { ...baseRow, external_site_id: input.externalSiteId }
+        : baseRow;
+    const { data, error } = await db.from(TABLE).insert(withSite).select().single();
+    if (error?.code === "PGRST204" && input.externalSiteId != null) {
+      // The external_site_id migration may not be applied yet — retry
+      // without it (same precedent as putFiles' encoding retry). The
+      // deployment proceeds; the site id simply isn't persisted, and the
+      // Netlify adapter's deterministic name lookup still finds the site.
+      const { data: retryData, error: retryError } = await db
+        .from(TABLE)
+        .insert(baseRow)
+        .select()
+        .single();
+      if (retryError) {
+        throw new Error(`Deployment create failed: ${retryError.message}`);
+      }
+      return rowToRecord(retryData as DeploymentRow);
+    }
     if (error) throw new Error(`Deployment create failed: ${error.message}`);
     return rowToRecord(data as DeploymentRow);
   },
@@ -329,11 +353,157 @@ export async function findLatestDeploymentForProject(
 }
 
 /**
- * The latest deployment per project for a user (newest first).
+ * The most recent READY deployment for a project.
+ *
+ * Sibling of findLatestDeploymentForProject restricted to deployments
+ * whose snapshot is complete and servable — the only snapshots a
+ * workspace restore may rehydrate from. Returns null when storage is
+ * unavailable or no ready deployment exists.
+ */
+export async function findLatestReadyDeploymentForProject(
+  projectId: string,
+  userId: string,
+): Promise<DeploymentRecord | null> {
+  if (!supabaseAdmin) return null;
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .eq("status", "ready")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  return rowToRecord(data as DeploymentRow);
+}
+
+/** One file of a published snapshot, for workspace rehydration. */
+export interface PublishedSnapshotFile {
+  path: string;
+  content: string;
+  contentType: string;
+  /** Storage kind written at deploy time: "utf-8" text or "base64" binary. Absent on rows predating the column. */
+  encoding?: string | null;
+}
+
+/**
+ * Read EVERY file of a READY deployment's snapshot, ordered by path.
+ *
+ * The restore-side counterpart of readPublishedFile: same readiness
+ * rule (only `ready` deployments have a complete snapshot), same
+ * missing-encoding-column fallback. Returns null when storage is
+ * unavailable, the deployment does not exist, or it is not ready;
+ * throws on store errors so a restore never mistakes an outage for an
+ * empty snapshot and "restores" nothing over a lost workspace.
+ */
+export async function readDeploymentSnapshotFiles(
+  deploymentId: string,
+): Promise<PublishedSnapshotFile[] | null> {
+  if (!supabaseAdmin) return null;
+
+  const { data: deployment, error: deploymentError } = await supabaseAdmin
+    .from(TABLE)
+    .select("id,status")
+    .eq("id", deploymentId)
+    .maybeSingle();
+  if (deploymentError) {
+    if (deploymentError.code === "22P02") return null;
+    throw new Error(`Deployment lookup failed: ${deploymentError.message}`);
+  }
+  if (!deployment) return null;
+  if ((deployment as { status: string }).status !== "ready") return null;
+
+  // Two literal selects — PostgREST's type-level parser needs the literal
+  // column string, a dynamic one degrades to ParserError.
+  const readRows = () =>
+    supabaseAdmin
+      .from(FILES_TABLE)
+      .select("path,content,content_type,encoding")
+      .eq("deployment_id", deploymentId)
+      .order("path", { ascending: true });
+  const readRowsNoEncoding = () =>
+    supabaseAdmin
+      .from(FILES_TABLE)
+      .select("path,content,content_type")
+      .eq("deployment_id", deploymentId)
+      .order("path", { ascending: true });
+  let data: { path: string; content: string; content_type: string; encoding?: string | null }[] | null;
+  let error: { code?: string; message: string } | null;
+  ({ data, error } = await readRows());
+  if (error?.code === "PGRST204" || error?.code === "42703") {
+    // Encoding column not yet applied — read without it (see
+    // readPublishedFile for why both codes mean "column absent").
+    ({ data, error } = await readRowsNoEncoding());
+  }
+  if (error) {
+    throw new Error(`Deployment snapshot read failed: ${error.message}`);
+  }
+  return (data ?? []).map((row) => ({
+    path: row.path,
+    content: row.content,
+    contentType: row.content_type,
+    encoding: row.encoding,
+  }));
+}
+
+/**
+ * The most recent deployment for a project on ONE target, whatever its
+ * state. Target-scoped sibling of findLatestDeploymentForProject: a
+ * project can be live on LiTT Hosting and on Netlify independently, and
+ * each target's surface must read its own latest record.
+ */
+export async function findLatestDeploymentForProjectTarget(
+  projectId: string,
+  userId: string,
+  target: string,
+): Promise<DeploymentRecord | null> {
+  if (!supabaseAdmin) return null;
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .eq("target", target)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  return rowToRecord(data as DeploymentRow);
+}
+
+/**
+ * Recent deployment history for a project, newest first, across all
+ * targets (Kimi wiring item 5). Powers the Deploy surface's history
+ * list. Read-only reporting — there is deliberately no rollback
+ * counterpart: no deployment rollback path exists in this system, and
+ * the surface must not pretend one does. Returns [] when storage is
+ * unavailable.
+ */
+export async function listDeploymentHistoryForProject(
+  projectId: string,
+  userId: string,
+  limit = 10,
+): Promise<DeploymentRecord[]> {
+  if (!supabaseAdmin) return [];
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(Math.max(1, Math.min(limit, 50)));
+  if (error || !data) return [];
+  return (data as DeploymentRow[]).map(rowToRecord);
+}
+
+/**
+ * The latest deployment per project AND target for a user (newest first).
  *
  * Powers the "Published sites" section of the /deployments page: one row
- * per project, showing the live LiTT Hosting URL when the deployment is
- * ready and verified. Returns [] when storage is unavailable.
+ * per project per target, showing the live URL when the deployment is
+ * ready and verified — a project published to both LiTT Hosting and
+ * Netlify shows both. Returns [] when storage is unavailable.
  */
 export async function listLatestDeploymentsForUser(
   userId: string,
@@ -349,8 +519,9 @@ export async function listLatestDeploymentsForUser(
   const seen = new Set<string>();
   const latest: DeploymentRecord[] = [];
   for (const row of data as DeploymentRow[]) {
-    if (seen.has(row.project_id)) continue;
-    seen.add(row.project_id);
+    const key = `${row.project_id} ${row.target}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     latest.push(rowToRecord(row));
   }
   return latest;

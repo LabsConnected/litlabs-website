@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import {
   ChevronDown,
@@ -20,8 +20,11 @@ import {
   Monitor,
 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import StudioPreviewPanel from "../StudioPreviewPanel";
+import { STUDIO_EVENT_OPEN_FILE } from "@/lib/canvas/panel-actions";
+import type { ConnectionCapabilities } from "../../hooks/useConnectionSummary";
 import { StudioFilePreview } from "../StudioFilePreview";
+
+const StudioPlanSurface = dynamic(() => import("../StudioPlanSurface"), { ssr: false });
 
 const MonacoEditor = dynamic(
   () =>
@@ -42,17 +45,35 @@ interface FileEntry {
   gitStatus?: "M" | "A" | "D" | "U" | "C";
 }
 
-type ViewMode = "code" | "split" | "file-preview" | "app-preview";
+type ViewMode = "code" | "split" | "file-preview";
 
 /**
- * View-mode toggle for the Code workspace tab toolbar. There is
- * intentionally no "Code" option: the Code workspace tab itself is the code
- * view, and a second Code button here duplicated it in the same toolbar.
+ * Editor-region toggle for the Code box's "Code" view. There is
+ * intentionally no "App" option anymore: the live app preview is a
+ * permanent third region of the one-box layout (Explorer + editor +
+ * preview side by side, spec 2026-11-16 §1), not a mode that hides the
+ * editor. The per-file preview (StudioFilePreview) stays available as
+ * an editor-side view, distinct from the app preview region.
  */
 export const CODE_VIEW_MODES: { id: ViewMode; icon: typeof Columns2; label: string }[] = [
   { id: "split", icon: Columns2, label: "Split" },
   { id: "file-preview", icon: Eye, label: "File" },
-  { id: "app-preview", icon: Monitor, label: "App" },
+  { id: "code", icon: Monitor, label: "Editor" },
+];
+
+/**
+ * Code-box views (spec Amendment 4): Plan, Canvas and Design moved
+ * inside the Code box. Canvas and Design are ONE inseparable surface
+ * (CommandStudio's canvasContent carries its own Build/Design toggle
+ * over the same builder), so they are presented as a single
+ * "Canvas / Design" view rather than two fake views.
+ */
+export type CodeBoxView = "code" | "plan" | "canvas-design";
+
+export const CODE_BOX_VIEWS: { id: CodeBoxView; label: string }[] = [
+  { id: "code", label: "Code" },
+  { id: "plan", label: "Plan" },
+  { id: "canvas-design", label: "Canvas / Design" },
 ];
 
 type DialogState =
@@ -63,11 +84,11 @@ type DialogState =
 type MutationAction = "write" | "delete" | "mkdir" | "rename";
 
 const GIT_BADGE_COLORS: Record<NonNullable<FileEntry["gitStatus"]>, { bg: string; color: string; label: string }> = {
-  M: { bg: "rgba(227,179,65,0.15)", color: "#e3b341", label: "Modified" },
-  A: { bg: "rgba(114,242,56,0.15)", color: "#72f238", label: "Added" },
-  D: { bg: "rgba(239,68,68,0.15)", color: "#ef4444", label: "Deleted" },
-  U: { bg: "rgba(96,165,250,0.15)", color: "#60a5fa", label: "Untracked" },
-  C: { bg: "rgba(34,211,238,0.15)", color: "#22d3ee", label: "Conflict" },
+  M: { bg: "rgba(227,179,65,0.15)", color: "#b45309", label: "Modified" },
+  A: { bg: "rgba(114,242,56,0.15)", color: "#16a34a", label: "Added" },
+  D: { bg: "rgba(239,68,68,0.15)", color: "#dc2626", label: "Deleted" },
+  U: { bg: "rgba(96,165,250,0.15)", color: "#2563eb", label: "Untracked" },
+  C: { bg: "rgba(34,211,238,0.15)", color: "#0891b2", label: "Conflict" },
 };
 
 function normalizePath(value: string): string {
@@ -113,6 +134,17 @@ function isTextFile(path: string): boolean {
   return TEXT_EXTENSIONS.has(ext);
 }
 
+/** Relative "saved" phrasing for the save-status line (Kimi wiring
+ *  item 15): "just now" under 5s, then Ns / Nm / Nh ago. */
+export function formatSavedAgo(at: number, now: number): string {
+  const seconds = Math.max(0, Math.floor((now - at) / 1000));
+  if (seconds < 5) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.floor(minutes / 60)}h ago`;
+}
+
 function getLanguage(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
   const map: Record<string, string> = {
@@ -132,12 +164,49 @@ export function CodeWorkspace({
   branch,
   workspaceStatus,
   writeAccess,
+  previewContent,
+  previewPlaceholder,
+  canvasContent,
+  planCapabilities,
+  planModelLabel,
+  onPreviewRefreshRequest,
+  onSummonPanel,
+  onRollback,
 }: {
   projectId: string | null;
   repositoryName: string | null;
   branch: string | null;
   workspaceStatus: string | null;
   writeAccess: boolean;
+  /**
+   * The ONE shared preview element, built by CommandStudio and
+   * relocated into this box when the Code panel is the preview's home
+   * (mapping §1, the filesContent pattern). CodeWorkspace never mounts
+   * its own StudioPreviewPanel — a second mount would be a second
+   * preview session driver.
+   */
+  previewContent?: ReactNode;
+  /**
+   * Rendered in the preview region when the live preview's home is
+   * the standalone Preview panel (the pointer card, supplied by
+   * BoardPanelBindings).
+   */
+  previewPlaceholder?: ReactNode;
+  /** The Canvas & Design stage element, built by CommandStudio. */
+  canvasContent?: ReactNode;
+  /** Plan view data — StudioPlanSurface renders inside the Code box. */
+  planCapabilities?: ConnectionCapabilities;
+  planModelLabel?: string;
+  /**
+   * Save / external-change → preview refresh coupling, re-threaded
+   * through CommandStudio, which owns the previewRefreshKey state
+   * passed into the shared preview element.
+   */
+  onPreviewRefreshRequest?: () => void;
+  /** Board summon for surfaces that keep their own board home
+   *  (Terminal, Activity, …). */
+  onSummonPanel?: (id: string) => void;
+  onRollback?: () => void;
 }) {
   const { getToken } = useClerkAuth();
   const [entries, setEntries] = useState<Record<string, FileEntry[]>>({});
@@ -157,13 +226,48 @@ export function CodeWorkspace({
   const [loading, setLoading] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Save-status line state (Kimi wiring item 15): the last successful
+  // save's path + timestamp, recorded by saveFile itself — never
+  // inferred. nowTick re-renders the relative phrasing every 10s.
+  const [lastSaved, setLastSaved] = useState<{ path: string; at: number } | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!lastSaved) return;
+    const id = window.setInterval(() => setNowTick(Date.now()), 10_000);
+    return () => window.clearInterval(id);
+  }, [lastSaved]);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
+  const [codeBoxView, setCodeBoxView] = useState<CodeBoxView>("code");
   const [selectedFileInfo, setSelectedFileInfo] = useState<{ path: string; size: number | null } | null>(null);
-  const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
   const [dialog, setDialog] = useState<DialogState>(null);
   const editorRef = useRef<unknown>(null);
+  // Kimi wiring item 4: a pending line reveal from a studio:open-file
+  // event that carried a line (the Checks file:line chip). The reveal
+  // fires once the target tab is active AND the editor has mounted —
+  // whichever completes last — then clears so later tab switches never
+  // yank the scroll position.
+  const pendingRevealRef = useRef<{ path: string; line: number } | null>(null);
+  const activeTabRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+  const tryRevealPendingLine = useCallback(() => {
+    const pending = pendingRevealRef.current;
+    if (!pending) return;
+    if (activeTabRef.current !== pending.path) return;
+    const editor = editorRef.current as {
+      revealLineInCenter?: (line: number) => void;
+      setPosition?: (position: { lineNumber: number; column: number }) => void;
+      focus?: () => void;
+    } | null;
+    if (!editor || typeof editor.revealLineInCenter !== "function") return;
+    pendingRevealRef.current = null;
+    editor.revealLineInCenter(pending.line);
+    editor.setPosition?.({ lineNumber: pending.line, column: 1 });
+    editor.focus?.();
+  }, []);
   // Track the current project ID so we only reset state on actual project change,
   // not on callback identity changes or preparation status toggles.
   const projectIdRef = useRef<string | null>(null);
@@ -297,8 +401,10 @@ export function CodeWorkspace({
         body: JSON.stringify({ action: "write", path, content: tab.content }),
       });
       setOpenTabs((prev) => prev.map((t) => t.path === path ? { ...t, original: t.content } : t));
+      setLastSaved({ path, at: Date.now() });
+      setNowTick(Date.now());
       void loadDirectory(parentPath(path), true);
-      setPreviewRefreshKey((k) => k + 1);
+      onPreviewRefreshRequest?.();
       // Mark the source so our own files-changed handler doesn't re-read
       // the tab we just saved (a reload racing the user's next keystroke
       // could discard it).
@@ -308,7 +414,7 @@ export function CodeWorkspace({
     } finally {
       setSaving(false);
     }
-  }, [projectId, requestJson, writeAccess, openTabs, loadDirectory]);
+  }, [projectId, requestJson, writeAccess, openTabs, loadDirectory, onPreviewRefreshRequest]);
 
   // Reload a tab's content from disk (after an external change). Clears any
   // conflict flag for the path.
@@ -513,7 +619,7 @@ export function CodeWorkspace({
         void loadDirectory(parentPath(changedPath), true);
         // Also reload root to catch top-level changes
         if (changedPath !== ".") void loadDirectory(".", true);
-        setPreviewRefreshKey((k) => k + 1);
+        onPreviewRefreshRequest?.();
         // Skip our own save echo — the tab already holds the saved content
         // and a re-read could race the user's next keystroke.
         if (detail?.source === "code-save") return;
@@ -533,7 +639,48 @@ export function CodeWorkspace({
     };
     window.addEventListener("studio:files-changed", handler);
     return () => window.removeEventListener("studio:files-changed", handler);
-  }, [projectId, loadDirectory, reloadTabContent]);
+  }, [projectId, loadDirectory, reloadTabContent, onPreviewRefreshRequest]);
+
+  // Panel linking (board B3, also live in the stage layout): a file
+  // opened in the Files panel — or via the studio.open_file action —
+  // surfaces here as an editor tab through the existing openFile path.
+  // Ignores events for other projects and malformed paths, exactly like
+  // the Files panel's own listener.
+  useEffect(() => {
+    if (!projectId) return;
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.projectId !== projectId) return;
+      const rawPath = typeof detail?.path === "string" ? detail.path : "";
+      let normalized: string;
+      try {
+        normalized = normalizePath(rawPath);
+      } catch {
+        return;
+      }
+      if (normalized === ".") return;
+      // A line rides along only from senders that parsed one out of
+      // real output (the Checks chip). Anything else opens at the top,
+      // exactly as before.
+      const line =
+        typeof detail?.line === "number" && Number.isInteger(detail.line) && detail.line > 0
+          ? detail.line
+          : null;
+      pendingRevealRef.current = line ? { path: normalized, line } : null;
+      void openFile(normalized).then(() => tryRevealPendingLine());
+    };
+    window.addEventListener(STUDIO_EVENT_OPEN_FILE, handler);
+    return () => window.removeEventListener(STUDIO_EVENT_OPEN_FILE, handler);
+  }, [projectId, openFile, tryRevealPendingLine]);
+
+  // The editor mounts after the tab's content loads; if a reveal is
+  // still pending for the now-active tab, fire it on mount and whenever
+  // the active tab settles.
+  useEffect(() => {
+    if (pendingRevealRef.current && pendingRevealRef.current.path === activeTab) {
+      tryRevealPendingLine();
+    }
+  }, [activeTab, openTabs, tryRevealPendingLine]);
 
   const activeTabData = openTabs.find((t) => t.path === activeTab);
   const isDirty = activeTabData && activeTabData.content !== activeTabData.original;
@@ -541,7 +688,7 @@ export function CodeWorkspace({
   // ─── Render ─────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden" style={{ backgroundColor: "#0a0b10" }}>
+    <div className="flex h-full w-full flex-col overflow-hidden" style={{ backgroundColor: "var(--studio-surface)" }}>
       {/* Top bar: view toggle + repo info */}
       <div
         className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5 glass-toolbar"
@@ -558,9 +705,41 @@ export function CodeWorkspace({
             <span className="text-[10px] font-medium" style={{ color: "var(--text-muted)" }}>{branch}</span>
           </>
         )}
+        {/* Code-box views (Amendment 4): Code / Plan / Canvas / Design
+            all live inside this one box. */}
+        <div
+          className="flex items-center gap-0.5 rounded-md p-0.5"
+          style={{ backgroundColor: "rgba(0,0,0,0.04)" }}
+          role="tablist"
+          aria-label="Code panel views"
+          data-testid="code-box-view-tabs"
+        >
+          {CODE_BOX_VIEWS.map((view) => {
+            const isActive = codeBoxView === view.id;
+            return (
+              <button
+                key={view.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                data-testid={`code-box-view-${view.id}`}
+                onClick={() => setCodeBoxView(view.id)}
+                className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold transition"
+                style={{
+                  backgroundColor: isActive ? "rgba(155,77,255,0.15)" : "transparent",
+                  color: isActive ? "#9b4dff" : "var(--text-muted)",
+                }}
+                title={view.label}
+              >
+                {view.label}
+              </button>
+            );
+          })}
+        </div>
         <div className="flex-1" />
-        {/* View mode toggle */}
-        <div className="flex items-center gap-0.5 rounded-md p-0.5" style={{ backgroundColor: "rgba(255,255,255,0.04)" }}>
+        {/* Editor-region toggle — only meaningful in the Code view */}
+        {codeBoxView === "code" && (
+        <div className="flex items-center gap-0.5 rounded-md p-0.5" style={{ backgroundColor: "rgba(0,0,0,0.04)" }}>
           {CODE_VIEW_MODES.map((mode) => {
             const Icon = mode.icon;
             const isActive = viewMode === mode.id;
@@ -582,11 +761,12 @@ export function CodeWorkspace({
             );
           })}
         </div>
+        )}
       </div>
 
       {/* Error banner */}
       {error && (
-        <div className="shrink-0 border-b px-3 py-1.5 text-[11px]" style={{ borderColor: "rgba(239,68,68,0.2)", backgroundColor: "rgba(239,68,68,0.06)", color: "#fca5a5" }}>
+        <div className="shrink-0 border-b px-3 py-1.5 text-[11px]" style={{ borderColor: "rgba(239,68,68,0.2)", backgroundColor: "rgba(239,68,68,0.06)", color: "#dc2626" }}>
           {error}
           <button type="button" onClick={() => setError(null)} className="ml-2 text-[10px] underline">dismiss</button>
         </div>
@@ -602,9 +782,12 @@ export function CodeWorkspace({
         </div>
       )}
 
-      {/* Main content area — only render when we have a project */}
-      {projectId && (
-      <div className="flex min-h-0 flex-1">
+      {/* Main content area — the one-box three-region layout
+          (Explorer + editor + app preview, simultaneously), shown in
+          the Code view only. Plan and Canvas / Design are separate
+          Code-box views below. */}
+      {projectId && codeBoxView === "code" && (
+      <div className="flex min-h-0 flex-1" data-testid="code-box-code-view">
         {/* Left: File Explorer */}
         <div
           className="shrink-0 overflow-y-auto glass-panel"
@@ -658,7 +841,7 @@ export function CodeWorkspace({
                 style={{ borderColor: "var(--studio-border)", color: "var(--text-primary)" }}
                 aria-label="Name"
               />
-              <button type="submit" className="rounded p-1" style={{ backgroundColor: "var(--litt-primary)", color: "#000" }} aria-label="Confirm">
+              <button type="submit" className="rounded p-1" style={{ backgroundColor: "var(--litt-primary)", color: "#fff" }} aria-label="Confirm">
                 <Save size={10} />
               </button>
               <button type="button" onClick={() => setDialog(null)} className="rounded p-1 hover:bg-white/8" style={{ color: "var(--text-muted)" }} aria-label="Cancel">
@@ -672,7 +855,7 @@ export function CodeWorkspace({
             </div>
           )}
           {(workspaceStatus === "failed" || workspaceStatus === "error") && (
-            <div className="flex items-center gap-1.5 border-b px-2.5 py-1.5 text-[10px]" style={{ borderColor: "rgba(239,68,68,0.2)", color: "#fca5a5" }}>
+            <div className="flex items-center gap-1.5 border-b px-2.5 py-1.5 text-[10px]" style={{ borderColor: "rgba(239,68,68,0.2)", color: "#dc2626" }}>
               <span>Workspace recovery failed</span>
               <button
                 type="button"
@@ -724,7 +907,7 @@ export function CodeWorkspace({
                       onClick={() => setActiveTab(tab.path)}
                       className="group flex shrink-0 cursor-pointer items-center gap-1.5 rounded-t px-2.5 py-1.5 text-[11px] font-medium transition"
                       style={{
-                        backgroundColor: isActive ? "#0a0b10" : "transparent",
+                        backgroundColor: isActive ? "var(--studio-bg)" : "transparent",
                         color: isActive ? "var(--text-primary)" : "var(--text-muted)",
                         borderBottom: isActive ? "2px solid #9b4dff" : "2px solid transparent",
                       }}
@@ -759,15 +942,46 @@ export function CodeWorkspace({
                 )}
               </div>
 
+              {/* Save-status line (Kimi wiring item 15): language,
+                  line count, and the save state of the ACTIVE tab —
+                  "Saved · just now / Ns ago" from the timestamp
+                  saveFile recorded, "Unsaved changes" while dirty.
+                  Monaco's native find (Ctrl+F) already covers the
+                  find half of the Kimmy original; nothing ported. */}
+              {activeTabData && (
+                <div
+                  className="flex shrink-0 items-center gap-1.5 border-b px-2.5 py-1 text-[9px]"
+                  style={{ borderColor: "var(--studio-border)", color: "var(--text-muted)", backgroundColor: "var(--studio-surface)" }}
+                  data-testid="code-save-status"
+                >
+                  <span className="font-mono">{getLanguage(activeTabData.path)}</span>
+                  <span aria-hidden>·</span>
+                  <span className="tabular-nums">
+                    {activeTabData.content ? activeTabData.content.split("\n").length : 0} lines
+                  </span>
+                  {isDirty ? (
+                    <>
+                      <span aria-hidden>·</span>
+                      <span style={{ color: "#e3b341" }}>Unsaved changes</span>
+                    </>
+                  ) : lastSaved && lastSaved.path === activeTabData.path ? (
+                    <>
+                      <span aria-hidden>·</span>
+                      <span>Saved · {formatSavedAgo(lastSaved.at, nowTick)}</span>
+                    </>
+                  ) : null}
+                </div>
+              )}
+
               {/* External-change conflict strip — saving a stale tab must be explicit */}
               {activeTab && conflictPaths.has(activeTab) && (
-                <div className="flex shrink-0 items-center gap-2 border-b px-2 py-1.5 text-[10px]" style={{ borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.08)", color: "#fca5a5" }}>
+                <div className="flex shrink-0 items-center gap-2 border-b px-2 py-1.5 text-[10px]" style={{ borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.08)", color: "#dc2626" }}>
                   <span className="min-w-0 flex-1">LiTT changed this file while you had unsaved edits. Saving now would overwrite those changes.</span>
                   <button
                     type="button"
                     onClick={() => void reloadTabContent(activeTab)}
                     className="shrink-0 rounded-md px-2 py-1 font-bold"
-                    style={{ backgroundColor: "rgba(239,68,68,0.15)", color: "#fecaca" }}
+                    style={{ backgroundColor: "rgba(239,68,68,0.15)", color: "#b91d1c" }}
                   >
                     Reload latest
                   </button>
@@ -829,7 +1043,7 @@ export function CodeWorkspace({
                     value={activeTabData.content}
                     theme="vs-dark"
                     onChange={(value) => updateTabContent(activeTabData.path, value ?? "")}
-                    onMount={(editor) => { editorRef.current = editor; }}
+                    onMount={(editor) => { editorRef.current = editor; tryRevealPendingLine(); }}
                     options={{
                       fontSize: 13,
                       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
@@ -875,22 +1089,75 @@ export function CodeWorkspace({
             </div>
           )}
 
-          {/* App Preview — shown in app-preview mode. Canvas-first layout:
-              there is no permanent right-column preview, so the App view
-              always mounts its own StudioPreviewPanel. */}
-          {viewMode === "app-preview" && (
-            <div className="flex min-w-0 flex-1 flex-col">
-              <StudioPreviewPanel
-                projectId={projectId}
-                projectName={repositoryName}
-                repositoryName={repositoryName}
-                branch={branch}
-                workspaceStatus={workspaceStatus}
-                refreshKey={previewRefreshKey}
-              />
+          {/* App Preview region — the third region of the one-box
+              layout, visible simultaneously with Explorer + editor.
+              It renders the ONE shared preview element relocated from
+              CommandStudio (previewContent), or the pointer card
+              (previewPlaceholder) when the standalone Preview panel is
+              the preview's current home. CodeWorkspace never mounts
+              its own StudioPreviewPanel. Device toggles and preview
+              logs travel with StudioPreviewPanel itself. */}
+          <div
+            className="flex min-w-0 flex-1 flex-col"
+            data-testid="code-preview-region"
+            style={{ borderLeft: "1px solid var(--studio-border)" }}
+          >
+            {previewContent ?? previewPlaceholder ?? (
+              <div
+                className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center"
+                data-testid="code-preview-unavailable"
+              >
+                <Monitor size={24} opacity={0.3} style={{ color: "var(--text-muted)" }} />
+                <p className="text-[11px] font-medium" style={{ color: "var(--text-muted)" }}>
+                  No preview is mounted in the Code panel.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+        </div>
+      )}
+
+      {/* Plan view — StudioPlanSurface inside the Code box
+          (Amendment 4). Its Open-* actions are rewired: targets that
+          now live in Code switch this box's view; the rest summon
+          their board panels. */}
+      {projectId && codeBoxView === "plan" && (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden" data-testid="code-box-plan-view">
+          {planCapabilities ? (
+            <StudioPlanSurface
+              capabilities={planCapabilities}
+              modelLabel={planModelLabel ?? ""}
+              onOpenCode={() => setCodeBoxView("code")}
+              onOpenCanvas={() => setCodeBoxView("canvas-design")}
+              onOpenPreview={() => setCodeBoxView("code")}
+              onOpenTerminal={() => onSummonPanel?.("terminal")}
+              onOpenActivity={() => onSummonPanel?.("activity")}
+              onOpenFiles={() => setCodeBoxView("code")}
+              onRollback={() => onRollback?.()}
+            />
+          ) : (
+            <div className="flex flex-1 items-center justify-center px-4 text-center">
+              <p className="text-[11px] font-medium" style={{ color: "var(--text-muted)" }}>
+                Plan is not available in this Code panel mount.
+              </p>
             </div>
           )}
         </div>
+      )}
+
+      {/* Canvas / Design view — the single inseparable Canvas &
+          Design surface (its own Build/Design toggle), threaded in
+          from CommandStudio like the preview element. */}
+      {projectId && codeBoxView === "canvas-design" && (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden" data-testid="code-box-canvas-design-view">
+          {canvasContent ?? (
+            <div className="flex flex-1 items-center justify-center px-4 text-center">
+              <p className="text-[11px] font-medium" style={{ color: "var(--text-muted)" }}>
+                Canvas / Design is not available in this Code panel mount.
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>

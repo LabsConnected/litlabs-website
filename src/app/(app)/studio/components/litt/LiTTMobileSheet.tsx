@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { MessageSquare, Activity, Wrench, X } from "lucide-react";
+import { MessageSquare, Activity, FolderOpen, Component, Wrench, X } from "lucide-react";
 import { useVisualViewport } from "../../hooks/useVisualViewport";
 import { mobileDiag } from "../../lib/mobileDiagnostics";
 import type { LiTTTab } from "../LiTTPanel";
@@ -24,8 +24,19 @@ export interface LiTTMobileSheetProps {
   onClose: () => void;
   chatContent: ReactNode;
   liveContent: ReactNode;
+  /** Files / Components surface (StudioProjectFiles) — when provided,
+   *  the sheet's tab row gains Files and Components tabs beside Chat
+   *  and Activity (Larry's placement decision, 2026-11-13). Both tabs
+   *  show this one combined surface, mounted once. */
+  filesContent?: ReactNode;
   /** Optional approval UI rendered full-width at the top of the sheet, above the tabs */
   approvalSlot?: ReactNode;
+  /** Build status control (MobileBuildStatusBar) rendered in the sheet's
+   *  header chrome, under the tab row. Clean-open (Larry, 2026-11-13):
+   *  the opener lives here — in the sheet's own layout flow, on light
+   *  tokens — never as a dark bar over the chat transcript. When omitted,
+   *  no build status row renders. */
+  buildStatusSlot?: ReactNode;
   /** Project context for the slim second header row (mobile density redesign) */
   projectName?: string | null;
   branch?: string | null;
@@ -41,7 +52,9 @@ export default function LiTTMobileSheet({
   onClose,
   chatContent,
   liveContent,
+  filesContent,
   approvalSlot,
+  buildStatusSlot,
   projectName,
   branch,
   onOpenTools,
@@ -126,15 +139,19 @@ export default function LiTTMobileSheet({
         style={{
           top: "0px",
           height: `${sheetHeight}px`,
-          backgroundColor: "#0d0916",
-          borderColor: "rgba(255,255,255,0.07)",
+          backgroundColor: "var(--studio-surface)",
+          borderColor: "var(--studio-border)",
         }}
         data-testid="litt-mobile-sheet"
         role="dialog"
         aria-label="LiTT assistant"
         aria-modal="true"
       >
-        <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-white/20" aria-hidden />
+        <div
+          className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full"
+          style={{ backgroundColor: "var(--studio-border-strong)" }}
+          aria-hidden
+        />
 
         {approvalSlot && (
           <div className="w-full shrink-0" data-testid="litt-mobile-approval-slot">
@@ -145,15 +162,15 @@ export default function LiTTMobileSheet({
         <div
           className="flex shrink-0 items-center gap-0.5 border-b px-2 py-1.5"
           style={{
-            borderColor: "rgba(255,255,255,0.07)",
-            backgroundColor: "rgba(24,18,38,0.96)",
+            borderColor: "var(--studio-border)",
+            backgroundColor: "var(--studio-surface)",
           }}
         >
           <div
             className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg"
             style={{
               background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 20%, transparent), color-mix(in srgb, var(--color-accent) 8%, transparent))",
-              border: "1px solid rgba(255,255,255,0.13)",
+              border: "1px solid var(--studio-border-strong)",
             }}
             aria-hidden
           >
@@ -187,12 +204,44 @@ export default function LiTTMobileSheet({
             <Activity size={12} className="pointer-events-none" />
             Activity
           </button>
+          {filesContent ? (
+            <>
+              <button
+                type="button"
+                onClick={() => onTabChange("files")}
+                className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+                style={{
+                  color: activeTab === "files" ? "var(--color-accent)" : "var(--text-muted)",
+                  backgroundColor: activeTab === "files" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
+                }}
+                aria-pressed={activeTab === "files"}
+                data-testid="litt-mobile-tab-files"
+              >
+                <FolderOpen size={12} className="pointer-events-none" />
+                Files
+              </button>
+              <button
+                type="button"
+                onClick={() => onTabChange("components")}
+                className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+                style={{
+                  color: activeTab === "components" ? "var(--color-accent)" : "var(--text-muted)",
+                  backgroundColor: activeTab === "components" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
+                }}
+                aria-pressed={activeTab === "components"}
+                data-testid="litt-mobile-tab-components"
+              >
+                <Component size={12} className="pointer-events-none" />
+                Components
+              </button>
+            </>
+          ) : null}
           <div className="flex-1" />
           {onOpenTools && (
             <button
               type="button"
               onClick={onOpenTools}
-              className="grid h-9 w-9 place-items-center rounded-md transition hover:bg-white/10"
+              className="grid h-9 w-9 place-items-center rounded-md transition hover:bg-black/5"
               style={{ color: "var(--text-muted)" }}
               aria-label="Open tools"
               data-testid="litt-mobile-tools-button"
@@ -203,7 +252,7 @@ export default function LiTTMobileSheet({
           <button
             type="button"
             onClick={onClose}
-            className="grid h-9 w-9 place-items-center rounded-md transition hover:bg-white/10"
+            className="grid h-9 w-9 place-items-center rounded-md transition hover:bg-black/5"
             style={{ color: "var(--text-muted)" }}
             aria-label="Close LiTT"
             data-testid="litt-mobile-sheet-close"
@@ -212,10 +261,23 @@ export default function LiTTMobileSheet({
           </button>
         </div>
 
+        {buildStatusSlot && (
+          <div
+            className="shrink-0 border-b px-2 py-1.5"
+            style={{
+              borderColor: "var(--studio-border)",
+              backgroundColor: "var(--studio-surface)",
+            }}
+            data-testid="litt-mobile-build-status-slot"
+          >
+            {buildStatusSlot}
+          </div>
+        )}
+
         {(projectName || branch) && (
           <div
             className="flex shrink-0 items-center border-b px-3 py-1"
-            style={{ borderColor: "rgba(255,255,255,0.07)" }}
+            style={{ borderColor: "var(--studio-border)" }}
             data-testid="litt-mobile-context"
           >
             <span
@@ -256,6 +318,19 @@ export default function LiTTMobileSheet({
           >
             {liveContent}
           </div>
+          {filesContent ? (
+            <div
+              className="absolute inset-0 flex min-w-0 flex-col overflow-hidden"
+              style={{
+                visibility: activeTab === "files" || activeTab === "components" ? "visible" : "hidden",
+                pointerEvents: activeTab === "files" || activeTab === "components" ? "auto" : "none",
+              }}
+              data-active={activeTab === "files" || activeTab === "components"}
+              data-testid="litt-mobile-files-panel"
+            >
+              {filesContent}
+            </div>
+          ) : null}
         </div>
       </div>
     </>

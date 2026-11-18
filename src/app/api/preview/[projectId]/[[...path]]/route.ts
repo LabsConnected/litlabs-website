@@ -3,6 +3,13 @@ import { auth } from "@/lib/auth";
 import { getProject } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { requireTerminalBaseUrl } from "@/lib/terminal-config";
+import { ensureWorkspaceAlive } from "@/lib/studio/workspace-recovery";
+import { restoreWorkspaceFromLatestDeployment } from "@/lib/studio/workspace-rehydration";
+
+// Marker comment stamped into the seeded welcome index.html every new
+// static project starts with (studio-starter-template). Kept in sync
+// with the preview-status route and the workspace-state route.
+const WELCOME_SCREEN_MARKER = "LITT-WELCOME-SCREEN";
 import { prepareStaticPreviewDocument } from "@/lib/projects/static-preview-document";
 import { collectPreviewAssetManifest } from "@/lib/projects/preview-asset-manifest";
 import { createPreviewToken, verifyPreviewToken } from "@/lib/projects/preview-token";
@@ -227,19 +234,79 @@ export async function GET(
                    mimeFor(filePath) !== "application/json; charset=utf-8" &&
                    mimeFor(filePath) !== "image/svg+xml";
 
-  let resp: Response;
-  try {
-    resp = await fetch(`${terminalBase}/ws-files/read`, {
+  // The workspace the reads below actually target. Recovery can swap
+  // this if the terminal lost the project's original workspace.
+  let activeWorkspaceId = project.workspaceId;
+  let activeToken = token;
+
+  const readFromWorkspace = (workspaceId: string, bearer: string): Promise<Response> =>
+    fetch(`${terminalBase}/ws-files/read`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`,        "X-Workspace-Id": project.workspaceId,
+        "Authorization": `Bearer ${bearer}`,
+        "X-Workspace-Id": workspaceId,
       },
       body: JSON.stringify({ path: filePath, encoding: isBinary ? "base64" : "utf-8" }),
       signal: AbortSignal.timeout(15000),
     });
+
+  let resp: Response;
+  try {
+    resp = await readFromWorkspace(activeWorkspaceId, activeToken);
   } catch {
     return NextResponse.json({ error: "Preview service unavailable" }, { status: 503 });
+  }
+
+  // Recovery parity with the files routes: when the terminal reports
+  // the WHOLE workspace missing (not just this file), a session request
+  // re-prepares the workspace — restoring the deployed snapshot for
+  // static projects — and retries the read once, instead of passing a
+  // straight 404 to the preview. Token-mode requests skip recovery:
+  // their capability was minted against the original workspace, and the
+  // panel's session probe is the surface that heals the workspace.
+  if (!resp.ok && resp.status === 404 && presentedToken === null) {
+    const detail = await resp.text().catch(() => "");
+    let workspaceMissing = false;
+    try {
+      workspaceMissing =
+        (JSON.parse(detail) as { error?: unknown } | null)?.error === "Workspace not found";
+    } catch {
+      workspaceMissing = false;
+    }
+    if (!workspaceMissing) {
+      return NextResponse.json(
+        { error: "File not found", detail: detail.slice(0, 200) },
+        { status: 404 },
+      );
+    }
+    let recoveredResp: Response | null = null;
+    try {
+      const recovered = await ensureWorkspaceAlive(projectId, userId, project.workspaceId);
+      if (recovered.reprepared) {
+        const freshProject = await getProject(projectId, userId);
+        if (freshProject?.workspaceId) {
+          activeWorkspaceId = freshProject.workspaceId;
+          activeToken = createTerminalToken(userId, {
+            workspaceId: activeWorkspaceId,
+            projectId,
+          }).token;
+          recoveredResp = await readFromWorkspace(activeWorkspaceId, activeToken);
+        }
+      }
+    } catch {
+      // Recovery or the retried read failed at the transport level:
+      // the original 404 stands (the workspace is genuinely gone).
+      recoveredResp = null;
+    }
+    if (recoveredResp) {
+      resp = recoveredResp;
+    } else {
+      return NextResponse.json(
+        { error: "File not found", detail: detail.slice(0, 200) },
+        { status: 404 },
+      );
+    }
   }
 
   if (!resp.ok) {
@@ -267,7 +334,7 @@ export async function GET(
   const readWorkspaceText = async (path: string): Promise<string | null> => {
     const asset = await fetch(`${terminalBase}/ws-files/read`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}`, "X-Workspace-Id": project.workspaceId! },
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${activeToken}`, "X-Workspace-Id": activeWorkspaceId },
       body: JSON.stringify({ path, encoding: "utf-8" }),
       signal: AbortSignal.timeout(15000),
     });
@@ -276,8 +343,55 @@ export async function GET(
     return typeof payload.content === "string" ? payload.content : null;
   };
 
+  // Set when the served document is the seeded welcome screen of a
+  // project whose deployed content could NOT be restored: the scaffold
+  // is served as before, but the response says so machine-readably
+  // instead of passing the starter off as the project's real site.
+  let contentLossHeaders: Record<string, string> = {};
+
   let mintedTokenHtml = false;
   if (typeof body === "string" && mimeFor(filePath).startsWith("text/html")) {
+    // A session request for the entry document that still carries the
+    // welcome marker means the workspace was re-seeded over a project
+    // that may have real deployed content: restore the latest
+    // deployment snapshot over the scaffold and serve the real
+    // document. Token-mode requests skip this (their document was
+    // already authorized against a healed workspace — the panel's
+    // session probe and the preview-status poll are the heal points).
+    if (
+      presentedToken === null &&
+      filePath === "index.html" &&
+      body.includes(WELCOME_SCREEN_MARKER)
+    ) {
+      const outcome = await restoreWorkspaceFromLatestDeployment({
+        projectId,
+        userId,
+        workspaceId: activeWorkspaceId,
+      });
+      if (outcome.kind === "restored") {
+        const reread = await readFromWorkspace(activeWorkspaceId, activeToken).catch(
+          () => null,
+        );
+        if (reread && reread.ok) {
+          const payload = (await reread.json().catch(() => null)) as {
+            content?: unknown;
+          } | null;
+          if (
+            typeof payload?.content === "string" &&
+            !payload.content.includes(WELCOME_SCREEN_MARKER)
+          ) {
+            body = payload.content;
+          }
+        }
+      } else if (outcome.kind === "content-loss") {
+        contentLossHeaders = {
+          "x-litt-workspace-content-loss": "true",
+          ...(outcome.survivingDeploymentId
+            ? { "x-litt-surviving-deployment-id": outcome.survivingDeploymentId }
+            : {}),
+        };
+      }
+    }
     // Scripts stay external (native execution semantics) and load through a
     // token-authorized URL prefix; stylesheets are embedded by the transform.
     // A document that itself arrived under a token re-uses that token (its
@@ -310,7 +424,7 @@ export async function GET(
       }
       previewToken = createPreviewToken(userId, {
         projectId,
-        workspaceId: project.workspaceId,
+        workspaceId: activeWorkspaceId,
         assets: manifest.assets,
       }).token;
       mintedTokenHtml = true;
@@ -327,6 +441,7 @@ export async function GET(
     headers: {
       "Content-Type": mimeFor(filePath),
       ...PREVIEW_SECURITY_HEADERS,
+      ...contentLossHeaders,
       // Module scripts are fetched in CORS mode; from the opaque-origin
       // iframe the Origin is the serialized string "null". Token-mode
       // responses therefore allow exactly that origin — NOT "*": a normal

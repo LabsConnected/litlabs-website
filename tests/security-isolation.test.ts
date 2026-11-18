@@ -153,32 +153,17 @@ describe("proxy/middleware auth gate", () => {
     expect(content).toContain("clerkMiddleware(");
   });
 
-  it("proxy protects /api/runtime-test and /api/ghl/test", () => {
+  it("proxy protects /api/ghl/test", () => {
     const content = readSrc("src/proxy.ts");
-    expect(content).toContain('"/api/runtime-test(.*)"');
     expect(content).toContain('"/api/ghl/test(.*)"');
   });
 });
 
-describe("runtime-test token must not leak service keys", () => {
-  it("requires auth, 404s when deployed, and never returns internalKey", () => {
-    const content = readSrc("src/app/api/runtime-test/token/route.ts");
-    expect(content).toMatch(/await auth\(/);
-    expect(content).toMatch(/isDeployed\(/);
-    expect(content).toMatch(/status:\s*401/);
-    expect(content).toMatch(/status:\s*404/);
-    expect(content).not.toMatch(/TERMINAL_INTERNAL_SERVICE_KEY/);
-    expect(content).not.toMatch(/internalKey/);
-    expect(content).not.toMatch(/runtime-test-user/);
-  });
-
-  it("acceptance page does not fetch or send X-Internal-Service-Key", () => {
-    const content = readSrc("src/app/(app)/runtime-test/page.tsx");
-    expect(content).not.toMatch(/internalKey/);
-    expect(content).not.toMatch(/X-Internal-Service-Key/);
-    expect(content).toContain("/api/studio/command");
-  });
-});
+// The /runtime-test page and its /api/runtime-test/token route were
+// deleted outright (issue #627 Studio Merge — self-documented as
+// temporary, "will be deleted after the acceptance proof is complete").
+// Their security-hardening tests went with them; there is nothing left
+// to assert.
 
 describe("ghl test sink is locked down", () => {
   it("requires auth and 404s when deployed", () => {

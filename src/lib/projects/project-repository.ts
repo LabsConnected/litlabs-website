@@ -19,6 +19,7 @@ import {
 } from "@/lib/terminal-internal-client";
 import type { StudioProjectRow, LegacyProjectRow } from "./types";
 import { normalizeProjectName } from "./project-name";
+import { isWorkspaceSeedIdentical } from "./workspace-seed-check";
 import {
   rowToCanonical,
   legacyRowToCanonical,
@@ -210,6 +211,160 @@ export async function createBlankProject(
   return rowToCanonical(data as StudioProjectRow);
 }
 
+/** How many candidate projects to untouched-check per reuse lookup. */
+const PROJECT_REUSE_CANDIDATE_LIMIT = 10;
+
+type ProjectActivityTable =
+  | "studio_tasks"
+  | "agent_paused_runs"
+  | "user_project_deployments";
+
+/** Count rows in an activity table for one project, fail-safe. */
+async function countProjectActivity(
+  table: ProjectActivityTable,
+  userId: string,
+  projectId: string,
+): Promise<number> {
+  const { count, error } = await supabaseAdmin
+    .from(table)
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("project_id", projectId);
+  // Unknown counts as activity: never reuse on uncertainty.
+  if (error || count === null) return Number.POSITIVE_INFINITY;
+  return count;
+}
+
+/** Count conversation messages across every conversation in a project. */
+async function countProjectMessages(
+  userId: string,
+  projectId: string,
+): Promise<number> {
+  const { data: conversations, error } = await supabaseAdmin
+    .from("studio_conversations")
+    .select("id")
+    .eq("owner_id", userId)
+    .eq("project_id", projectId);
+  if (error || !conversations) return Number.POSITIVE_INFINITY;
+  if (conversations.length === 0) return 0;
+  const { count, error: countError } = await supabaseAdmin
+    .from("studio_conversation_messages")
+    .select("id", { count: "exact", head: true })
+    .in(
+      "conversation_id",
+      conversations.map((c) => c.id as string),
+    );
+  if (countError || count === null) return Number.POSITIVE_INFINITY;
+  return count;
+}
+
+/** Activity counts for one project; unknown counts surface as Infinity. */
+interface ProjectActivityCounts {
+  messages: number;
+  tasks: number;
+  pausedRuns: number;
+  deployments: number;
+}
+
+async function getProjectActivityCounts(
+  userId: string,
+  projectId: string,
+): Promise<ProjectActivityCounts> {
+  const [messages, tasks, pausedRuns, deployments] = await Promise.all([
+    countProjectMessages(userId, projectId),
+    countProjectActivity("studio_tasks", userId, projectId),
+    countProjectActivity("agent_paused_runs", userId, projectId),
+    countProjectActivity("user_project_deployments", userId, projectId),
+  ]);
+  return { messages, tasks, pausedRuns, deployments };
+}
+
+/**
+ * The reuse verdict for one candidate, in two tiers:
+ *
+ * 1. UNTOUCHED (the original #903 rule): zero messages, zero tasks,
+ *    zero paused runs, zero deployments — proven by counts alone.
+ * 2. ENTERED BUT CONTENTLESS: the project was entered (messages, tasks
+ *    or paused runs exist — the entry flow routes straight into chat,
+ *    so first use used to disqualify a shell forever and every
+ *    re-entry minted another duplicate) but it has NO deployments and
+ *    its workspace is still byte-identical to the seeded starter (see
+ *    workspace-seed-check.ts). Re-focusing it loses nothing: there is
+ *    no user-authored content in it yet.
+ *
+ * Hard lines, both tiers: a deployment always disqualifies (a deployed
+ * project is user value, whatever its files look like); any count that
+ * cannot be proven disqualifies (never reuse on uncertainty); and
+ * tier 2 requires the workspace proof — an entered project whose
+ * workspace differs from the seed in any byte (including an index.html
+ * overwritten to empty by a started-but-unfinished build, which is NOT
+ * the seed) is never reused.
+ */
+async function isProjectReusableBlank(
+  userId: string,
+  row: StudioProjectRow,
+): Promise<boolean> {
+  const counts = await getProjectActivityCounts(userId, row.id);
+  const known =
+    Number.isFinite(counts.messages) &&
+    Number.isFinite(counts.tasks) &&
+    Number.isFinite(counts.pausedRuns) &&
+    Number.isFinite(counts.deployments);
+  if (!known) return false;
+  if (counts.deployments > 0) return false;
+  if (counts.messages === 0 && counts.tasks === 0 && counts.pausedRuns === 0) {
+    return true;
+  }
+  return isWorkspaceSeedIdentical(userId, {
+    id: row.id,
+    templateId: row.template_id,
+    workspaceId: row.workspace_id,
+    workspaceStatus: row.workspace_status,
+    workspaceRoot: row.workspace_root,
+  });
+}
+
+/**
+ * Find an existing blank project that a fresh entry may focus instead
+ * of minting another record — the project-level equivalent of
+ * findReusableEmptyConversation. Candidates are the user's own
+ * non-system blank projects whose stored name still equals the entry
+ * name (a renamed project never matches) and whose template matches;
+ * a candidate is returned only when it is provably reusable (see
+ * isProjectReusableBlank): untouched, or entered but still holding no
+ * user-authored content and no deployments. Most recently updated
+ * wins. Bounded scan, mirroring the conversation rule.
+ *
+ * This is a hygiene guard for entry flows that always ask for the
+ * same default project (e.g. the Studio Website chip's "New Website");
+ * it is NOT a general create dedupe — callers opt in explicitly, and
+ * the per-submission idempotency key guarantee is unaffected.
+ */
+export async function findReusableEmptyBlankProject(
+  userId: string,
+  input: { name: string; templateId: ProjectTemplateId },
+): Promise<CanonicalProject | null> {
+  const name = normalizeProjectName(input.name);
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("user_id", userId)
+    .eq("source_type", "blank")
+    .eq("is_system", false)
+    .eq("template_id", input.templateId)
+    .eq("name", name)
+    .order("updated_at", { ascending: false })
+    .limit(PROJECT_REUSE_CANDIDATE_LIMIT);
+  // A failed lookup must never fall through to a guess — no reuse.
+  if (error || !data) return null;
+  for (const row of data) {
+    if (await isProjectReusableBlank(userId, row as StudioProjectRow)) {
+      return rowToCanonical(row as StudioProjectRow);
+    }
+  }
+  return null;
+}
+
 /**
  * Thrown when a create would violate the one-project-per-repository
  * invariant. Carries the already-connected project so callers can surface
@@ -304,6 +459,38 @@ export async function createGithubProject(
 }
 
 /**
+ * Re-mint a stored preview URL on read (Phase 2 build-list §3.3).
+ *
+ * Scoped preview URLs carry a signed token that expires after five
+ * minutes, so the URL persisted on the project row is NOT durable —
+ * any reader that treats it as such hands the browser a dead link.
+ * When the row says the runtime is ready and the stored URL targets
+ * the terminal preview proxy, replace it with a freshly minted scoped
+ * URL for this read. The row itself is left untouched (the next start
+ * or reconcile persists its own URL); non-proxy URLs (e.g. static
+ * serve paths) and non-ready rows pass through unchanged.
+ */
+export function refreshStoredPreviewUrl(project: CanonicalProject): CanonicalProject {
+  if (project.runtimeStatus !== "ready" || !project.workspaceId || !project.previewUrl) {
+    return project;
+  }
+  let pathname: string;
+  try {
+    pathname = new URL(project.previewUrl).pathname;
+  } catch {
+    return project;
+  }
+  if (!pathname.startsWith("/preview/")) return project;
+  return {
+    ...project,
+    previewUrl: buildPreviewProxyUrl(project.workspaceId, {
+      userId: project.userId,
+      projectId: project.id,
+    }),
+  };
+}
+
+/**
  * Get a single canonical project by ID.
  * Checks studio_projects first, then falls back to legacy projects table.
  * Verifies ownership.
@@ -324,8 +511,11 @@ export async function getProject(
     .maybeSingle();
 
   if (studioRow) {
-    const project = rowToCanonical(studioRow as StudioProjectRow);
-    return reconcileStaleStartingStatus(project);
+    const project = await recoverIfStaleProvisioning(
+      rowToCanonical(studioRow as StudioProjectRow),
+      userId,
+    );
+    return refreshStoredPreviewUrl(await reconcileStaleStartingStatus(project));
   }
 
   // Fall back to legacy table
@@ -389,7 +579,10 @@ export async function reconcileStaleStartingStatus(
     ? live.status === "ready"
       ? {
           runtimeStatus: "ready" as const,
-          previewUrl: buildPreviewProxyUrl(project.workspaceId),
+          previewUrl: buildPreviewProxyUrl(project.workspaceId, {
+            userId: project.userId,
+            projectId: project.id,
+          }),
           runtimeError: null,
         }
       : live.status === "failed"
@@ -423,6 +616,71 @@ export async function reconcileStaleStartingStatus(
   return (
     (await updateProjectRuntime(project.id, project.userId, updates)) ?? project
   );
+}
+
+/**
+ * In-memory mirror of the write recoverStaleProvisioning persists, so a
+ * just-recovered row reads settled without a refetch.
+ */
+function settleRecoveredProvisioning(
+  project: CanonicalProject,
+): CanonicalProject {
+  return {
+    ...project,
+    workspaceStatus: "failed",
+    workspaceError: project.workspaceError
+      ? `${project.workspaceError} | Provisioning timed out`
+      : "Provisioning timed out",
+    workspaceProvisioningToken: null,
+  };
+}
+
+/**
+ * Settle a provably dead provisioning row on read.
+ *
+ * The provisioning subsystem's own dead-lock window is 5 minutes
+ * (recoverStaleProvisioning's default): a live lock owner heartbeats
+ * updatedAt via touchProvisioningHeartbeat, so a "provisioning" row
+ * older than that is dead — its owner crashed and will never settle it.
+ * Recovery persists provisioning → failed ("Provisioning timed out").
+ * Fresh rows are returned untouched and cost no query.
+ */
+async function recoverIfStaleProvisioning(
+  project: CanonicalProject,
+  userId: string,
+): Promise<CanonicalProject> {
+  if (
+    project.workspaceStatus !== "provisioning" ||
+    Number.isNaN(Date.parse(project.updatedAt)) ||
+    Date.now() - Date.parse(project.updatedAt) <= 300_000
+  ) {
+    return project;
+  }
+  const recovered = await recoverStaleProvisioning(project.id, userId).catch(
+    () => false,
+  );
+  return recovered ? settleRecoveredProvisioning(project) : project;
+}
+
+/**
+ * Read-reconciliation for list reads, mirroring what getProject does for
+ * a single project. Without it, a project whose provisioning died stayed
+ * "provisioning" in the row forever — /projects derived an eternal
+ * amber "Stalled" from it and the dashboard derived "Building" — because
+ * recoverStaleProvisioning was only ever invoked from the prepare path,
+ * i.e. only when someone retried. Reads now settle the row the same way
+ * a retry would, so every surface sees the same settled truth.
+ */
+async function reconcileListedProjects(
+  projects: CanonicalProject[],
+  userId: string,
+): Promise<CanonicalProject[]> {
+  const out: CanonicalProject[] = [];
+  for (const project of projects) {
+    const recovered = await recoverIfStaleProvisioning(project, userId);
+    out.push(await reconcileStaleStartingStatus(recovered));
+  }
+  return out;
 }
 
 /**
@@ -486,7 +744,9 @@ export async function listProjects(userId: string): Promise<ProjectListResult> {
       .map((p) => p.github_repository_id),
   );
 
-  const canonical = studioProjects.map(rowToCanonical);
+  const canonical = (
+    await reconcileListedProjects(studioProjects.map(rowToCanonical), userId)
+  ).map(refreshStoredPreviewUrl);
   const legacyOnly = legacyProjects
     .filter((p) => !studioGithubRepoIds.has(p.repository_id))
     .map(legacyRowToCanonical);

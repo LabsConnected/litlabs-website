@@ -141,7 +141,12 @@ export function ReactionBar({
         >
           <Heart size={20} fill={post.viewer.liked ? "currentColor" : "none"} />
           {likeCount > 0 && (
-            <span className="text-xs font-semibold tabular-nums">{formatCount(likeCount)}</span>
+            // Animated count (Kimi wiring item 17): keyed by the
+            // count so a change replays the pop; the number itself is
+            // the post's real optimistic/server like count.
+            <span key={likeCount} className="feed-like-count text-xs font-semibold tabular-nums">
+              {formatCount(likeCount)}
+            </span>
           )}
         </button>
 

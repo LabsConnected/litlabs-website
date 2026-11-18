@@ -132,7 +132,11 @@ const TONE_COLOR: Record<ActivityTone, string> = {
   muted: "var(--text-muted)",
 };
 
-const MAX_RENDERED_EVENTS = 60;
+// The events route returns up to 200 events per fetch (listActionEvents'
+// default limit), so the render window matches the fetch window: a fresh
+// fetch shows a long run in full instead of dropping its oldest events.
+// The footer note below still flags the rare run that exceeds the window.
+const MAX_RENDERED_EVENTS = 200;
 
 export function StudioActivityPanel({
   runId,

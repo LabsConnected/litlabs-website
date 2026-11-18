@@ -76,6 +76,11 @@ describe("ElementInspectorPanel — real element edit write path", () => {
     await waitFor(() => expect(screen.getByTestId("element-edit-status").textContent).toContain("index.html"));
 
     const field = screen.getByTestId("element-edit-text");
+    // The field is a controlled input populated asynchronously from the
+    // file read; wait until the loaded value has actually landed before
+    // clearing — under parallel-suite load the clear can otherwise race
+    // the state update and the typed text appends to "Hello world".
+    await waitFor(() => expect(field).toHaveValue("Hello world"));
     await user.clear(field);
     await user.type(field, "New headline");
     await user.tab(); // commit on blur

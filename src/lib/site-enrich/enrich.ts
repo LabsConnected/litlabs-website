@@ -38,6 +38,15 @@ export interface EnrichReport {
   providersFailed: string[];
   filesChanged: string[];
   audit: VisualAudit | null;
+  /**
+   * Placeholder image references still present in the entry page after
+   * every repair phase — slots that fell back to the local SVG and
+   * model-authored placeholder refs that could not be repaired. Empty
+   * means visually complete. The caller feeds this into the quality
+   * loop: a build whose report names unresolved placeholders must not
+   * be declared a clean success (production defect 2026-11-11).
+   */
+  unresolvedPlaceholders: string[];
 }
 
 const MAX_IMAGES_PER_RUN = 8;
@@ -96,6 +105,7 @@ export async function enrichStaticSiteVisuals(
     providersFailed: [],
     filesChanged: [],
     audit: null,
+    unresolvedPlaceholders: [],
   };
   const budget = opts.maxImages ?? MAX_IMAGES_PER_RUN;
   const topic = opts.topicKeywords ?? "professional photography";
@@ -272,6 +282,12 @@ export async function enrichStaticSiteVisuals(
       let changed = false;
       report.filesScanned += 1;
 
+      // Tags this pass itself just fell back to the placeholder SVG for.
+      // Phase 3 must not re-process them as model-authored placeholder
+      // refs — the slot already spent its resolve attempt here, and a
+      // second failed attempt would double-count the fallback.
+      const phase1FallbackTags = new Set<string>();
+
       // 1. Materialize <img data-litt-image="kw"> slots.
       const slots = extractImageRefs(html).filter((r) => r.kind === "img" && r.keywords !== null);
       for (const slot of slots) {
@@ -286,6 +302,7 @@ export async function enrichStaticSiteVisuals(
           .replace(/ src\s*=\s*["'][^"']*["']/i, ` src="${finalSrc}"`)
           .replace(/\s*data-litt-image\s*=\s*["'][^"']*["']/i, "");
         const withSrc = / src\s*=/i.test(newTag) ? newTag : newTag.replace(/<img\b/i, `<img src="${finalSrc}"`);
+        if (!sitePath) phase1FallbackTags.add(withSrc);
         html = html.replace(slot.raw, withSrc);
         changed = true;
       }
@@ -317,6 +334,15 @@ export async function enrichStaticSiteVisuals(
         const src = ref.src;
         const isExternal = /^https?:\/\//i.test(src);
         const isPlaceholder = /via\.placeholder|placehold\.|dummyimage|fakeimg/i.test(src);
+        // A LOCAL placeholder reference (the model wrote the finished
+        // page with <img src="assets/images/placeholder.svg"> slots
+        // directly — the 2026-11-11 Food Court shape) is a slot to
+        // fill, not an existing asset to keep: the file exists, so the
+        // relMissing check alone would wave it through. Tags phase 1
+        // just fell back to are exempt — they already spent their
+        // resolve attempt in this pass.
+        const isLocalPlaceholder =
+          !isExternal && /placeholder/i.test(src) && !phase1FallbackTags.has(ref.raw);
         // CSS url() is not image-only space: @font-face srcs, SVG paint
         // servers (url(#id)) and other resources share the syntax. Only
         // refs that are actually image-shaped get the image pipeline —
@@ -366,7 +392,7 @@ export async function enrichStaticSiteVisuals(
             html = html.replace(ref.raw, rewrite(finalSrc));
             changed = true;
           }
-        } else if (isPlaceholder || relMissing) {
+        } else if (isPlaceholder || isLocalPlaceholder || relMissing) {
           const alt = ref.raw.match(/\balt\s*=\s*["']([^"']*)["']/i)?.[1] ?? "";
           const sitePath = await resolve(alt || topic);
           const finalSrc = sitePath ?? (await ensurePlaceholderSvg(transport));
@@ -570,6 +596,13 @@ export async function enrichStaticSiteVisuals(
     const assets = await transport.listFiles("assets/images").catch(() => null);
     for (const e of assets?.entries ?? []) if (e.type === "file") postFiles.add(`assets/images/${e.name}`);
     report.audit = auditStaticSiteHtml(finalHtml, postFiles);
+    // Whatever placeholder references survive every repair phase are
+    // named on the report: the artifact is honest (the placeholder
+    // renders, never a broken <img>), but the run must not be able to
+    // claim a visually complete build while they remain.
+    report.unresolvedPlaceholders = report.audit
+      ? [...new Set(report.audit.placeholderRefs)]
+      : [];
     return report;
   } catch (err) {
     console.warn("[enrich] enrichStaticSiteVisuals aborted:", err instanceof Error ? err.message : err);

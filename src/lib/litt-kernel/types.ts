@@ -155,6 +155,15 @@ export type LiTTControlDecision = {
     requiresPrivateData: boolean;
     requiresExecution: boolean;
     /**
+     * Execution task kind from intent classification: "inspection"
+     * when the turn is read-only workspace inspection, "exec" when
+     * the turn is a shell-command execution whose completion is the
+     * command's output, "media" when the turn is a media generation
+     * whose completion is the generated media result. Optional — only
+     * set by the Kernel path, and only for inspection/exec/media turns.
+     */
+    taskKind?: "inspection" | "exec" | "media";
+    /**
      * Anaphoric follow-up marker from intent classification ("build it",
      * "do that again"). Optional — only set by the Kernel path.
      */
@@ -313,6 +322,19 @@ export type IntentClassification = {
   requiresCurrentInformation: boolean;
   requiresPrivateData: boolean;
   requiresExecution: boolean;
+  /**
+   * The kind of execution a turn needs, when the classifier can tell.
+   * "inspection" = read-only workspace inspection (the #905 pattern
+   * group): execution through the tool lane, but completion means the
+   * read tools answered — never a file mutation. "media" = a bare
+   * media-generation ask: execution through the tool lane, but
+   * completion means the generation tools produced the media — never
+   * a site build. Consumers (quality gate scope, launch-flow
+   * completion, route completion evidence) must use THIS signal
+   * rather than re-deriving turn kind from the message text. Unset
+   * for every other turn kind.
+   */
+  taskKind?: "inspection" | "exec" | "media";
   confidence: number;
   reasoning: string;
   /**

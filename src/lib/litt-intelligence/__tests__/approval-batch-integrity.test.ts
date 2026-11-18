@@ -37,6 +37,7 @@ function makeCtx(overrides: Partial<DeferredToolBatchContext> = {}): DeferredToo
       mutationBatchPending: false,
       batchHasMutation: false,
       completedDeployment: null,
+      chatImages: [],
     },
     ...overrides,
   };

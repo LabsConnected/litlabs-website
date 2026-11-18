@@ -44,6 +44,11 @@ export function resolveLittNavigation(request: string, context?: LittPageContext
   if (["settings", "billing", "credits", "billing/credits", "wallet"].includes(name)) {
     return name === "settings" ? "/settings" : "/settings?section=billing";
   }
+  // "Home" is the Studio prime landing — there is no separate dashboard
+  // page anymore (the Home nav item was retired with it).
+  if (name === "home") {
+    return "/studio";
+  }
   return destinations.find(item => item.label.toLowerCase() === name)?.href ?? null;
 }
 

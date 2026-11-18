@@ -6,6 +6,7 @@ import {
   onboardingStorageKey,
   peekFirstRunProjectId,
   peekFirstRunPrompt,
+  resolveActiveProjectIdForUrl,
   resolveStudioProjectId,
   takeFirstRunPrompt,
   writeFirstRunHandoff,
@@ -74,5 +75,27 @@ describe("first-run handoff", () => {
     expect(isOnboardingComplete("user_2", "proj_1")).toBe(false);
     expect(localStorage.getItem("litt:onboarding-complete")).toBeNull();
     expect(localStorage.getItem(onboardingStorageKey("user_1", "proj_1"))).toBe("true");
+  });
+});
+
+describe("resolveActiveProjectIdForUrl — project pinned into the Studio URL", () => {
+  it("prefers the explicit URL project over the server-resolved project", () => {
+    expect(resolveActiveProjectIdForUrl("from-url", "from-server")).toBe("from-url");
+  });
+
+  it("prefers the first-run handoff over the server-resolved project", () => {
+    writeFirstRunHandoff({ prompt: "x", projectId: "from-handoff" });
+    expect(resolveActiveProjectIdForUrl(null, "from-server")).toBe("from-handoff");
+  });
+
+  it("falls back to the server-resolved project so a bare landing still pins context", () => {
+    expect(resolveActiveProjectIdForUrl(null, "from-server")).toBe("from-server");
+    expect(resolveActiveProjectIdForUrl("", "from-server")).toBe("from-server");
+  });
+
+  it("returns null when no source knows a project (never invents one)", () => {
+    expect(resolveActiveProjectIdForUrl(null, null)).toBeNull();
+    expect(resolveActiveProjectIdForUrl(null, undefined)).toBeNull();
+    expect(resolveActiveProjectIdForUrl(null, "   ")).toBeNull();
   });
 });

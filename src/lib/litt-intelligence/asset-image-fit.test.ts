@@ -45,6 +45,8 @@ describe("fitImageForPublish", () => {
     expect(out!.contentType).toBe("image/png");
   });
 
+  // Explicit timeout: real sharp/mozjpeg encodes of multi-MB noise images
+  // exceed the 5s default when the full CI suite runs under load.
   it("shrinks an oversized photo PNG under the publish cap as JPEG", async () => {
     const png = await oversizedPng();
     expect(png.length).toBeGreaterThan(PUBLISH_MAX_IMAGE_BYTES);
@@ -57,7 +59,7 @@ describe("fitImageForPublish", () => {
     const meta = await sharp(out!.buffer).metadata();
     expect(meta.format).toBe("jpeg");
     expect(Math.max(meta.width ?? 0, meta.height ?? 0)).toBeLessThanOrEqual(1920);
-  });
+  }, 60_000);
 
   it("shrinks an oversized JPEG under the publish cap", async () => {
     const jpg = await oversizedJpeg();
@@ -65,7 +67,7 @@ describe("fitImageForPublish", () => {
     const out = await fitImageForPublish(jpg, "image/jpeg");
     expect(out).not.toBeNull();
     expect(out!.buffer.length).toBeLessThanOrEqual(PUBLISH_MAX_IMAGE_BYTES);
-  });
+  }, 60_000);
 
   it("refuses oversized formats it cannot safely re-encode", async () => {
     // GIF is not in the resizable set — an oversized gif must be refused

@@ -35,13 +35,15 @@ export function resolveAvailableCapabilities(ctx?: {
   // per-user wiring — always available wherever the loop runs.
   caps.add("web_search");
 
-  // image_generation: the agent path calls /api/media/generate with
+  // image_generation: the agent path calls generateImage with
   // generationMode "auto-free", which walks AUTO_FREE_ORDER filtered by
-  // configured providers. Pollinations is a wired, no-key, free provider,
-  // so at least one auto-free provider is always available. Mirror that
-  // truth here instead of hardcoding: if the catalog ever loses its last
-  // no-key free image provider, the capability honestly disappears and the
-  // tool stops being advertised instead of failing post-approval.
+  // configured providers. Pollinations — a wired, no-key, free provider —
+  // is the terminal entry of AUTO_FREE_ORDER, so at least one auto-free
+  // provider is always available even when every configured key is dead
+  // or unset. Mirror that truth here instead of hardcoding: if the catalog
+  // ever loses its last no-key free image provider, the capability
+  // honestly disappears and the tool stops being advertised instead of
+  // failing post-approval.
   const hasFreeImageProvider = MEDIA_PROVIDERS.some(
     (p) =>
       p.supportedFormats.includes("image") &&

@@ -51,7 +51,11 @@ vi.mock("@/context/ThemeContext", () => ({
   useTheme: () => mockTheme(),
 }));
 vi.mock("next/navigation", () => ({
-  useSearchParams: vi.fn(() => new URLSearchParams()),
+  // A project deep link, not a bare /studio visit: since the Studio
+  // prime consolidation (ART-20261110-029) a bare /studio renders the
+  // prime landing, while these tests exercise the workspace path that
+  // follows the loading state.
+  useSearchParams: vi.fn(() => new URLSearchParams("project=init-truth")),
   useRouter: vi.fn(() => ({ push: vi.fn() })),
   usePathname: vi.fn(() => "/studio"),
 }));

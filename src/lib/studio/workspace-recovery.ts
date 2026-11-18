@@ -12,8 +12,10 @@ import {
   prepareWorkspaceInternal,
 } from "@/lib/terminal-internal-client";
 import { getInstallationTokenForClone } from "@/lib/github-app";
+import { extractEmbeddedErrorCode } from "@/lib/host-execution-guard";
 import { isManagedSourceType, isStaticTemplateId } from "@/lib/projects/project-source";
 import type { CanonicalProject } from "@/lib/projects/types";
+import { restoreWorkspaceFromLatestDeployment } from "./workspace-rehydration";
 
 /**
  * Shared workspace recovery logic.
@@ -30,6 +32,31 @@ import type { CanonicalProject } from "@/lib/projects/types";
 export interface RecoveredWorkspace {
   workspaceId: string;
   reprepared: boolean;
+  /**
+   * True when a re-prepare ran during this call but the resulting
+   * workspace STILL does not resolve on the terminal server — the heal
+   * was attempted and failed (e.g. the GitHub-mirror branch served the
+   * existing workspace after its best-effort heal failed). Distinct
+   * from a plain reprepared:false, which also covers "the workspace
+   * was simply alive, nothing ran". Callers use this to escalate to a
+   * full prepare instead of retrying the dead workspace ID.
+   */
+  healFailed?: boolean;
+  /**
+   * Set when a re-prepare landed on an empty root and the workspace was
+   * rehydrated from this deployment's snapshot (static managed projects
+   * only). The deployed content won over the seeded welcome scaffold.
+   */
+  restoredFromDeploymentId?: string;
+  /**
+   * True when a re-prepare landed on an empty root for a project that
+   * HAS deployments, but no complete snapshot could be restored — the
+   * workspace holds only the scaffold while deployed content exists
+   * elsewhere. Surfaces must report this, never a silent "ready".
+   */
+  contentLoss?: boolean;
+  /** The newest deployment that survives for the project, when contentLoss is set. */
+  survivingDeploymentId?: string | null;
 }
 
 const PROVISIONING_POLL_MS = 500;
@@ -68,8 +95,21 @@ function startProvisioningHeartbeat(projectId: string, userId: string, provision
   return () => clearInterval(timer);
 }
 
+/**
+ * Attach the machine error code (when one is recoverable) to an Error so
+ * downstream routes can key truthful states off it — e.g. the
+ * terminal-server's fail-closed HOST_EXECUTION_DISABLED, which the stored
+ * workspaceError carries only as embedded JSON text.
+ */
+function withProvisioningCode(error: Error, source?: unknown): Error {
+  const rawCode = (source as { code?: unknown } | null | undefined)?.code;
+  const code = typeof rawCode === "string" ? rawCode : extractEmbeddedErrorCode(error.message);
+  if (code) (error as { code?: string }).code = code;
+  return error;
+}
+
 function workspaceProvisioningError(project: CanonicalProject): Error {
-  return new Error(project.workspaceError || "Workspace provisioning failed");
+  return withProvisioningCode(new Error(project.workspaceError || "Workspace provisioning failed"));
 }
 
 function sanitizeProvisioningError(error: unknown): string {
@@ -140,15 +180,33 @@ async function waitForProvisioning(
  * Check whether a workspace still exists on the terminal server.
  * If it doesn't, re-provision it automatically.
  * Returns the (possibly new) workspaceId.
+ *
+ * The reprepared flag is truthful: it is set only when the workspace
+ * that the re-prepare produced actually resolves on the terminal
+ * server afterwards. A re-prepare that merely "served the existing
+ * workspace" (the GitHub-mirror branch after a failed heal) leaves the
+ * descriptor unregistered — reporting reprepared there made callers
+ * retry a dead workspace ID and surface the terminal's 404. That case
+ * returns reprepared: false with healFailed: true instead, so callers
+ * can escalate to a full prepare.
  */
 export async function ensureWorkspaceAlive(
   projectId: string,
   userId: string,
   currentWorkspaceId: string,
 ): Promise<RecoveredWorkspace> {
-  // First check if the workspace still exists on the terminal server
+  // First check if the workspace still exists on the terminal server.
+  // A descriptor that resolves but reports ready === false is NOT
+  // alive: loadPersisted keeps root-missing descriptors registered as
+  // not-ready, and /ws-files refuses them with 409 "Workspace not
+  // ready". Returning "not reprepared" for one (the previous behavior)
+  // told callers the workspace was fine and stranded Files on the 409
+  // forever — a not-ready descriptor must go through the same
+  // re-prepare path as a missing one. (ready is only ever false when
+  // the terminal explicitly says so; an absent flag keeps the old
+  // exists-means-alive reading.)
   const ws = await getWorkspaceInternal(currentWorkspaceId, userId).catch(() => null);
-  if (ws) {
+  if (ws && ws.ready !== false) {
     return { workspaceId: currentWorkspaceId, reprepared: false };
   }
 
@@ -158,7 +216,37 @@ export async function ensureWorkspaceAlive(
   if (!project?.workspaceId) {
     throw new Error("Workspace recovery failed: no workspace ID after re-preparation");
   }
-  return { workspaceId: project.workspaceId, reprepared: true };
+
+  // Verify the re-prepare actually restored a live workspace before
+  // claiming it did (see the contract note above). A descriptor that
+  // resolves but is still not-ready is not a restoration either.
+  const verified = await getWorkspaceInternal(project.workspaceId, userId).catch(() => null);
+  if (!verified || verified.ready === false) {
+    return { workspaceId: project.workspaceId, reprepared: false, healFailed: true };
+  }
+  const recovered: RecoveredWorkspace = { workspaceId: project.workspaceId, reprepared: true };
+
+  // A re-prepare onto an empty root seeds only the blank welcome
+  // scaffold. For a static, LiTT-managed project that has deployments,
+  // the deployed snapshot is the real content and must win over the
+  // scaffold: restore it as part of recovery. Repo-backed projects are
+  // excluded — their repository is the source of truth and the prepare
+  // path already mirrors it. The restore helper never throws; an
+  // unrestorable loss is reported on the result, not hidden.
+  if (project.framework === "static" && isManagedSourceType(project.sourceType)) {
+    const outcome = await restoreWorkspaceFromLatestDeployment({
+      projectId,
+      userId,
+      workspaceId: project.workspaceId,
+    });
+    if (outcome.kind === "restored") {
+      recovered.restoredFromDeploymentId = outcome.deploymentId;
+    } else if (outcome.kind === "content-loss") {
+      recovered.contentLoss = true;
+      recovered.survivingDeploymentId = outcome.survivingDeploymentId;
+    }
+  }
+  return recovered;
 }
 
 /**
@@ -174,6 +262,93 @@ export async function reprepareWorkspace(
   // particular, this function must never claim a lock and then throw without
   // transitioning it to failed.
   return provisionWorkspaceForProject(projectId, userId);
+}
+
+/**
+ * One best-effort re-prepare of a GitHub mirror workspace whose terminal
+ * descriptor is gone, run from the mirror branch after the liveness
+ * retry has failed. Returns the (possibly new) workspaceId on success,
+ * or null when the heal could not be completed — the caller then falls
+ * back to serving the existing workspace with the status untouched.
+ *
+ * Why this exists: the Studio gate reads the DB record, but preview
+ * start, files, and exec consult only the terminal server's in-memory
+ * workspace registry. That registry's boot reload drops descriptors
+ * whose root is not visible at the load instant, and a later persist
+ * seals the loss — the DB keeps saying "ready" while every registry
+ * lookup 404s. Before #989 a liveness miss fell through to a full
+ * re-provision, which re-registered the descriptor; #989 removed the
+ * demotion (correctly — one bad lookup must never latch the gate) but
+ * with it the only heal a ready mirror project had. This restores the
+ * heal without restoring the latch: nothing here writes "not_prepared"
+ * or "failed", and a failed heal changes no state at all.
+ *
+ * Lock discipline: claimProvisioningLock only transitions rows out of
+ * "not_prepared"/"failed", so a "ready" mirror row can never be
+ * claimed — the claim half of the discipline cannot engage here. The
+ * observe half can: if another request has claimed provisioning since
+ * our read, share its outcome via waitForProvisioning instead of
+ * preparing in parallel. Otherwise the heal prepares in exactly the
+ * shape of the mirror refresh above (adoption hints, persist on
+ * success), which is the lock-free discipline the mirror branch has
+ * always used for its re-syncs.
+ */
+async function attemptMirrorWorkspaceHeal(
+  project: CanonicalProject,
+  userId: string,
+): Promise<string | null> {
+  try {
+    const current = await getProject(project.id, userId).catch(() => null);
+    if (current?.workspaceStatus === "provisioning") {
+      const completed = await waitForProvisioning(project.id, userId).catch(() => null);
+      if (completed) return completed;
+    }
+    const basis = current ?? project;
+    if (
+      basis.workspaceStatus === "ready" &&
+      basis.workspaceId &&
+      basis.workspaceId !== project.workspaceId
+    ) {
+      // Another request already replaced the workspace while we were
+      // checking liveness; its prepare registered the new descriptor,
+      // so there is nothing left to heal.
+      return basis.workspaceId;
+    }
+
+    const githubToken = await getInstallationTokenForClone({
+      installationId: basis.githubInstallationId!,
+      owner: basis.githubOwner!,
+      repo: basis.githubRepo!,
+    });
+    const result = await prepareWorkspaceInternal({
+      sourceType: "github",
+      userId,
+      projectId: project.id,
+      installationId: basis.githubInstallationId!,
+      owner: basis.githubOwner!,
+      repo: basis.githubRepo!,
+      branch: basis.githubBranch ?? "main",
+      commitSha: basis.latestCommitSha,
+      githubToken,
+      existingRoot: basis.workspaceRoot,
+      existingWorkspaceId: basis.workspaceId,
+    });
+    await updateProjectWorkspace(project.id, userId, {
+      workspaceId: result.workspaceId,
+      workspaceStatus: "ready",
+      workspaceRoot: result.root,
+      workspaceBranch: result.branch ?? null,
+      workspacePreparedAt: new Date().toISOString(),
+      workspaceError: null,
+    });
+    return result.workspaceId;
+  } catch (err) {
+    console.warn(
+      `[provisionWorkspaceForProject] GitHub workspace heal failed for project ${project.id}; serving existing workspace:`,
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  }
 }
 
 /**
@@ -229,7 +404,14 @@ export async function provisionWorkspaceForProject(
   // pull fails (e.g. uncommitted agent work blocks it), keep serving the
   // existing workspace instead of breaking the preview.
   if (isGithubMirror && project.workspaceId && project.workspaceStatus === "ready") {
-    const ws = await getWorkspaceInternal(project.workspaceId, userId).catch(() => null);
+    // The liveness check is a single GET against the terminal. A terminal
+    // restart (registry reload, binding reconcile), a canary-cycle gap,
+    // or a transient probe failure can make it fail for a workspace that
+    // is actually fine — so retry once before drawing any conclusion.
+    let ws = await getWorkspaceInternal(project.workspaceId, userId).catch(() => null);
+    if (!ws || !ws.ready) {
+      ws = await getWorkspaceInternal(project.workspaceId, userId).catch(() => null);
+    }
     if (ws && ws.ready) {
       try {
         const githubToken = await getInstallationTokenForClone({
@@ -267,12 +449,33 @@ export async function provisionWorkspaceForProject(
         return project.workspaceId;
       }
     }
-    // Workspace lost on terminal-server — reset the status only and fall
-    // through to the full re-provision below.
-    await updateProjectWorkspace(projectId, userId, {
-      workspaceStatus: "not_prepared",
-      workspaceError: null,
-    });
+    // Liveness still failing after the retry. Make ONE best-effort
+    // re-prepare attempt before falling back to serving the existing
+    // workspace: the miss can be a genuinely lost terminal workspace
+    // (registry boot reload dropped the descriptor), and since #989
+    // this branch is the only place a ready mirror project can heal —
+    // every registry consumer (preview start, files, exec) fails on
+    // the missing descriptor forever otherwise. The heal never
+    // demotes: on success it persists and returns the re-registered
+    // workspace; on failure it writes nothing and the #989 posture
+    // below applies verbatim.
+    const healed = await attemptMirrorWorkspaceHeal(project, userId);
+    if (healed) return healed;
+    // Give it the same best-effort posture as a failed mirror refresh
+    // above: keep serving the existing workspace and leave
+    // workspaceStatus untouched. Stamping "not_prepared" here forced
+    // a full cold re-provision (fresh sandbox plus whole-tree mirror)
+    // on the strength of one bad lookup, and every Studio surface
+    // derives the repo-workspace gate from that one DB field — so a
+    // transient terminal blip latched the whole project into the gate
+    // until a re-prepare happened to complete. A workspace that was
+    // never prepared never reaches this branch (no workspaceId, or
+    // its status is not "ready"), so first-time provisioning below is
+    // unchanged.
+    console.warn(
+      `[provisionWorkspaceForProject] GitHub workspace liveness check failed after retry for project ${projectId}; serving existing workspace without demoting status`,
+    );
+    return project.workspaceId;
   }
 
   // Recover dead provisioning locks before attempting a fresh claim.
@@ -417,7 +620,7 @@ export async function provisionWorkspaceForProject(
       // The write failure is already logged inside updateProjectWorkspace —
       // don't let it mask the provisioning error being rethrown below.
     }
-    throw new Error(message);
+    throw withProvisioningCode(new Error(message), err);
   } finally {
     stopHeartbeat();
   }

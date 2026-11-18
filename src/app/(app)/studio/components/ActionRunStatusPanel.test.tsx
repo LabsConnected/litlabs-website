@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 import { ActionRunStatusPanel } from "./ActionRunStatusPanel";
@@ -81,5 +81,87 @@ describe("ActionRunStatusPanel", () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(screen.queryByTestId("action-run-status-panel")).toBeNull();
+  });
+});
+
+const ACTIVE_PROJECTION_BODY = {
+  projection: {
+    run: {
+      id: "run-429-test",
+      status: "waiting_for_user",
+      updatedAt: "2026-09-23T00:00:02.000Z",
+      cancellationRequestedAt: null,
+    },
+    displayState: "awaiting_approval",
+    currentActivity: "Waiting for deploy approval",
+    pendingApprovals: [{ id: "paused-one", toolId: "project.deploy", reason: "Sensitive action" }],
+    capabilities: {
+      deployment: {
+        status: "not_started",
+        deploymentId: null,
+        publicUrl: null,
+        verified: false,
+        error: null,
+      },
+    },
+    timeline: [],
+    failure: null,
+  },
+};
+
+function rateLimitedResponse(): Response {
+  return new Response(JSON.stringify({ error: "Rate limit exceeded", retryAfter: 10 }), {
+    status: 429,
+    headers: { "Content-Type": "application/json", "Retry-After": "10" },
+  });
+}
+
+describe("ActionRunStatusPanel 429 handling", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("on 429 keeps the last projection, never flags unavailable, and backs off per Retry-After", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(response(ACTIVE_PROJECTION_BODY))
+        .mockResolvedValueOnce(rateLimitedResponse())
+        .mockResolvedValue(response(ACTIVE_PROJECTION_BODY));
+
+      render(<ActionRunStatusPanel conversationId="conversation-429" busy={false} />);
+      await act(async () => {});
+      expect(screen.getByTestId("action-run-status-panel").textContent).toContain("Needs approval");
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      // Normal 2s poll fires and is answered 429.
+      await act(async () => { vi.advanceTimersByTime(2000); });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      // The last good projection stays on screen; no unavailable banner.
+      expect(screen.getByTestId("action-run-status-panel").textContent).toContain("Needs approval");
+      expect(screen.queryByText(/temporarily unavailable/)).toBeNull();
+
+      // Backed off: the next 2s tick must NOT refire.
+      await act(async () => { vi.advanceTimersByTime(2000); });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+      // Retry-After (10s from the 429) is honored.
+      await act(async () => { vi.advanceTimersByTime(8000); });
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+
+      // Success restores the normal 2s cadence.
+      await act(async () => { vi.advanceTimersByTime(2000); });
+      expect(fetchSpy).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a 429 on the very first load does not show the unavailable banner", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(rateLimitedResponse());
+    render(<ActionRunStatusPanel conversationId="conversation-429-first" busy={false} />);
+    await act(async () => {});
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(screen.queryByText(/temporarily unavailable/)).toBeNull();
   });
 });

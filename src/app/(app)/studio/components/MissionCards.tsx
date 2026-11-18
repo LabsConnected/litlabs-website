@@ -34,6 +34,7 @@ import {
 import type { ConnectionCapabilities } from "../hooks/useConnectionSummary";
 import { describeSourceRows } from "../lib/source-rows";
 import { useExecutionStore, type ExecutionPhase } from "../stores/useExecutionStore";
+import { approvalAwaitingDecision } from "../lib/approval-awaiting";
 import { useStudioAgentStore, AGENT_META } from "../stores/useStudioAgentStore";
 
 export interface MissionCardsProps {
@@ -56,10 +57,12 @@ export interface MissionCardsProps {
 
 type IconType = ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: CSSProperties }>;
 
-/* ── Design tokens (literals) ──────────────────────────────────── */
+/* ── Design tokens — the platform's standard light studio tokens
+      (same conversion MobileBuildStatusBar already shipped with;
+      under .studio-shell these resolve light). ── */
 
-const CARD_SURFACE = "rgba(16,12,26,0.92)";
-const CARD_BORDER = "rgba(255,255,255,0.07)";
+const CARD_SURFACE = "var(--studio-surface)";
+const CARD_BORDER = "var(--studio-border)";
 const ACCENT = "var(--color-accent)";
 const AMBER = "#e3b341";
 
@@ -242,6 +245,12 @@ export default function MissionCards({
   const phase = useExecutionStore((s) => s.phase);
   const isRunning = useExecutionStore((s) => s.isRunning);
   const pendingApproval = useExecutionStore((s) => s.pendingApproval);
+  const approvalPhase = useExecutionStore((s) => s.approvalPhase);
+  // A gate whose decision already landed (submitting/executing) is not
+  // "waiting" — pendingApproval stays mounted through the resume by
+  // design, and reading its presence alone contradicted the chat card's
+  // "Approved — running..." on the same screen (2026-11-11).
+  const approvalWaiting = approvalAwaitingDecision(pendingApproval, approvalPhase);
   const checkpoint = useExecutionStore((s) => s.checkpoint);
   const afterCheckpoint = useExecutionStore((s) => s.afterCheckpoint);
   // Persisted run checkpoints survive a refresh: hydrate the store from
@@ -280,7 +289,8 @@ export default function MissionCards({
 
   /* ── Contextual hints derived from real store state ───────────── */
   const hints: string[] = [];
-  if (pendingApproval) hints.push("Approval waiting — review the request before work continues.");
+  if (approvalWaiting) hints.push("Approval waiting — review the request before work continues.");
+  if (pendingApproval && !approvalWaiting) hints.push("Approval granted — the run is continuing.");
   if (isRunning) hints.push(`Run in progress — step ${toolCalls.length + 1}.`);
   if (hasCheckpoint && hasChanges && !isRunning) hints.push("Checkpoint recorded — restore if you need to undo changes.");
   const terminalHealth = terminalHealthOf(capabilities);
@@ -344,7 +354,7 @@ export default function MissionCards({
             </span>
           }
         />
-        {pendingApproval && (
+        {approvalWaiting && (
           <div
             style={{
               display: "inline-flex",
@@ -376,7 +386,7 @@ export default function MissionCards({
               <span style={{ fontSize: 11, color: "var(--error)" }}>-{changesSummary!.deleted} deleted</span>
             )}
             {changesSummary!.renamed > 0 && (
-              <span style={{ fontSize: 11, color: "#c4b5fd" }}>→{changesSummary!.renamed} renamed</span>
+              <span style={{ fontSize: 11, color: "#7c3aed" }}>→{changesSummary!.renamed} renamed</span>
             )}
           </div>
         )}

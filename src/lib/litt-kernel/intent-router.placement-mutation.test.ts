@@ -67,10 +67,15 @@ describe("placement-mutation prompts — execution routing", () => {
     expect(result.requiresExecution).toBe(false);
   });
 
-  it("keeps image generation phrasing on create (no false positive)", () => {
+  it("keeps image generation phrasing on create, not build (no false positive)", () => {
+    // The guard's point stands — a bare media ask is not a site
+    // mutation and must not be pulled into build. Since 2026-11-15
+    // (image-gen refusal diagnosis) it DOES carry
+    // requiresExecution=true: create mode with execution is the media
+    // generation lane (image.generate), not the text-only lane.
     const result = classifyIntent("Generate a logo for my brand");
     expect(result.mode).toBe("create");
-    expect(result.requiresExecution).toBe(false);
+    expect(result.requiresExecution).toBe(true);
   });
 
   it("does not treat 'show me' informational requests as site mutations", () => {

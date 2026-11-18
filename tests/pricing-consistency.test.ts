@@ -65,9 +65,9 @@ describe("Pricing contract — single source of truth", () => {
       expect(PLANS.creator_beta.monthlyCredits).toBe(7500);
     });
 
-    it("Pro Builder Beta is $39/month", () => {
+    it("Pro Builder Beta is $39.99/month", () => {
       expect(PLANS.pro_builder_beta.billingType).toBe("subscription");
-      expect(PLANS.pro_builder_beta.monthlyPriceCents).toBe(3900);
+      expect(PLANS.pro_builder_beta.monthlyPriceCents).toBe(3999);
       expect(PLANS.pro_builder_beta.monthlyCredits).toBe(18000);
     });
 

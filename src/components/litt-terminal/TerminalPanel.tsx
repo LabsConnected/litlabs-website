@@ -16,6 +16,9 @@ import { useTerminalStore } from "@/stores/useTerminalStore";
 import { Maximize2, Minimize2, Plug, RotateCcw, Trash2, AlertCircle, Copy, Check, Download, ExternalLink } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
 import { copyToClipboard } from "@/lib/studio/message-copy";
+import { HostExecutionDisabledError } from "@/lib/host-execution-guard";
+import { markHostExecSettled } from "@/lib/studio/host-exec-session";
+import { HOST_EXECUTION_UNAVAILABLE_MESSAGE } from "@/lib/projects/runtime-state";
 import { useVisualViewport } from "../../app/(app)/studio/hooks/useVisualViewport";
 import { TerminalFitController } from "./terminal-fit";
 import {
@@ -51,6 +54,10 @@ interface TerminalPanelProps {
   onConnectionChange?: (connected: boolean) => void;
   onTerminalOutput?: (output: string) => void;
   visible?: boolean;
+  /** xterm font size (Kimi wiring item 9). Applied live via a dedicated
+   *  effect — the terminal is created once and never recreated for a
+   *  size change. Defaults to 14 when unset. */
+  fontSize?: number;
 }
 
 export interface TerminalPanelHandle {
@@ -62,7 +69,7 @@ export const TerminalPanel = forwardRef<
   TerminalPanelHandle,
   TerminalPanelProps
 >(function TerminalPanel(
-  { projectId, repositoryName, branch, approvalMode = "manual", onLog, onCommand, onConnectionChange, onTerminalOutput, visible },
+  { projectId, repositoryName, branch, approvalMode = "manual", onLog, onCommand, onConnectionChange, onTerminalOutput, visible, fontSize },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -101,6 +108,19 @@ export const TerminalPanel = forwardRef<
     if (inset > 0) term.scrollToBottom();
   }, [vv.bottomInset]);
 
+  // Live font size (Kimi wiring item 9): apply option changes to the
+  // existing xterm instance and refit — never recreate the terminal
+  // (that would drop the session). Runs when the prop changes; the
+  // creation effect above seeds the initial size.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term || !fontSize) return;
+    if (term.options.fontSize !== fontSize) {
+      term.options.fontSize = fontSize;
+      fitControllerRef.current?.requestFit();
+    }
+  }, [fontSize]);
+
   // Refs for callback props — updated every render but NOT included in the
   // connection useEffect's dependency array. This prevents inline arrow
   // functions from the parent (e.g. onConnectionChange={(c) => ...}) from
@@ -125,7 +145,7 @@ export const TerminalPanel = forwardRef<
 
     const term = new Terminal({
       cursorBlink: true,
-      fontSize: 14,
+      fontSize: fontSize ?? 14,
       fontFamily: "JetBrains Mono, Consolas, monospace",
       theme: {
         background: "#000000",
@@ -665,11 +685,30 @@ export const TerminalPanel = forwardRef<
                   term.writeln(`\x1b[33m   provisioning in progress... (${attempt}/${maxAttempts})\x1b[0m`);
                   return new Promise<void>((resolve) => setTimeout(resolve, 2000)).then(pollPrepare);
                 }
+                // HOST_EXECUTION_DISABLED: the fail-closed policy verdict,
+                // not a provisioning failure — throw the typed error so the
+                // catch below settles the panel as unavailable (and mark the
+                // session guard so no other surface re-attempts prepare).
+                if (resp.status === 503 && body.code === "HOST_EXECUTION_DISABLED") {
+                  markHostExecSettled(projectId);
+                  throw new HostExecutionDisabledError("workspace.prepare");
+                }
                 // Other errors
                 throw new Error(body.error || `Prepare failed (${resp.status})`);
               });
 
           void pollPrepare().catch((prepErr: unknown) => {
+            // HOST_EXECUTION_DISABLED from prepare: same policy family —
+            // settle as unavailable with the honest explanation, never as
+            // a provisioning failure the user could retry.
+            if (prepErr instanceof HostExecutionDisabledError) {
+              term.writeln(`\x1b[33m⚠ ${HOST_EXECUTION_UNAVAILABLE_MESSAGE}\x1b[0m`);
+              onLog?.("[WORKSPACE] Host execution disabled — repo workspace unavailable on the hosted service");
+              terminalStore.setError(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
+              terminalStore.setFailureStage("isolation_disabled");
+              terminalStore.setStatus("unavailable");
+              return;
+            }
             // The token endpoint's TERMINAL_DISABLED verdict is a
             // deploy-time policy state, not a provisioning failure —
             // surface it truthfully instead of "workspace provisioning failed".
