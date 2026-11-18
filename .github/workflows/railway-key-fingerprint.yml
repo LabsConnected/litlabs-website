@@ -80,10 +80,10 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         continue-on-error: true
         run: |
-          railway logs --service "@litlabs/litt-shell" --lines 2000 2>&1 \
-            | grep -iE "gemini|provider|fallback|429|quota|billing|RESOURCE_EXHAUSTED|model_routing|API key" \
+          railway logs --service "@litlabs/litt-shell" --lines 20000 2>&1 \
+            | grep -iE "gemini|forbidden|403|provider=|attempt_failure|health_disabled|credential" \
             | sed -E 's/(key|token|secret|password)([=: \t]+)[A-Za-z0-9_./+-]{8,}/\1\2<redacted>/gi' \
-            | tail -80 || true
+            | tail -120 || true
           exit 0
 
       - name: Service domains (non-secret)
