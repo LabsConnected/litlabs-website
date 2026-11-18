@@ -71,17 +71,29 @@ def list_services():
     return names
 
 
+ALL_SERVICES = [
+    "@litlabs/litt-shell",
+    "terminal-server",
+    "@litt/agent-core",
+    "@litt/companion",
+    "@litt/models",
+    "litlabs-voice-proxy",
+    "cli",
+    "@litlabs/litt-cli",
+]
+
+
 def main():
-    if len(sys.argv) < 2:
-        if "--all-services" in sys.argv:
-            for svc in list_services():
-                subprocess.run(
-                    [sys.executable, __file__, svc,
-                     "TERMINAL_INTERNAL_SERVICE_KEY", "TERMINAL_AUTH_SECRET"],
-                )
-            return 0
-        print("usage: railway-var-fingerprint.py <service> [VAR ...]", file=sys.stderr)
-        return 2
+    if len(sys.argv) < 2 or sys.argv[1] == "--all-services":
+        if len(sys.argv) > 2:
+            wanted = sys.argv[2:]
+        else:
+            wanted = ["TERMINAL_INTERNAL_SERVICE_KEY", "TERMINAL_AUTH_SECRET"]
+        for svc in ALL_SERVICES:
+            subprocess.run(
+                [sys.executable, __file__, svc] + wanted,
+            )
+        return 0
     service = sys.argv[1]
     wanted = sys.argv[2:] or ["TERMINAL_INTERNAL_SERVICE_KEY"]
 
