@@ -22,9 +22,14 @@ import { join } from "path";
 import {
   checkSandboxPreviewGroundTruth,
   checkSandboxPreviewLiveness,
+  previewRecreationPromise,
   startSandboxPreview,
   verifySandboxPreviewHealth,
   PREVIEW_LIVENESS_UNREADABLE_ESCALATION_ROUNDS,
+  PREVIEW_RECREATION_COOLDOWN_MS,
+  PREVIEW_RECREATION_FAILURE_THRESHOLD,
+  PREVIEW_RECREATION_FAILURE_WINDOW_MS,
+  PREVIEW_RECREATION_MAX_PER_SESSION,
   PREVIEW_VERIFY_FAILURE_THRESHOLD,
   PREVIEW_VERIFY_FAILURE_WINDOW_MS,
   PREVIEW_VERIFY_PROBE_TIMEOUT_MS,
@@ -1615,5 +1620,446 @@ describe("pushPreviewLog — stdout mirror (round 15, C5)", () => {
     } finally {
       info.mockRestore();
     }
+  });
+});
+
+/**
+ * Round 16 (C2) — gated sandbox recreation for a verifiably dead
+ * preview address.
+ *
+ * The live failure these tests answer (2026-11-17, production):
+ * sandbox iqurn9a3kukxgdt8vd7x0's dev server was alive and healthy
+ * INSIDE the sandbox while every external probe of its preview
+ * address timed out — and the round-14 re-exposure kept returning
+ * the IDENTICAL address, because E2B derives the host
+ * deterministically from (sandboxId, port). The provider stub
+ * below models exactly that contract: exposePort(sandboxId) is a
+ * pure function of the sandbox id, so the ONLY way to a new
+ * address is a new sandbox.
+ *
+ * Recreation must fire on sustained dead-address evidence with a
+ * locally-serving guest (or unreadable verdicts), must NOT fire
+ * for a genuinely dead server, and must be capped + spaced so it
+ * can never loop.
+ */
+describe("verifySandboxPreviewHealth — sandbox recreation (round 16, C2)", () => {
+  const SBX1_ORIGIN = "https://3000-sbx-1.e2b.app";
+  const SBX2_ORIGIN = "https://3000-sbx-2.e2b.app";
+  const SBX3_ORIGIN = "https://3000-sbx-3.e2b.app";
+
+  const failing: SandboxProbeResult = {
+    healthy: false,
+    authConfigError: false,
+    rootRouteMissing: false,
+    status: null,
+  };
+  const healthy: SandboxProbeResult = {
+    healthy: true,
+    authConfigError: false,
+    rootRouteMissing: false,
+    status: 200,
+  };
+  const probeByOrigin =
+    (healthyOrigins: ReadonlySet<string>) =>
+    async (origin: string): Promise<SandboxProbeResult> =>
+      healthyOrigins.has(origin) ? healthy : failing;
+
+  type LivenessMode = "alive" | "dead" | "unreadable";
+  type GroundTruthMode = "answering" | "silent" | "unreadable";
+
+  function makeRecreationSupport(
+    opts: {
+      liveness?: LivenessMode;
+      groundTruth?: GroundTruthMode;
+      destroyError?: Error;
+      /** Sandbox ids ensureSandboxForPreview hands out, in order. */
+      ensureIds?: string[];
+    } = {},
+  ) {
+    const liveness = opts.liveness ?? "alive";
+    const groundTruth = opts.groundTruth ?? "answering";
+    const ensureIds = opts.ensureIds ?? ["sbx-2"];
+    let ensureCalls = 0;
+    const destroySandbox = vi.fn(async (_ws: WorkspaceDescriptor) => {
+      if (opts.destroyError) throw opts.destroyError;
+    });
+    const ensureSandboxForPreview = vi.fn(async () => ({
+      sandboxId: ensureIds[Math.min(ensureCalls++, ensureIds.length - 1)],
+    }));
+    const exposePort = vi.fn(async (sandboxId: string) => ({
+      // The production contract (round 15): host + token are a
+      // deterministic function of the sandbox — same sandbox, same
+      // address; NEW sandbox, NEW address.
+      url: `https://3000-${sandboxId}.e2b.app`,
+      previewToken: `tok-${sandboxId}`,
+      expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+    }));
+    const provider = {
+      name: "stub",
+      fileTransfer: {
+        listDir: vi.fn(async () => []),
+        makeDir: vi.fn(async () => {}),
+        writeFile: vi.fn(async () => {}),
+        readFile: vi.fn(async () => new Uint8Array()),
+        listTree: vi.fn(async () => []),
+        removePath: vi.fn(async () => {}),
+        renamePath: vi.fn(async () => {}),
+      },
+      execute: vi.fn(
+        async (_sandboxId: string, input: { command: string }) => {
+          if (input.command.includes("LITT_PREVIEW_LIVENESS")) {
+            if (liveness === "unreadable") throw new Error("envd unreachable");
+            return {
+              exitCode: 0,
+              stdout:
+                liveness === "alive"
+                  ? "LITT_PREVIEW_LIVENESS=alive pid=4242\n"
+                  : "LITT_PREVIEW_LIVENESS=dead pid=4242\n",
+              stderr: "",
+              durationMs: 1,
+            };
+          }
+          if (input.command.includes("LITT_PREVIEW_GROUND_TRUTH")) {
+            if (groundTruth === "unreadable") {
+              throw new Error("envd unreachable");
+            }
+            return {
+              exitCode: 0,
+              stdout:
+                groundTruth === "answering"
+                  ? "LITT_PREVIEW_GROUND_TRUTH=200\n"
+                  : "LITT_PREVIEW_GROUND_TRUTH=000\n",
+              stderr: "",
+              durationMs: 1,
+            };
+          }
+          // Install / launch / housekeeping execs in the recreated
+          // sandbox simply succeed.
+          return { exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
+        },
+      ),
+      exposePort,
+      extendTimeout: vi.fn(async () => true),
+    };
+    const executor = {
+      ensureSandboxForPreview,
+      destroySandbox,
+      notePreviewPort: vi.fn(),
+    };
+    return {
+      support: {
+        executor: executor as unknown as SandboxWorkspaceExecutor,
+        provider: provider as unknown as SandboxProvider,
+      },
+      destroySandbox,
+      ensureSandboxForPreview,
+      exposePort,
+    };
+  }
+
+  function makeReadyRuntime(): PreviewRuntime {
+    const runtime = makeRuntime();
+    runtime.status = "ready";
+    runtime.packageManager = "pnpm";
+    runtime.upstream = {
+      kind: "sandbox",
+      sandboxId: "sbx-1",
+      origin: SBX1_ORIGIN,
+      headers: { "e2b-traffic-access-token": "tok-sbx-1" },
+      expiresAt: null,
+    };
+    return runtime;
+  }
+
+  /**
+   * Seed the external-failure accounting as if the previous rounds
+   * already failed across the recreation window — the next failing
+   * round completes the sustained evidence.
+   */
+  function seedSustained(runtime: PreviewRuntime) {
+    runtime.healthExternalFailureCount =
+      PREVIEW_RECREATION_FAILURE_THRESHOLD - 1;
+    runtime.healthExternalFailureSince =
+      Date.now() - PREVIEW_RECREATION_FAILURE_WINDOW_MS - 1_000;
+  }
+
+  const resolveWorkspace = () => WS;
+
+  it("dead ingress + alive, locally-answering server recreates exactly once and the NEW address is used", async () => {
+    const healthyOrigins = new Set<string>([SBX2_ORIGIN]);
+    const { support, destroySandbox } = makeRecreationSupport();
+    const runtime = makeReadyRuntime();
+    seedSustained(runtime);
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, {
+      probe: probeByOrigin(healthyOrigins),
+      resolveWorkspace,
+    });
+
+    expect(ok).toBe(true);
+    expect(destroySandbox).toHaveBeenCalledTimes(1);
+    expect(destroySandbox).toHaveBeenCalledWith(WS);
+    expect(runtime.healthRecreationCount).toBe(1);
+    // The trigger decision is logged with both ids and addresses.
+    expect(
+      runtime.logs.some(
+        (l) =>
+          l.includes("recreating the sandbox for a fresh address") &&
+          l.includes("sbx-1") &&
+          l.includes(SBX1_ORIGIN),
+      ),
+    ).toBe(true);
+
+    const recreation = previewRecreationPromise(runtime);
+    expect(recreation).not.toBeNull();
+    await recreation;
+    await vi.waitFor(() => expect(runtime.status).toBe("ready"));
+
+    // The runtime now points at the NEW sandbox and ITS address —
+    // the panel surfaces the fresh upstream from here on.
+    expect(runtime.upstream).toMatchObject({
+      kind: "sandbox",
+      sandboxId: "sbx-2",
+      origin: SBX2_ORIGIN,
+      headers: { "e2b-traffic-access-token": "tok-sbx-2" },
+    });
+    expect(
+      runtime.logs.some(
+        (l) =>
+          l.includes("Sandbox recreation complete") &&
+          l.includes("sbx-2") &&
+          l.includes(SBX2_ORIGIN),
+      ),
+    ).toBe(true);
+    expect(previewRecreationPromise(runtime)).toBeNull();
+    expect(runtime.healthRecreationInFlight).toBe(false);
+
+    // Continued failure against the new address does NOT immediately
+    // re-trigger: the recreation reset the external accounting, so
+    // the fresh address earns its own evidence window.
+    healthyOrigins.delete(SBX2_ORIGIN);
+    for (let i = 0; i < PREVIEW_RECREATION_FAILURE_THRESHOLD - 1; i++) {
+      const roundOk = await verifySandboxPreviewHealth(support, runtime, {
+        probe: probeByOrigin(healthyOrigins),
+        resolveWorkspace,
+      });
+      expect(roundOk).toBe(true);
+    }
+    expect(destroySandbox).toHaveBeenCalledTimes(1);
+    expect(runtime.healthRecreationCount).toBe(1);
+  });
+
+  it("a genuinely dead server does NOT recreate — the C1 conviction stands", async () => {
+    const { support, destroySandbox, ensureSandboxForPreview } =
+      makeRecreationSupport({ liveness: "dead", groundTruth: "silent" });
+    const runtime = makeReadyRuntime();
+    seedSustained(runtime);
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, {
+      probe: probeByOrigin(new Set<string>()),
+      resolveWorkspace,
+    });
+
+    expect(ok).toBe(false);
+    expect(runtime.status).toBe("failed");
+    expect(runtime.errorCode).toBe("preview_dev_server_failed");
+    expect(destroySandbox).not.toHaveBeenCalled();
+    expect(ensureSandboxForPreview).not.toHaveBeenCalled();
+    expect(runtime.healthRecreationCount ?? 0).toBe(0);
+  });
+
+  it("ground truth saying the server does not answer locally blocks recreation even under a live pid", async () => {
+    const { support, destroySandbox } = makeRecreationSupport({
+      liveness: "alive",
+      groundTruth: "silent",
+    });
+    const runtime = makeReadyRuntime();
+    seedSustained(runtime);
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, {
+      probe: probeByOrigin(new Set<string>()),
+      resolveWorkspace,
+    });
+
+    expect(ok).toBe(true);
+    expect(runtime.status).toBe("ready");
+    expect(destroySandbox).not.toHaveBeenCalled();
+    expect(
+      runtime.logs.some((l) => l.includes("recreation is not the remedy")),
+    ).toBe(true);
+  });
+
+  it("unreadable liveness AND ground truth with a sustained dead address still recreates", async () => {
+    const { support, destroySandbox } = makeRecreationSupport({
+      liveness: "unreadable",
+      groundTruth: "unreadable",
+    });
+    const runtime = makeReadyRuntime();
+    seedSustained(runtime);
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, {
+      probe: probeByOrigin(new Set<string>([SBX2_ORIGIN])),
+      resolveWorkspace,
+    });
+
+    expect(ok).toBe(true);
+    expect(destroySandbox).toHaveBeenCalledTimes(1);
+    await previewRecreationPromise(runtime);
+    await vi.waitFor(() => expect(runtime.status).toBe("ready"));
+    expect(runtime.upstream).toMatchObject({
+      kind: "sandbox",
+      sandboxId: "sbx-2",
+      origin: SBX2_ORIGIN,
+    });
+  });
+
+  it("below the sustained window, no recreation — the evidence accumulates organically first", async () => {
+    const { support, destroySandbox } = makeRecreationSupport();
+    const runtime = makeReadyRuntime();
+
+    // A full threshold of failing rounds in quick succession: the
+    // count is met but the WINDOW is not — a burst is not sustained.
+    for (let i = 0; i < PREVIEW_RECREATION_FAILURE_THRESHOLD; i++) {
+      const ok = await verifySandboxPreviewHealth(support, runtime, {
+        probe: probeByOrigin(new Set<string>()),
+        resolveWorkspace,
+      });
+      expect(ok).toBe(true);
+      expect(runtime.status).toBe("ready");
+    }
+    expect(runtime.healthExternalFailureCount).toBe(
+      PREVIEW_RECREATION_FAILURE_THRESHOLD,
+    );
+    expect(destroySandbox).not.toHaveBeenCalled();
+  });
+
+  it("the session cap is enforced — after the cap, sustained failure logs the cap and stays ready", async () => {
+    const { support, destroySandbox } = makeRecreationSupport();
+    const runtime = makeReadyRuntime();
+    runtime.healthRecreationCount = PREVIEW_RECREATION_MAX_PER_SESSION;
+    runtime.healthLastRecreationAt =
+      Date.now() - PREVIEW_RECREATION_COOLDOWN_MS - 1_000;
+    seedSustained(runtime);
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, {
+      probe: probeByOrigin(new Set<string>()),
+      resolveWorkspace,
+    });
+
+    expect(ok).toBe(true);
+    expect(runtime.status).toBe("ready");
+    expect(destroySandbox).not.toHaveBeenCalled();
+    expect(
+      runtime.logs.some((l) => l.includes("recreation cap")),
+    ).toBe(true);
+  });
+
+  it("the cooldown is enforced — a recent recreation blocks the next one", async () => {
+    const { support, destroySandbox } = makeRecreationSupport();
+    const runtime = makeReadyRuntime();
+    runtime.healthRecreationCount = 1;
+    runtime.healthLastRecreationAt = Date.now();
+    seedSustained(runtime);
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, {
+      probe: probeByOrigin(new Set<string>()),
+      resolveWorkspace,
+    });
+
+    expect(ok).toBe(true);
+    expect(runtime.status).toBe("ready");
+    expect(destroySandbox).not.toHaveBeenCalled();
+    expect(runtime.healthRecreationCount).toBe(1);
+    expect(runtime.logs.some((l) => l.includes("cooldown"))).toBe(true);
+  });
+
+  it("a second recreation fires after the window and cooldown — and the cap stops the third", async () => {
+    const healthyOrigins = new Set<string>([SBX2_ORIGIN]);
+    const { support, destroySandbox } = makeRecreationSupport({
+      ensureIds: ["sbx-2", "sbx-3"],
+    });
+    const runtime = makeReadyRuntime();
+    seedSustained(runtime);
+
+    // Recreation #1: sbx-1 → sbx-2.
+    await verifySandboxPreviewHealth(support, runtime, {
+      probe: probeByOrigin(healthyOrigins),
+      resolveWorkspace,
+    });
+    await previewRecreationPromise(runtime);
+    await vi.waitFor(() => expect(runtime.status).toBe("ready"));
+    expect(runtime.upstream).toMatchObject({ sandboxId: "sbx-2" });
+    expect(destroySandbox).toHaveBeenCalledTimes(1);
+
+    // The sbx-2 address dies too. Fresh sustained evidence + the
+    // cooldown served → recreation #2: sbx-2 → sbx-3.
+    healthyOrigins.delete(SBX2_ORIGIN);
+    healthyOrigins.add(SBX3_ORIGIN);
+    seedSustained(runtime);
+    runtime.healthLastRecreationAt =
+      Date.now() - PREVIEW_RECREATION_COOLDOWN_MS - 1_000;
+    await verifySandboxPreviewHealth(support, runtime, {
+      probe: probeByOrigin(healthyOrigins),
+      resolveWorkspace,
+    });
+    await previewRecreationPromise(runtime);
+    await vi.waitFor(() => expect(runtime.status).toBe("ready"));
+    expect(runtime.upstream).toMatchObject({
+      sandboxId: "sbx-3",
+      origin: SBX3_ORIGIN,
+    });
+    expect(destroySandbox).toHaveBeenCalledTimes(2);
+    expect(runtime.healthRecreationCount).toBe(2);
+
+    // A third dead address hits the session cap — no more recreations.
+    healthyOrigins.delete(SBX3_ORIGIN);
+    seedSustained(runtime);
+    runtime.healthLastRecreationAt =
+      Date.now() - PREVIEW_RECREATION_COOLDOWN_MS - 1_000;
+    const ok = await verifySandboxPreviewHealth(support, runtime, {
+      probe: probeByOrigin(healthyOrigins),
+      resolveWorkspace,
+    });
+    expect(ok).toBe(true);
+    expect(runtime.status).toBe("ready");
+    expect(destroySandbox).toHaveBeenCalledTimes(2);
+    expect(
+      runtime.logs.some((l) => l.includes("recreation cap")),
+    ).toBe(true);
+  });
+
+  it("a recreation failure degrades honestly — no crash, no wedged runtime", async () => {
+    const { support, ensureSandboxForPreview } = makeRecreationSupport({
+      destroyError: new Error("provider destroy unavailable"),
+    });
+    const runtime = makeReadyRuntime();
+    seedSustained(runtime);
+
+    const ok = await verifySandboxPreviewHealth(support, runtime, {
+      probe: probeByOrigin(new Set<string>()),
+      resolveWorkspace,
+    });
+
+    expect(ok).toBe(true);
+    // The detached recreation runs to completion on its own (it
+    // never rejects — the failure surfaces in the log instead).
+    await vi.waitFor(() =>
+      expect(
+        runtime.logs.some((l) => l.includes("Sandbox recreation failed")),
+      ).toBe(true),
+    );
+    // The runtime is NOT left wedged in "starting" and the failure
+    // is on the record.
+    expect(runtime.status).toBe("ready");
+    expect(runtime.healthRecreationInFlight).toBe(false);
+    expect(previewRecreationPromise(runtime)).toBeNull();
+    expect(ensureSandboxForPreview).not.toHaveBeenCalled();
+    expect(
+      runtime.logs.some(
+        (l) =>
+          l.includes("Sandbox recreation failed") &&
+          l.includes("provider destroy unavailable"),
+      ),
+    ).toBe(true);
   });
 });
