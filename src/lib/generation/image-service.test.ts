@@ -160,6 +160,12 @@ function makeDeps(overrides: Partial<ImageServiceDeps> = {}) {
         if (job.id === jobId) job.metadata = { ...job.metadata, ...updates };
       }
     },
+    getJob: async (jobId) => {
+      for (const job of jobs.values()) {
+        if (job.id === jobId) return job;
+      }
+      return null;
+    },
     getBalances: async () => ({ total: 1000 }),
     debit: async (_clerkId, amount, _reason, key) => {
       calls.debit.push({ amount, key });
@@ -217,6 +223,32 @@ describe("generateImage", () => {
     expect(calls.dispatch).toBe(1);
     expect(calls.debit).toHaveLength(1);
     expect(calls.debit[0]).toMatchObject({ amount: 50, key: "image:charge:op_1" });
+  });
+
+  it("round 14: a completion that does not read back is flagged, not reported as a persisted asset", async () => {
+    // Simulates the lion-proof failure at the service boundary: the
+    // completion writes were issued, but the row still reads
+    // "processing" with no durable URL (the flip silently failed in
+    // the jobs layer). The generation itself succeeded — the service
+    // must still return the image — but it must NOT claim a
+    // persisted asset: assetPersistenceFailed is set and no job id
+    // is reported as the asset.
+    const { deps } = makeDeps({
+      getJob: async (jobId) => makeJob({ id: jobId, status: "processing", metadata: {} }),
+    });
+    const result = await generateImage(
+      { userId: "user_abc", projectId: "proj_1", requestId: "op_1" },
+      paidInput,
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.assetPersistenceFailed).toBe(true);
+      expect(result.generationJobId).toBeNull();
+      expect(result.assetId).toBeNull();
+      expect(result.downloadUrl).toBe("https://provider/x.png");
+    }
   });
 
   it("replays a completed operation — no second generation, no second debit", async () => {

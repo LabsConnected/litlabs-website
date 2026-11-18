@@ -54,6 +54,10 @@ interface TerminalPanelProps {
   onConnectionChange?: (connected: boolean) => void;
   onTerminalOutput?: (output: string) => void;
   visible?: boolean;
+  /** xterm font size (Kimi wiring item 9). Applied live via a dedicated
+   *  effect — the terminal is created once and never recreated for a
+   *  size change. Defaults to 14 when unset. */
+  fontSize?: number;
 }
 
 export interface TerminalPanelHandle {
@@ -65,7 +69,7 @@ export const TerminalPanel = forwardRef<
   TerminalPanelHandle,
   TerminalPanelProps
 >(function TerminalPanel(
-  { projectId, repositoryName, branch, approvalMode = "manual", onLog, onCommand, onConnectionChange, onTerminalOutput, visible },
+  { projectId, repositoryName, branch, approvalMode = "manual", onLog, onCommand, onConnectionChange, onTerminalOutput, visible, fontSize },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -104,6 +108,19 @@ export const TerminalPanel = forwardRef<
     if (inset > 0) term.scrollToBottom();
   }, [vv.bottomInset]);
 
+  // Live font size (Kimi wiring item 9): apply option changes to the
+  // existing xterm instance and refit — never recreate the terminal
+  // (that would drop the session). Runs when the prop changes; the
+  // creation effect above seeds the initial size.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term || !fontSize) return;
+    if (term.options.fontSize !== fontSize) {
+      term.options.fontSize = fontSize;
+      fitControllerRef.current?.requestFit();
+    }
+  }, [fontSize]);
+
   // Refs for callback props — updated every render but NOT included in the
   // connection useEffect's dependency array. This prevents inline arrow
   // functions from the parent (e.g. onConnectionChange={(c) => ...}) from
@@ -128,7 +145,7 @@ export const TerminalPanel = forwardRef<
 
     const term = new Terminal({
       cursorBlink: true,
-      fontSize: 14,
+      fontSize: fontSize ?? 14,
       fontFamily: "JetBrains Mono, Consolas, monospace",
       theme: {
         background: "#000000",

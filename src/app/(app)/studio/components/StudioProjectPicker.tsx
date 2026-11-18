@@ -156,23 +156,29 @@ export default function StudioProjectPicker({
     }
   };
 
+  /** The one rename path: PATCH /api/studio-projects/[id]. Throws on
+   *  failure; callers decide how to surface it. */
+  const performRename = async (id: string, name: string) => {
+    const token = await getToken?.();
+    const response = await fetch(`/api/studio-projects/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ name }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const payload = await response.json().catch(() => null) as { project?: ProjectOption; error?: string } | null;
+    if (!response.ok) throw new Error(payload?.error ?? `Rename failed (${response.status})`);
+    setProjects((prev) => prev.map((project) => (project.id === id ? { ...project, name } : project)));
+    onProjectRenamed?.(id, name);
+  };
+
   const handleRenameProject = async (name: string) => {
     if (!renameProject) return;
     setRenaming(true);
     setRenameError(null);
     try {
-      const token = await getToken?.();
-      const response = await fetch(`/api/studio-projects/${encodeURIComponent(renameProject.id)}`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ name }),
-        signal: AbortSignal.timeout(15000),
-      });
-      const payload = await response.json().catch(() => null) as { project?: ProjectOption; error?: string } | null;
-      if (!response.ok) throw new Error(payload?.error ?? `Rename failed (${response.status})`);
-      setProjects((prev) => prev.map((project) => project.id === renameProject.id ? { ...project, name } : project));
-      onProjectRenamed?.(renameProject.id, name);
+      await performRename(renameProject.id, name);
       setRenameProject(null);
     } catch (renameErr) {
       setRenameError(renameErr instanceof Error ? renameErr.message : "Rename failed.");
@@ -181,22 +187,83 @@ export default function StudioProjectPicker({
     }
   };
 
+  // Inline rename (Kimi wiring item 16): double-clicking the current
+  // project name edits it in place — Enter (or blur) commits through
+  // the same PATCH, Esc cancels. A failed commit falls back to the
+  // rename dialog with the error shown, so the failure is never silent.
+  const [inlineName, setInlineName] = useState<string | null>(null);
+  const inlineCancelRef = useRef(false);
+  const commitInlineRename = async () => {
+    if (inlineName === null || !projectId) return;
+    const name = inlineName.trim();
+    setInlineName(null);
+    if (!name || name === projectName) return;
+    try {
+      await performRename(projectId, name);
+    } catch (renameErr) {
+      setRenameError(renameErr instanceof Error ? renameErr.message : "Rename failed.");
+      setRenameProject({ id: projectId, name: projectName ?? name });
+    }
+  };
+
   return (
     <div className="min-w-0 shrink-0">
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={toggleOpen}
-        className="flex w-full min-w-0 max-w-[200px] items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-1 text-[12px] font-bold transition hover:bg-black/5 sm:max-w-[240px]"
-        style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)", backgroundColor: "var(--studio-surface)" }}
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        title="Switch active project"
-      >
-        <Folder size={13} className="shrink-0" style={{ color: "var(--litt-primary)" }} />
-        <span className="min-w-0 flex-1 truncate">{projectName ?? "Select project"}</span>
-        <ChevronDown size={11} className="shrink-0" style={{ color: "var(--text-muted)" }} />
-      </button>
+      {inlineName !== null && projectId ? (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void commitInlineRename();
+          }}
+          className="flex w-full min-w-0 max-w-[200px] items-center gap-1.5 rounded-md border px-2 py-1 sm:max-w-[240px]"
+          style={{ borderColor: "var(--litt-primary)", backgroundColor: "var(--studio-surface)" }}
+        >
+          <Folder size={13} className="shrink-0" style={{ color: "var(--litt-primary)" }} />
+          <input
+            autoFocus
+            value={inlineName}
+            onChange={(event) => setInlineName(event.target.value)}
+            onFocus={(event) => event.target.select()}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                inlineCancelRef.current = true;
+                setInlineName(null);
+              }
+            }}
+            onBlur={() => {
+              if (!inlineCancelRef.current) void commitInlineRename();
+              inlineCancelRef.current = false;
+            }}
+            className="min-w-0 flex-1 bg-transparent text-[12px] font-bold outline-none"
+            style={{ color: "var(--text-secondary)" }}
+            aria-label="Rename project"
+            data-testid="project-inline-rename"
+          />
+        </form>
+      ) : (
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={toggleOpen}
+          onDoubleClick={() => {
+            // Inline rename (item 16): double-click the name to edit
+            // it in place. Also closes the dropdown the first click
+            // opened.
+            if (projectId && projectName) {
+              setOpen(false);
+              setInlineName(projectName);
+            }
+          }}
+          className="flex w-full min-w-0 max-w-[200px] items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-1 text-[12px] font-bold transition hover:bg-black/5 sm:max-w-[240px]"
+          style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)", backgroundColor: "var(--studio-surface)" }}
+          aria-expanded={open}
+          aria-haspopup="listbox"
+          title="Switch active project"
+        >
+          <Folder size={13} className="shrink-0" style={{ color: "var(--litt-primary)" }} />
+          <span className="min-w-0 flex-1 truncate">{projectName ?? "Select project"}</span>
+          <ChevronDown size={11} className="shrink-0" style={{ color: "var(--text-muted)" }} />
+        </button>
+      )}
       {open && (
         <>
           {/* Outside-click dismiss — the dropdown must not trap mobile users. */}

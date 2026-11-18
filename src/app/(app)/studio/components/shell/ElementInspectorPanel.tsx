@@ -14,11 +14,12 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, RotateCcw, RotateCw, Sparkles, X } from "lucide-react";
+import { Check, Copy, Loader2, RotateCcw, RotateCw, Sparkles, X } from "lucide-react";
 import type { PreviewSelection } from "../StudioPreviewPanel";
 import type { StudioSelectionPayload } from "../../context/StudioContext";
 import type { ElementPatch } from "../../lib/element-edits";
 import { useSharedElementEdits } from "../../context/ElementEditsContext";
+import { copyToClipboard } from "@/lib/studio/message-copy";
 
 /** Accepts the PreviewPanel shape OR the pinned canonical payload — the
     ask-litt pin stamps StudioSelectionPayload into the same slot. */
@@ -38,6 +39,46 @@ function normalizeSelection(selection: ElementSelectionLike): PreviewSelection {
     };
   }
   return selection;
+}
+
+/**
+ * Box-model helpers (Kimi wiring item 14). The preview bridge captures
+ * the `margin` / `padding` / `border` SHORTHANDS from getComputedStyle
+ * (longhands are not captured), so the diagram parses the shorthand
+ * into its four sides. Values render exactly as captured — the diagram
+ * is read-only presentation of the selection's real computed styles.
+ */
+export function parseBoxShorthand(
+  value: string | undefined,
+): { top: string; right: string; bottom: string; left: string } | null {
+  if (!value) return null;
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0 || parts.length > 4) return null;
+  const [a, b, c, d] = parts;
+  switch (parts.length) {
+    case 1:
+      return { top: a, right: a, bottom: a, left: a };
+    case 2:
+      return { top: a, right: b, bottom: a, left: b };
+    case 3:
+      return { top: a, right: b, bottom: c, left: b };
+    default:
+      return { top: a, right: b, bottom: c, left: d };
+  }
+}
+
+/** Border width from the captured `border` shorthand ("1px solid
+ *  rgb(…)" → "1px"), or a captured border-width when present. */
+export function parseBorderWidth(styles: Record<string, string>): string | null {
+  if (styles["border-width"]) return styles["border-width"];
+  const border = styles["border"];
+  if (!border) return null;
+  return (
+    border
+      .trim()
+      .split(/\s+/)
+      .find((token) => token === "0" || /^\d+(\.\d+)?(px|rem|em)$/.test(token)) ?? null
+  );
 }
 
 const TEXT_TAGS = new Set([
@@ -138,6 +179,7 @@ export default function ElementInspectorPanel({
   const [savedFlash, setSavedFlash] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [selectorCopied, setSelectorCopied] = useState(false);
 
   const selKey = `${selection.selector}|${selection.tagName}`;
   useEffect(() => {
@@ -172,6 +214,13 @@ export default function ElementInspectorPanel({
 
   const styles = selection.styles ?? {};
   const tag = selection.tagName.toLowerCase();
+  // Box model (Kimi wiring item 14): parsed from the captured
+  // shorthands; the diagram renders only when the capture actually
+  // carries box data (or a rect) — nothing is estimated.
+  const marginBox = parseBoxShorthand(styles["margin"]);
+  const paddingBox = parseBoxShorthand(styles["padding"]);
+  const borderWidth = parseBorderWidth(styles);
+  const showBoxModel = Boolean(selection.rect || marginBox || paddingBox || borderWidth);
   const editable = edits.status === "ready" || edits.status === "applying";
   const showText = TEXT_TAGS.has(tag) || (!VOID_TAGS.has(tag) && !!selection.text);
 
@@ -191,11 +240,51 @@ export default function ElementInspectorPanel({
       <div className="shrink-0 px-3 pb-2 pt-3">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <div className="truncate text-[12px] font-bold" style={{ color: "var(--text-main)" }} title={selection.label}>
-              {selection.label}
+            <div className="flex items-center gap-1.5">
+              <div className="truncate text-[12px] font-bold" style={{ color: "var(--text-main)" }} title={selection.label}>
+                {selection.label}
+              </div>
+              {/* Tag chip (Kimi wiring item 14): <tag> plus the
+                  element's first class, from the captured attrs. */}
+              {tag && (
+                <span
+                  className="shrink-0 rounded px-1 py-px font-mono text-[9px]"
+                  style={{ backgroundColor: "rgba(124,58,237,0.14)", color: "var(--text-secondary)" }}
+                  data-testid="inspector-tag-chip"
+                >
+                  &lt;{tag}&gt;
+                  {(() => {
+                    const firstClass = (selection.attrs?.["class"] ?? selection.attrs?.["className"] ?? "")
+                      .trim()
+                      .split(/\s+/)
+                      .filter(Boolean)[0];
+                    return firstClass ? <span style={{ color: "var(--text-muted)" }}> .{firstClass}</span> : null;
+                  })()}
+                </span>
+              )}
             </div>
-            <div className="mt-0.5 truncate font-mono text-[10px]" style={{ color: "var(--text-muted)" }} title={selection.selector}>
-              {selection.selector}
+            <div className="mt-0.5 flex items-center gap-1">
+              <div className="truncate font-mono text-[10px]" style={{ color: "var(--text-muted)" }} title={selection.selector}>
+                {selection.selector}
+              </div>
+              {/* Copy selector (item 14) */}
+              <button
+                type="button"
+                aria-label="Copy selector"
+                title="Copy selector"
+                data-testid="inspector-copy-selector"
+                className="grid h-5 w-5 shrink-0 place-items-center rounded"
+                style={{ color: selectorCopied ? "#48EE38" : "var(--text-muted)" }}
+                onClick={() => {
+                  void copyToClipboard(selection.selector).then((ok) => {
+                    if (!ok) return;
+                    setSelectorCopied(true);
+                    window.setTimeout(() => setSelectorCopied(false), 1500);
+                  });
+                }}
+              >
+                {selectorCopied ? <Check size={11} /> : <Copy size={11} />}
+              </button>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
@@ -231,6 +320,54 @@ export default function ElementInspectorPanel({
           )}
         </div>
       </div>
+
+      {/* Box-model diagram (Kimi wiring item 14): margin / border /
+          padding zones with the captured per-side values, content
+          size in the center. Read-only — it presents the selection's
+          computed styles, it does not edit them (the Layout section
+          below owns edits). */}
+      {showBoxModel && (
+        <div className="mx-3 mb-2" data-testid="inspector-box-model">
+          <div className="mb-1" style={{ color: "var(--text-muted)", fontSize: 9, fontWeight: 800, letterSpacing: "0.1em" }}>
+            BOX MODEL
+          </div>
+          <div className="rounded-md border border-dashed px-1.5 py-1" style={{ borderColor: "rgba(255,255,255,0.18)" }}>
+            <div className="text-center font-mono text-[8px]" style={{ color: "var(--text-muted)" }}>
+              margin {marginBox?.top ?? "—"}
+            </div>
+            <div className="flex items-stretch gap-1">
+              <div className="flex items-center font-mono text-[8px]" style={{ color: "var(--text-muted)" }}>{marginBox?.left ?? "—"}</div>
+              <div className="flex-1 rounded border px-1.5 py-1" style={{ borderColor: "rgba(255,255,255,0.28)" }}>
+                <div className="text-center font-mono text-[8px]" style={{ color: "var(--text-muted)" }}>
+                  border {borderWidth ?? "—"}
+                </div>
+                <div className="rounded px-1.5 py-1" style={{ backgroundColor: "rgba(124,58,237,0.10)" }}>
+                  <div className="text-center font-mono text-[8px]" style={{ color: "var(--text-muted)" }}>
+                    padding {paddingBox?.top ?? "—"}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="font-mono text-[8px]" style={{ color: "var(--text-muted)" }}>{paddingBox?.left ?? "—"}</div>
+                    <div
+                      className="flex-1 rounded py-1 text-center font-mono text-[9px] font-bold"
+                      style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "var(--text-main)" }}
+                    >
+                      {selection.rect ? `${selection.rect.width} × ${selection.rect.height}` : "content"}
+                    </div>
+                    <div className="font-mono text-[8px]" style={{ color: "var(--text-muted)" }}>{paddingBox?.right ?? "—"}</div>
+                  </div>
+                  <div className="text-center font-mono text-[8px]" style={{ color: "var(--text-muted)" }}>
+                    {paddingBox?.bottom ?? "—"}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center font-mono text-[8px]" style={{ color: "var(--text-muted)" }}>{marginBox?.right ?? "—"}</div>
+            </div>
+            <div className="text-center font-mono text-[8px]" style={{ color: "var(--text-muted)" }}>
+              {marginBox?.bottom ?? "—"}
+            </div>
+          </div>
+        </div>
+      )}
 
       {lastError && (
         <div className="mx-3 mb-2 rounded-md border px-2 py-1.5 text-[10px]" style={{ borderColor: "rgba(239,68,68,0.35)", color: "#fca5a5" }}>

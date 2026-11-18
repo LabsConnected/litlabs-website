@@ -645,6 +645,16 @@ function CommandStudioContent() {
     if (!studioShellActive || !userId || !boardProjectId) return;
     const tool = searchParams.get("tool");
     if (!tool) return;
+    // ?tool=checks (Kimi wiring item 13): the Projects page's
+    // failed-project deep link. Checks is a board panel, not a stage
+    // surface, so it summons directly instead of using the station map.
+    if (tool === "checks") {
+      const key = `${boardProjectId}::${tool}`;
+      if (handledToolLinkRef.current === key) return;
+      handledToolLinkRef.current = key;
+      summonBoardPanel("health");
+      return;
+    }
     const surface = toolParamToStation(tool);
     if (!surface) return;
     const key = `${boardProjectId}::${tool}`;
@@ -728,6 +738,20 @@ function CommandStudioContent() {
     setDockTab(tab);
     setDockOpen(true);
   }, [studioShellActive, summonBoardPanel]);
+
+  // Media routing for the Files panel (Kimi wiring item 7): opening an
+  // image/video/audio file brings the Media surface forward (board:
+  // summon the Media panel; classic: the Media dock tab — both are
+  // handleOpenDockTab's existing routing). The path is intentionally
+  // not forwarded as a selection: workspace files are not Asset Lake
+  // entries (StudioAsset carries no workspace path), so summoning the
+  // panel is the honest routing — no fake per-file selection.
+  const handleOpenMediaFile = useCallback(
+    (_path: string) => {
+      handleOpenDockTab("media");
+    },
+    [handleOpenDockTab],
+  );
 
   // Agent-initiated dock intents (STUDIO_EVENT_OPEN_DOCK) are PRESELECTION
   // ONLY (Phase 0, Larry 2026-11-14): they may record which dock tab would
@@ -3191,6 +3215,7 @@ function CommandStudioContent() {
           textarea?.focus();
           setCompletion(null);
         }}
+        onOpenPreview={() => summonBoardPanel("preview")}
       />
       {chatErrorBanner}
       {/* Stop-and-ask project guard — pinned with the other decision
@@ -3461,6 +3486,7 @@ function CommandStudioContent() {
           onSaved={handleWorkspaceRevision}
           onMutation={handleWorkspaceRevision}
           onWorkspacePrepared={handleWorkspacePrepared}
+          onOpenMediaFile={handleOpenMediaFile}
         />
       </div>
     </div>
@@ -3487,6 +3513,12 @@ function CommandStudioContent() {
       lastRunFailureNote={lastRunFailureNote}
       onSelectionChange={setPreviewSelection}
       refreshKey={previewRefreshKey}
+      // Kimi wiring item 1: the failure surface's View logs summons the
+      // Terminal/Logs panel. In the pre-layout tree the board binding
+      // wired this prop on its own panel instance; the shared element
+      // carries it now (this element IS the board binding's full prop
+      // set), summoning the board Terminal panel.
+      onViewLogs={() => summonBoardPanel("terminal")}
     />
   );
 
@@ -3743,6 +3775,7 @@ function CommandStudioContent() {
             onSaved={handleWorkspaceRevision}
             onMutation={handleWorkspaceRevision}
             onWorkspacePrepared={handleWorkspacePrepared}
+            onOpenMediaFile={handleOpenMediaFile}
           />
         );
       case "images":
@@ -3945,6 +3978,7 @@ function CommandStudioContent() {
               ? setLayoutMode
               : undefined
           }
+          onReconnectWorkspaceAction={handlePrepareWorkspace}
         />
 
         {/* Export result toast — reports the server's real outcome. */}
@@ -4816,6 +4850,7 @@ function StudioWorkSurface({
   onDismissCompletion,
   onUndoCompletion,
   onContinueCompletion,
+  onOpenPreview,
   overflowDownloads = false,
   ptyUsable = false,
   suppressEmptyState = false,
@@ -4834,6 +4869,7 @@ function StudioWorkSurface({
   onDismissCompletion?: () => void;
   onUndoCompletion?: () => void;
   onContinueCompletion?: () => void;
+  onOpenPreview?: () => void;
   overflowDownloads?: boolean;
   /** Canonical runtime truth: is the interactive PTY usable right now. */
   ptyUsable?: boolean;
@@ -4889,6 +4925,7 @@ function StudioWorkSurface({
           onDismissCompletion={onDismissCompletion}
           onUndoCompletion={onUndoCompletion}
           onContinueCompletion={onContinueCompletion}
+          onOpenPreview={onOpenPreview}
           overflowDownloads={overflowDownloads}
           // Canonical runtime truth — the ONLY consumer path for PTY
           // usability outside useProjectRuntime itself.

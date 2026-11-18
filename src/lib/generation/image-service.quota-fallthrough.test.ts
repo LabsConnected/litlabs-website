@@ -115,6 +115,12 @@ function makeDeps(dispatchImpl: ImageServiceDeps["dispatch"]) {
         if (job.id === jobId) job.metadata = { ...job.metadata, ...updates };
       }
     },
+    getJob: async (jobId) => {
+      for (const job of jobs.values()) {
+        if (job.id === jobId) return job;
+      }
+      return null;
+    },
     getBalances: async () => ({ total: 1000 }),
     debit: async (_clerkId, amount, _reason, key) => {
       calls.debit.push({ amount, key });

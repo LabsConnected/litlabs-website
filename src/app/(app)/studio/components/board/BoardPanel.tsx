@@ -15,10 +15,21 @@
  * hard-coded surface colors.
  */
 
-import { useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 import { Maximize2, Minimize2, Minus, X } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import {
+  BOARD_PANEL_STATUS_COLORS,
+  type BoardPanelStatus,
+} from "../../stores/useBoardPanelStatusStore";
+import {
+  BOARD_ACCENT_VIOLET,
   BOARD_MIN_PANEL_HEIGHT,
   BOARD_MIN_PANEL_WIDTH,
   type BoardPanelId,
@@ -99,6 +110,18 @@ export interface BoardPanelProps {
    *  drag, no resize handles. The board stacks panels vertically and
    *  the user scrolls between them. */
   stacked?: boolean;
+  /** Panel icon for the header (Kimi wiring item 2): the same glyph the
+   *  toolbar summons this panel with, so headers and toolbar read as
+   *  one system. */
+  icon?: ReactNode;
+  /** Live status published by the panel's own real system (preview
+   *  stage, terminal connection, checks result, deploy state) — shown
+   *  as a dot in the header. Null/absent renders no dot: an unknown
+   *  state is never dressed up as ok. */
+  status?: BoardPanelStatus | null;
+  /** This panel is the frontmost on the board: it carries the emphasis
+   *  ring + deeper shadow (Kimi wiring item 2, from PanelFrame). */
+  front?: boolean;
   onRectChange: (id: BoardPanelId, rect: BoardRect) => void;
   onBringToFront: (id: BoardPanelId) => void;
   onMinimize: (id: BoardPanelId) => void;
@@ -115,6 +138,9 @@ export default function BoardPanel({
   maximized,
   scale = 1,
   stacked = false,
+  icon,
+  status,
+  front = false,
   onRectChange,
   onBringToFront,
   onMinimize,
@@ -124,6 +150,29 @@ export default function BoardPanel({
 }: BoardPanelProps) {
   const { tokens } = useTheme();
   const sessionRef = useRef<DragSession | null>(null);
+  // Spring settle (Kimi wiring item 2): a release-only flourish — when a
+  // drag/resize ends somewhere new, the panel plays one short settle
+  // keyframe. The drag engine above is untouched: geometry still comes
+  // from the store on every pointermove; this only animates a transform
+  // on the finished frame, and reduced-motion users never see it (the
+  // keyframe class is gated in globals.css).
+  const rectRef = useRef(rect);
+  // Mirror the latest committed rect into the ref from an effect (the
+  // drag session's onEnd reads it). Writing refs during render is
+  // banned by react-hooks/refs; the effect keeps it current enough —
+  // onEnd only asks "did the rect change at all", and every committed
+  // move updates it.
+  useEffect(() => {
+    rectRef.current = rect;
+  }, [rect]);
+  const [settling, setSettling] = useState(false);
+  const settleTimerRef = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (settleTimerRef.current !== null) window.clearTimeout(settleTimerRef.current);
+    },
+    [],
+  );
 
   const beginSession = (
     kind: DragSession["kind"],
@@ -173,8 +222,22 @@ export default function BoardPanel({
       }
     };
     const onEnd = (up: PointerEvent) => {
-      if (up.pointerId !== sessionRef.current?.pointerId) return;
+      const ended = sessionRef.current;
+      if (!ended || up.pointerId !== ended.pointerId) return;
       sessionRef.current = null;
+      // Settle only when the gesture actually moved the panel — a plain
+      // click-to-front must not bounce the panel.
+      const endRect = rectRef.current;
+      if (
+        endRect.x !== ended.startRect.x ||
+        endRect.y !== ended.startRect.y ||
+        endRect.width !== ended.startRect.width ||
+        endRect.height !== ended.startRect.height
+      ) {
+        setSettling(true);
+        if (settleTimerRef.current !== null) window.clearTimeout(settleTimerRef.current);
+        settleTimerRef.current = window.setTimeout(() => setSettling(false), 260);
+      }
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onEnd);
       window.removeEventListener("pointercancel", onEnd);
@@ -212,9 +275,10 @@ export default function BoardPanel({
       data-panel-id={id}
       aria-label={`${title} panel`}
       className={
-        stacked
+        (stacked
           ? "relative flex w-full shrink-0 flex-col overflow-hidden rounded-xl border shadow-lg"
-          : "absolute flex flex-col overflow-hidden rounded-xl border shadow-lg"
+          : "absolute flex flex-col overflow-hidden rounded-xl border shadow-lg") +
+        (settling ? " board-panel-settling" : "")
       }
       style={
         stacked
@@ -222,7 +286,7 @@ export default function BoardPanel({
               height: Math.min(Math.max(rect.height, 340), 620),
               zIndex,
               backgroundColor: tokens.surface,
-              borderColor: tokens.border,
+              borderColor: front ? BOARD_ACCENT_VIOLET : tokens.border,
               color: tokens.text,
             }
           : {
@@ -232,7 +296,10 @@ export default function BoardPanel({
               height: rect.height,
               zIndex,
               backgroundColor: tokens.surface,
-              borderColor: tokens.border,
+              borderColor: front ? BOARD_ACCENT_VIOLET : tokens.border,
+              boxShadow: front
+                ? `0 24px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px ${BOARD_ACCENT_VIOLET}`
+                : undefined,
               color: tokens.text,
             }
       }
@@ -245,6 +312,26 @@ export default function BoardPanel({
         onPointerDown={(event) => beginSession("move", event)}
         onDoubleClick={() => onToggleMaximize(id)}
       >
+        {icon && (
+          <span
+            className="flex shrink-0 items-center"
+            style={{ color: tokens.textMuted }}
+            aria-hidden
+          >
+            {icon}
+          </span>
+        )}
+        {status && (
+          <span
+            data-testid={`board-panel-status-${id}`}
+            data-status-tone={status.tone}
+            role="img"
+            aria-label={status.label}
+            title={status.label}
+            className={`h-2 w-2 shrink-0 rounded-full ${status.pulse ? "animate-pulse" : ""}`}
+            style={{ backgroundColor: BOARD_PANEL_STATUS_COLORS[status.tone] }}
+          />
+        )}
         <span className="min-w-0 flex-1 truncate text-xs font-semibold tracking-wide">
           {title}
         </span>

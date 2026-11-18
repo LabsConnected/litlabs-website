@@ -13,12 +13,15 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Search,
   Trash2,
   X,
 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useStudioContext } from "../context/StudioContext";
 import { STUDIO_EVENT_OPEN_FILE } from "@/lib/canvas/panel-actions";
+import { copyToClipboard } from "@/lib/studio/message-copy";
+import { useBoardPanelStatusStore } from "../stores/useBoardPanelStatusStore";
 import { attemptWorkspacePrepare, isHostExecSettled } from "@/lib/studio/host-exec-session";
 import { HOST_EXECUTION_UNAVAILABLE_MESSAGE } from "@/lib/projects/runtime-state";
 
@@ -38,6 +41,60 @@ const GIT_BADGE_COLORS: Record<NonNullable<FileEntry["gitStatus"]>, { bg: string
   U: { bg: "rgba(96,165,250,0.15)", color: "#60a5fa", label: "Untracked" },
   C: { bg: "rgba(34,211,238,0.15)", color: "#22d3ee", label: "Conflict" },
 };
+
+const GIT_STATUS_VALUES = new Set(["M", "A", "D", "U", "C"]);
+
+/** The files API returns a one-letter git status per entry (the Code
+ *  workspace's parser already keeps it); validate before trusting it. */
+function parseGitStatus(value: unknown): FileEntry["gitStatus"] {
+  return typeof value === "string" && GIT_STATUS_VALUES.has(value)
+    ? (value as FileEntry["gitStatus"])
+    : undefined;
+}
+
+/**
+ * Media file extensions (Kimi wiring item 7): image / video / audio
+ * files belong to the Media panel, not the text editor. Extension-based
+ * because the files API carries no media kind — the same extensions the
+ * Asset Lake classifies by.
+ */
+const MEDIA_EXTENSIONS = new Set([
+  "png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico",
+  "mp4", "webm", "mov", "m4v",
+  "mp3", "wav", "ogg", "m4a", "flac", "aac",
+]);
+
+export function isMediaPath(path: string): boolean {
+  const extension = path.split(".").pop()?.toLowerCase() ?? "";
+  return MEDIA_EXTENSIONS.has(extension);
+}
+
+/**
+ * Parse one directory listing from the files API into FileEntry rows
+ * (null when the payload is malformed). Shared by the user-facing
+ * loader, its prepare-retry path, and the search expansion walk so all
+ * three read gitStatus identically.
+ */
+function parseFileEntries(
+  payload: Record<string, unknown> | null,
+  directory: string,
+): FileEntry[] | null {
+  if (!payload || !Array.isArray(payload.entries)) return null;
+  return payload.entries
+    .flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const raw = entry as { name?: unknown; type?: unknown; size?: unknown; gitStatus?: unknown };
+      if (typeof raw.name !== "string" || (raw.type !== "file" && raw.type !== "folder")) return [];
+      return [{
+        name: raw.name,
+        type: raw.type,
+        size: typeof raw.size === "number" ? raw.size : undefined,
+        gitStatus: parseGitStatus(raw.gitStatus),
+        path: directory === "." ? raw.name : `${directory}/${raw.name}`,
+      } satisfies FileEntry];
+    })
+    .sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === "folder" ? -1 : 1));
+}
 
 function GitBadge({ status }: { status: NonNullable<FileEntry["gitStatus"]> }) {
   const colors = GIT_BADGE_COLORS[status];
@@ -158,6 +215,7 @@ export default function StudioProjectFiles({
   onSaved,
   onMutation,
   onWorkspacePrepared,
+  onOpenMediaFile,
 }: {
   projectId: string | null;
   repositoryName: string | null;
@@ -167,6 +225,13 @@ export default function StudioProjectFiles({
   onSaved?: () => void;
   onMutation?: () => void;
   onWorkspacePrepared?: () => void;
+  /**
+   * Kimi wiring item 7: opening an image/video/audio file routes to
+   * the Media surface instead of the text editor. The host decides how
+   * (board: summon the Media panel; stage: open the Media dock tab).
+   * When absent, media files keep the honest not-text-editable state.
+   */
+  onOpenMediaFile?: (path: string) => void;
 }) {
   const { getToken } = useClerkAuth();
   const { setActiveFile } = useStudioContext();
@@ -195,6 +260,19 @@ export default function StudioProjectFiles({
    * Save is blocked until the user reloads or explicitly keeps their version.
    */
   const [conflictNotice, setConflictNotice] = useState<string | null>(null);
+  // Kimi wiring item 7: filename search + row context menu. The tree
+  // loads lazily per directory, so search first expands the tree —
+  // walking folders it has not loaded yet (capped) — and only then
+  // matches, so results are honest full-path matches, not just the
+  // rows that happen to be on screen.
+  const [query, setQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<FileEntry[] | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ entry: FileEntry; x: number; y: number } | null>(null);
+  const entriesRef = useRef(entries);
+  useEffect(() => {
+    entriesRef.current = entries;
+  }, [entries]);
 
   // onWorkspacePrepared is invoked through a ref so loadDirectory never
   // depends on the prop's identity: a parent passing an inline arrow can
@@ -311,20 +389,14 @@ export default function StudioProjectFiles({
         signal: AbortSignal.timeout(20_000),
       });
       const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
-      if (!response.ok || !payload || !Array.isArray(payload.entries)) {
+      // parseFileEntries keeps the API's git status (Kimi wiring items
+      // 7 + 11): the row badges and the board toolbar's changed-files
+      // count both read it. The inline parser this replaces dropped it,
+      // so the badges that already existed in this file never rendered.
+      const nextEntries = parseFileEntries(payload, safeDirectory);
+      if (!response.ok || !nextEntries) {
         throw new Error(typeof payload?.error === "string" ? payload.error : `Request failed (${response.status})`);
       }
-      const nextEntries = payload.entries.flatMap((entry) => {
-        if (!entry || typeof entry !== "object") return [];
-        const raw = entry as { name?: unknown; type?: unknown; size?: unknown };
-        if (typeof raw.name !== "string" || (raw.type !== "file" && raw.type !== "folder")) return [];
-        return [{
-          name: raw.name,
-          type: raw.type,
-          size: typeof raw.size === "number" ? raw.size : undefined,
-          path: safeDirectory === "." ? raw.name : `${safeDirectory}/${raw.name}`,
-        } satisfies FileEntry];
-      }).sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "folder" ? -1 : 1);
       setEntries((current) => ({ ...current, [safeDirectory]: nextEntries }));
     } catch (loadError) {
       const msg = loadError instanceof Error ? loadError.message : "Failed to load project files";
@@ -369,18 +441,8 @@ export default function StudioProjectFiles({
           window.dispatchEvent(new CustomEvent("studio:workspace-recovered", { detail: { projectId, workspaceId: prepPayload.workspaceId } }));
           await new Promise((resolve) => setTimeout(resolve, 600));
           const retryPayload = await requestJson(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`);
-          if (retryPayload && Array.isArray(retryPayload.entries)) {
-            const retryEntries = retryPayload.entries.flatMap((entry) => {
-              if (!entry || typeof entry !== "object") return [];
-              const raw = entry as { name?: unknown; type?: unknown; size?: unknown };
-              if (typeof raw.name !== "string" || (raw.type !== "file" && raw.type !== "folder")) return [];
-              return [{
-                name: raw.name,
-                type: raw.type,
-                size: typeof raw.size === "number" ? raw.size : undefined,
-                path: safeDirectory === "." ? raw.name : `${safeDirectory}/${raw.name}`,
-              } satisfies FileEntry];
-            }).sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "folder" ? -1 : 1);
+          const retryEntries = parseFileEntries(retryPayload, safeDirectory);
+          if (retryEntries) {
             setEntries((current) => ({ ...current, [safeDirectory]: retryEntries }));
             return;
           }
@@ -397,6 +459,88 @@ export default function StudioProjectFiles({
       if (!silent) setLoading(false);
     }
   }, [projectId, requestJson, runPrepare, preparing, authHeaders]);
+
+  // Search expansion loader (Kimi wiring item 7): like loadDirectory
+  // but with NO error/recovery side effects — a folder that fails to
+  // load during a background search walk simply stays unexpanded, and
+  // the match list is computed from whatever the tree actually holds.
+  const expandDirectory = useCallback(async (directory: string) => {
+    if (!projectId) return;
+    const safeDirectory = normalizePath(directory);
+    try {
+      const response = await fetch(`/api/studio-projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(safeDirectory)}`, {
+        credentials: "include",
+        headers: await authHeaders(),
+        signal: AbortSignal.timeout(20_000),
+      });
+      const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+      if (!response.ok) return;
+      const parsed = parseFileEntries(payload, safeDirectory);
+      if (parsed) setEntries((current) => ({ ...current, [safeDirectory]: parsed }));
+    } catch {
+      // Best-effort: expansion keeps what the tree already has.
+    }
+  }, [authHeaders, projectId]);
+  const expandDirectoryRef = useRef(expandDirectory);
+  useEffect(() => {
+    expandDirectoryRef.current = expandDirectory;
+  }, [expandDirectory]);
+
+  // Filename search: expand the tree (bounded passes over unloaded
+  // folders), then match file paths against the query. While expansion
+  // runs the panel shows an honest "searching" state — results are
+  // never just the rows that happened to be loaded.
+  useEffect(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) {
+      setSearching(false);
+      setSearchResults(null);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    void (async () => {
+      for (let pass = 0; pass < 24 && !cancelled; pass += 1) {
+        const snapshot = entriesRef.current;
+        const unloaded = Object.values(snapshot)
+          .flat()
+          .filter((entry) => entry.type === "folder" && !(entry.path in snapshot))
+          .map((entry) => entry.path);
+        if (unloaded.length === 0) break;
+        await Promise.all(
+          unloaded.slice(0, 8).map((dir) => expandDirectoryRef.current(dir)),
+        );
+      }
+      if (cancelled) return;
+      const matches = Object.values(entriesRef.current)
+        .flat()
+        .filter((entry) => entry.type === "file" && entry.path.toLowerCase().includes(q))
+        .sort((a, b) => a.path.localeCompare(b.path));
+      setSearchResults(matches);
+      setSearching(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [query]);
+
+  // Kimi wiring item 11: publish the changed-files count (from the
+  // gitStatus the API returns, over the directories loaded so far —
+  // a full search expansion makes it tree-wide) as this panel's board
+  // status badge. Zero changes publishes nothing: no badge, no dot.
+  const setPanelStatus = useBoardPanelStatusStore((s) => s.setPanelStatus);
+  useEffect(() => {
+    const changed = Object.values(entries)
+      .flat()
+      .filter((entry) => entry.gitStatus).length;
+    setPanelStatus(
+      "files",
+      changed > 0
+        ? { tone: "working", label: `${changed} file${changed === 1 ? "" : "s"} changed`, badge: changed }
+        : null,
+    );
+  }, [entries, setPanelStatus]);
+  useEffect(() => () => setPanelStatus("files", null), [setPanelStatus]);
 
   useEffect(() => {
     setEntries({});
@@ -523,6 +667,14 @@ export default function StudioProjectFiles({
 
   const openFile = useCallback(async (entry: FileEntry) => {
     if (entry.type !== "file") return;
+    // Type-aware routing (Kimi wiring item 7): image/video/audio files
+    // open in the Media surface when the host provides one — they are
+    // not text, and the Asset Lake is their home. Without a host
+    // handler they fall through to the honest not-text-editable state.
+    if (isMediaPath(entry.path) && onOpenMediaFile) {
+      onOpenMediaFile(entry.path);
+      return;
+    }
     if (dirty && !window.confirm("Discard unsaved changes?")) return;
     setActivePath(entry.path);
     setActiveFile(entry.path); // Drive canonical StudioContext.activeFile
@@ -563,7 +715,7 @@ export default function StudioProjectFiles({
     } finally {
       setFileLoading(false);
     }
-  }, [dirty, projectId, requestJson]);
+  }, [dirty, onOpenMediaFile, projectId, requestJson]);
 
   // Listen for the ActionPanel file tree's "open this file" request
   // (studio.open_file action). Selects the file through the same openFile
@@ -672,7 +824,16 @@ export default function StudioProjectFiles({
       const isOpen = expanded.has(entry.path);
       return (
         <div key={entry.path}>
-          <div className="group relative flex min-w-0 items-center gap-1 rounded-lg hover:bg-black/5" style={{ paddingLeft: `${Math.min(depth, 5) * 10 + 2}px` }}>
+          <div
+            className="group relative flex min-w-0 items-center gap-1 rounded-lg hover:bg-black/5"
+            style={{ paddingLeft: `${Math.min(depth, 5) * 10 + 2}px` }}
+            onContextMenu={(event) => {
+              // Row context menu (Kimi wiring item 7): Open / Open in
+              // Media / Copy path. Position is clamped at render time.
+              event.preventDefault();
+              setContextMenu({ entry, x: event.clientX, y: event.clientY });
+            }}
+          >
             <button
               type="button"
               onClick={() => entry.type === "folder" ? void toggleFolder(entry) : void openFile(entry)}
@@ -765,6 +926,25 @@ export default function StudioProjectFiles({
         <span className="ml-auto shrink-0 px-1 text-[9px]" style={{ color: "var(--text-muted)" }}>{loading ? "Loading…" : `${Object.values(entries).flat().length} loaded`}</span>
       </div>
 
+      {/* Filename search (Kimi wiring item 7) */}
+      <div className="flex shrink-0 items-center gap-1.5 rounded-lg border px-2" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
+        <Search size={12} className="shrink-0" style={{ color: "var(--text-muted)" }} />
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search files…"
+          className="min-h-9 min-w-0 flex-1 bg-transparent text-[10px] outline-none"
+          style={{ color: "var(--text-primary)" }}
+          aria-label="Search files by name or path"
+          data-testid="files-search-input"
+        />
+        {query && (
+          <button type="button" onClick={() => setQuery("")} className="grid h-7 w-7 shrink-0 place-items-center rounded-md hover:bg-white/8" style={{ color: "var(--text-muted)" }} aria-label="Clear file search">
+            <X size={11} />
+          </button>
+        )}
+      </div>
+
       {/* Split by the component's OWN width, not the viewport's: this
           panel is mounted both as the wide Files stage and inside the
           ~286px Files sidebar, and the old viewport-xl split left the
@@ -773,7 +953,32 @@ export default function StudioProjectFiles({
           under the tree instead of starving it. */}
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 @min-[560px]:grid-cols-[minmax(130px,0.8fr)_minmax(0,1.7fr)]" data-testid="studio-project-files-layout">
         <div className="min-h-28 overflow-y-auto rounded-xl border p-1.5 @min-[560px]:min-h-0" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
-          {loading && !entries["."] ? <div className="flex items-center gap-2 px-2 py-3 text-[10px]" style={{ color: "var(--text-muted)" }}><Loader2 size={12} className="animate-spin" /> Loading files…</div> : entries["."]?.length ? renderEntries(".") : <div className="px-2 py-3 text-[10px]" style={{ color: "var(--text-muted)" }}>No files found.</div>}
+          {query.trim() ? (
+            // Search mode: flat full-path matches across the expanded
+            // tree (the search effect loads unloaded folders first).
+            searching ? (
+              <div className="flex items-center gap-2 px-2 py-3 text-[10px]" style={{ color: "var(--text-muted)" }}><Loader2 size={12} className="animate-spin" /> Searching files…</div>
+            ) : searchResults && searchResults.length > 0 ? (
+              <div data-testid="files-search-results">
+                {searchResults.map((entry) => (
+                  <button
+                    key={entry.path}
+                    type="button"
+                    onClick={() => void openFile(entry)}
+                    className="flex min-h-10 w-full min-w-0 items-center gap-1.5 rounded-lg px-1.5 text-left text-[10px] hover:bg-black/5"
+                    style={{ color: activePath === entry.path ? "var(--litt-primary)" : "var(--text-secondary)" }}
+                    title={entry.path}
+                  >
+                    <FileText size={13} className="shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">{entry.path}</span>
+                    {entry.gitStatus && <GitBadge status={entry.gitStatus} />}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="px-2 py-3 text-[10px]" style={{ color: "var(--text-muted)" }}>No files match &ldquo;{query.trim()}&rdquo;.</div>
+            )
+          ) : loading && !entries["."] ? <div className="flex items-center gap-2 px-2 py-3 text-[10px]" style={{ color: "var(--text-muted)" }}><Loader2 size={12} className="animate-spin" /> Loading files…</div> : entries["."]?.length ? renderEntries(".") : <div className="px-2 py-3 text-[10px]" style={{ color: "var(--text-muted)" }}>No files found.</div>}
         </div>
 
         <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border" style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-card)" }}>
@@ -823,6 +1028,78 @@ export default function StudioProjectFiles({
           ) : <div className="flex flex-1 items-center justify-center px-5 text-center text-[10px] leading-5" style={{ color: "var(--text-muted)" }}>Select a text file to inspect and edit it. Changes stay local until you press Save.</div>}
         </div>
       </div>
+
+      {/* Row context menu (Kimi wiring item 7) — clamped inside the
+          viewport; a transparent backdrop closes it on any outside
+          press. Only actions the row really supports: Open (editor or
+          folder toggle), Open in Media for media files when the host
+          routes them, Copy path. */}
+      {contextMenu && (
+        <>
+          <button
+            type="button"
+            aria-label="Close file menu"
+            className="fixed inset-0 z-40 cursor-default"
+            style={{ background: "transparent" }}
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(event) => { event.preventDefault(); setContextMenu(null); }}
+          />
+          <div
+            role="menu"
+            data-testid="files-context-menu"
+            className="fixed z-50 w-44 overflow-hidden rounded-lg border py-1 shadow-xl"
+            style={{
+              left: Math.max(4, Math.min(contextMenu.x, (typeof window !== "undefined" ? window.innerWidth : 320) - 184)),
+              top: Math.max(4, Math.min(contextMenu.y, (typeof window !== "undefined" ? window.innerHeight : 480) - 132)),
+              backgroundColor: "var(--studio-card)",
+              borderColor: "var(--studio-border)",
+            }}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className="flex min-h-9 w-full items-center px-3 text-left text-[10px] font-bold hover:bg-white/8"
+              style={{ color: "var(--text-primary)" }}
+              onClick={() => {
+                const entry = contextMenu.entry;
+                setContextMenu(null);
+                if (entry.type === "folder") void toggleFolder(entry);
+                else void openFile(entry);
+              }}
+            >
+              Open
+            </button>
+            {contextMenu.entry.type === "file" && isMediaPath(contextMenu.entry.path) && onOpenMediaFile && (
+              <button
+                type="button"
+                role="menuitem"
+                className="flex min-h-9 w-full items-center px-3 text-left text-[10px] font-bold hover:bg-white/8"
+                style={{ color: "var(--text-primary)" }}
+                onClick={() => {
+                  const path = contextMenu.entry.path;
+                  setContextMenu(null);
+                  onOpenMediaFile(path);
+                }}
+              >
+                Open in Media
+              </button>
+            )}
+            <button
+              type="button"
+              role="menuitem"
+              className="flex min-h-9 w-full items-center px-3 text-left text-[10px] font-bold hover:bg-white/8"
+              style={{ color: "var(--text-primary)" }}
+              onClick={() => {
+                const path = contextMenu.entry.path;
+                setContextMenu(null);
+                void copyToClipboard(path);
+              }}
+            >
+              Copy path
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

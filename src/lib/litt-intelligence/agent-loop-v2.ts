@@ -1232,6 +1232,52 @@ async function createAfterRunCheckpoint(
 }
 
 /**
+ * Round 14 — the after-run checkpoint is time-bounded.
+ *
+ * createAfterRunCheckpoint is a sandbox transport operation. Both
+ * loop tails used to AWAIT it BEFORE emitting "finished" and
+ * returning, so a sick sandbox data path could hold a completed
+ * run's settlement hostage indefinitely — the loop simply never
+ * returned, and every downstream settlement (paused-run row,
+ * transcript writeback, action-run status) never happened. The
+ * checkpoint is best-effort by design (undefined on failure); a
+ * hang is one more failure shape, not a settlement blocker. The
+ * tails now emit "finished" first and call this bounded version;
+ * on timeout the run settles without a checkpoint.
+ *
+ * The checkpoint's progress events are gated once the race is lost
+ * so a late completion cannot emit a "checkpoint" event after the
+ * run's "finished" event already closed the stream.
+ */
+export const AFTER_RUN_CHECKPOINT_TIMEOUT_MS = 30_000;
+
+async function createAfterRunCheckpointBounded(
+  transport: WorkspaceTransport,
+  workspaceChange: WorkspaceChangeEvidence | undefined,
+  request: string | null,
+  localProgress: ProgressEmitter,
+): Promise<{ checkpointId: string; label: string; gitSha: string } | undefined> {
+  if (workspaceChange?.status !== "changed") return undefined;
+  let eventsLive = true;
+  const gatedProgress = new ProgressEmitter((event) => {
+    if (eventsLive) localProgress.emit(event);
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      createAfterRunCheckpoint(transport, workspaceChange, request, gatedProgress),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), AFTER_RUN_CHECKPOINT_TIMEOUT_MS);
+        (timer as { unref?: () => void }).unref?.();
+      }),
+    ]);
+  } finally {
+    eventsLive = false;
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
  * What re-reading the workspace says about a claimed mutation. `verified`
  * is deliberately tri-state — "the claim is confirmed" / "the claim is
  * contradicted" / "could not check" — so a check that could not run is
@@ -2118,6 +2164,9 @@ async function runAgentLoopV2Inner(
   let baselineCheckpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
   const toolCallLog: AgentToolCallLogEntry[] = [];
   let completedDeployment: CompletedDeployment | null = null;
+  // Round 14: images generated during this run, for the inline chat
+  // render appended at the tail (readChatImageOutcome).
+  const chatImages: ChatImageOutcome[] = [];
   // Bounded recovery when the model announces more work but emits no tool
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
@@ -2914,6 +2963,8 @@ async function runAgentLoopV2Inner(
         recordVerificationEvidence(runObs, "deployment", deploymentOutcome.publicUrl);
       }
       completedDeployment = deploymentOutcome ?? completedDeployment;
+      const chatImage = readChatImageOutcome(toolCall.toolId, result.result);
+      if (chatImage) chatImages.push(chatImage);
       if (qualitySession) {
         noteToolResult(
           qualitySession,
@@ -3180,7 +3231,15 @@ async function runAgentLoopV2Inner(
     settlement.completedWithWarning && !completedDeployment
       ? settlement.completedWithWarning
       : gatedFinalText;
-  const afterCheckpoint = await createAfterRunCheckpoint(transport, workspaceChange, userMessage, localProgress);
+  // Round 14: generated images render inline in the settled text —
+  // appended here, by the loop, only on a completed settlement.
+  const finalTextWithChatImages =
+    settlement.outcome === "completed"
+      ? appendChatImagesToFinalText(settledFinalText, chatImages)
+      : settledFinalText;
+  // Round 14: "finished" is emitted BEFORE the after-run checkpoint,
+  // and the checkpoint is time-bounded — settlement must never wait
+  // on a sandbox transport operation (createAfterRunCheckpointBounded).
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
     ...(cancelled
@@ -3198,9 +3257,10 @@ async function runAgentLoopV2Inner(
             (qualityFinale ? qualityFinale.verdict.ok : true),
         }),
   } as ProgressEvent);
+  const afterCheckpoint = await createAfterRunCheckpointBounded(transport, workspaceChange, userMessage, localProgress);
 
   return {
-    finalText: settledFinalText,
+    finalText: finalTextWithChatImages,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -3289,6 +3349,59 @@ function readDeploymentOutcome(toolId: string, result: unknown): CompletedDeploy
     deploymentId: typeof payload.deployment?.deploymentId === "string" ? payload.deployment.deploymentId : null,
     publicUrl: url,
   };
+}
+
+/** A generated image that should render inline in the chat outcome. */
+export interface ChatImageOutcome {
+  url: string;
+  prompt: string;
+}
+
+/**
+ * Round 14 — read the UI-only chatImage payload the registry
+ * preserves on a saved image.generate result
+ * (maybeAutoInsertGeneratedImage). The handler's own markdown is
+ * stripped on save success so the model never re-emits it; this
+ * payload is how the image still renders in chat — the loop
+ * collects it and appends the render markdown to the settled final
+ * text itself (appendChatImagesToFinalText), at the tail, where no
+ * model turn can mangle or drop it.
+ */
+function readChatImageOutcome(toolId: string, result: unknown): ChatImageOutcome | null {
+  if (toolId !== "image.generate" || !result || typeof result !== "object") return null;
+  const payload = result as {
+    success?: boolean;
+    chatImage?: { url?: unknown; prompt?: unknown };
+  };
+  if (payload.success !== true) return null;
+  const url = typeof payload.chatImage?.url === "string" ? payload.chatImage.url : null;
+  if (!url) return null;
+  return {
+    url,
+    prompt:
+      typeof payload.chatImage?.prompt === "string" && payload.chatImage.prompt
+        ? payload.chatImage.prompt
+        : "Generated image",
+  };
+}
+
+/**
+ * Append collected chat images to a settled final text as markdown,
+ * deduped by URL. Called only for completed settlements — a failed
+ * run's closing text stays failure-honest, with no success imagery
+ * pasted onto it.
+ */
+function appendChatImagesToFinalText(finalText: string, images: ChatImageOutcome[]): string {
+  if (images.length === 0) return finalText;
+  const seen = new Set<string>();
+  const blocks: string[] = [];
+  for (const image of images) {
+    if (seen.has(image.url)) continue;
+    seen.add(image.url);
+    blocks.push(`![${image.prompt}](${image.url})`);
+  }
+  if (blocks.length === 0) return finalText;
+  return `${finalText}\n\n${blocks.join("\n\n")}`;
 }
 
 /** Closing text when the provider failed but a deployment had succeeded. */
@@ -3409,6 +3522,8 @@ export interface DeferredToolBatchState {
   mutationBatchPending: boolean;
   batchHasMutation: boolean;
   completedDeployment: CompletedDeployment | null;
+  /** Round 14: chat images collected inside the deferred batch (shared array reference with the caller). */
+  chatImages: ChatImageOutcome[];
   /** Bounded read-loop nudges spent — shared with the resumed loop. */
   readLoopNudges?: number;
   /**
@@ -3708,6 +3823,8 @@ export async function executeDeferredToolCalls(
       persisted: mutationCheck?.verified ?? undefined,
     });
     state.completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? state.completedDeployment;
+    const deferredChatImage = readChatImageOutcome(toolCall.toolId, result.result);
+    if (deferredChatImage) state.chatImages.push(deferredChatImage);
     if (ctx.qualitySession) {
       noteToolResult(
         ctx.qualitySession,
@@ -3938,6 +4055,10 @@ async function resumeAgentLoopV2Inner(
   // just what ran after the gate.
   const toolCallLog: AgentToolCallLogEntry[] = [...(resume.priorToolCalls ?? [])];
   let completedDeployment: CompletedDeployment | null = null;
+  // Round 14: images generated during this run (the approved call,
+  // deferred batch, and main loop all collect), rendered inline in
+  // the settled text at the tail.
+  const chatImages: ChatImageOutcome[] = [];
   // NOTE: checkpoints are now created before EVERY mutation, so this flag no
   // longer gates anything. It is retained only because it is part of the
   // DeferredToolBatchState shape threaded through pause/resume records.
@@ -4062,6 +4183,8 @@ async function resumeAgentLoopV2Inner(
     });
     recordObsApproval(resumeRunObs, resume.toolId, "granted");
     completedDeployment = readDeploymentOutcome(resume.toolId, result.result) ?? completedDeployment;
+    const approvedChatImage = readChatImageOutcome(resume.toolId, result.result);
+    if (approvedChatImage) chatImages.push(approvedChatImage);
     // Acceptance 2026-09-28: the APPROVED tool — the actual edit in an
     // approval-gated run — was never fed to the quality ledger, so a
     // successful edit still reported "build (pending)". Record it like
@@ -4174,6 +4297,7 @@ async function resumeAgentLoopV2Inner(
       mutationBatchPending,
       batchHasMutation,
       completedDeployment,
+      chatImages,
       readLoopNudges,
     };
     const deferredResult = await executeDeferredToolCalls(resume.deferredToolCalls, {
@@ -4642,6 +4766,8 @@ async function resumeAgentLoopV2Inner(
         persisted: mutationCheck?.verified ?? undefined,
       });
       completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? completedDeployment;
+      const batchChatImage = readChatImageOutcome(toolCall.toolId, result.result);
+      if (batchChatImage) chatImages.push(batchChatImage);
       if (qualitySession) {
         noteToolResult(
           qualitySession,
@@ -4844,12 +4970,14 @@ async function resumeAgentLoopV2Inner(
     settlement.completedWithWarning && !completedDeployment
       ? settlement.completedWithWarning
       : gatedFinalText;
-  const afterCheckpoint = await createAfterRunCheckpoint(
-    transport,
-    workspaceChange,
-    cfg.qualityLoop?.userRequest ?? null,
-    localProgress,
-  );
+  // Round 14: generated images render inline in the settled text —
+  // appended here, by the loop, only on a completed settlement.
+  const finalTextWithChatImages =
+    settlement.outcome === "completed"
+      ? appendChatImagesToFinalText(settledFinalText, chatImages)
+      : settledFinalText;
+  // Round 14: "finished" before the bounded after-run checkpoint —
+  // identical to the initial loop's tail (see there).
   localProgress.emit({
     type: cancelled ? "cancelled" : "finished",
     ...(cancelled
@@ -4866,9 +4994,15 @@ async function resumeAgentLoopV2Inner(
             (qualityFinale ? qualityFinale.verdict.ok : true),
         }),
   } as ProgressEvent);
+  const afterCheckpoint = await createAfterRunCheckpointBounded(
+    transport,
+    workspaceChange,
+    cfg.qualityLoop?.userRequest ?? null,
+    localProgress,
+  );
 
   return {
-    finalText: settledFinalText,
+    finalText: finalTextWithChatImages,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,

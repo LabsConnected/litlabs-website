@@ -193,6 +193,22 @@ export async function maybeAutoInsertGeneratedImage(
         savedToProject: true,
         projectPath: saved.path,
         sitePath: saved.sitePath,
+        // Round 14: a UI-only chat payload survives the strip. The
+        // markdown was removed because the MODEL must never re-emit
+        // it — but dropping it also dropped the only inline-render
+        // channel, so a saved image never appeared in chat (the
+        // 2026-11-17 lion proof). chatImage carries no instruction
+        // for the model; the agent loop reads it from the result
+        // (readChatImageOutcome) and appends the render markdown to
+        // the settled final text itself. downloadUrl already rides
+        // the result, so this exposes nothing new to the model.
+        chatImage: {
+          url: r.downloadUrl,
+          prompt:
+            typeof r.title === "string" && r.title.length > 0
+              ? r.title
+              : "Generated image",
+        },
         siteReference:
           `The image is already saved in the project at ${saved.sitePath}. ` +
           `Reference it in the site's HTML as <img src="${saved.sitePath}" /> — ` +

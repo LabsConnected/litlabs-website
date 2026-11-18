@@ -10,6 +10,10 @@ import {
   HOST_EXECUTION_UNAVAILABLE_MESSAGE,
 } from "@/lib/projects/runtime-state";
 import { useExecutionStore } from "../stores/useExecutionStore";
+import {
+  useBoardPanelStatusStore,
+  type BoardPanelStatus,
+} from "../stores/useBoardPanelStatusStore";
 import { StudioSecretsPanel } from "./StudioSecretsPanel";
 import StudioPublishControls from "./StudioPublishControls";
 import { downloadProjectExport } from "../lib/export-project";
@@ -267,6 +271,7 @@ export default function StudioPreviewPanel({
   startGraceMs = STUCK_NOT_STARTED_MS,
   lastRunFailureNote = null,
   onSelectionChange,
+  onViewLogs,
   lockSelection = false,
   inspectorTool = "select",
   snapEnabled = true,
@@ -294,6 +299,11 @@ export default function StudioPreviewPanel({
    */
   lastRunFailureNote?: string | null;
   onSelectionChange?: (selection: PreviewSelection | null) => void;
+  /** "View logs" on the failure surface (Kimi wiring item 1): the board
+   *  binding summons the Terminal / Logs panel. Absent outside the
+   *  board — the failure surface then falls back to this panel's own
+   *  logs strip when it has lines. */
+  onViewLogs?: () => void;
   /** Canvas mode: selection stays on regardless of the toolbar toggle. */
   lockSelection?: boolean;
   /** Active canvas tool forwarded to the in-frame inspector bridge. */
@@ -1286,6 +1296,81 @@ export default function StudioPreviewPanel({
   const displayDetail = showStarterNotice ? starterDetail : detail;
   const displayDotColor = showStarterNotice ? STATUS_DOT_COLOR.not_started : dotColor;
 
+  // ── Kimi wiring item 1: staged-loading timer + curtain reveal ──────
+  // Elapsed time is measured from the moment THIS panel entered a start
+  // state — a real measurement of the wait, never a simulated progress
+  // value. It resets when the start settles.
+  const isStarting = state === "starting" || state === "restarting";
+  const startStampRef = useRef<number | null>(null);
+  const [startElapsedMs, setStartElapsedMs] = useState(0);
+  useEffect(() => {
+    if (!isStarting) {
+      startStampRef.current = null;
+      setStartElapsedMs(0);
+      return;
+    }
+    if (startStampRef.current === null) startStampRef.current = Date.now();
+    const id = window.setInterval(() => {
+      if (startStampRef.current !== null) {
+        setStartElapsedMs(Date.now() - startStampRef.current);
+      }
+    }, 100);
+    return () => window.clearInterval(id);
+  }, [isStarting]);
+
+  // Curtain-lift reveal: each transition INTO ready (from a start or a
+  // failure — not ready↔stale wobble) replays one short blur→sharp lift
+  // with an accent scanline. Reduced motion collapses it to a plain
+  // opacity fade (globals.css kills the scanline/blur there).
+  const prevStateRef = useRef(state);
+  const [revealing, setRevealing] = useState(false);
+  useEffect(() => {
+    const prev = prevStateRef.current;
+    prevStateRef.current = state;
+    if (state !== "ready" || prev === "ready" || prev === "stale") return;
+    setRevealing(true);
+    const id = window.setTimeout(() => setRevealing(false), 460);
+    return () => window.clearTimeout(id);
+  }, [state]);
+
+  // ── Kimi wiring item 2: publish this panel's own status for the
+  // board header dot. The mapping reads only states this panel already
+  // derives — no new data, no blended aggregate.
+  const setPanelStatus = useBoardPanelStatusStore((s) => s.setPanelStatus);
+  useEffect(() => {
+    const status: BoardPanelStatus =
+      state === "ready"
+        ? frameFailed
+          ? { tone: "error", label: "Preview failed to load" }
+          : stylingFailed
+            ? { tone: "working", label: "Preview styling failed to apply" }
+            : { tone: "ready", label: "Preview ready" }
+        : state === "starting"
+          ? {
+              tone: "working",
+              label:
+                startPhase === "provision"
+                  ? "Provisioning workspace"
+                  : startPhase === "devserver"
+                    ? "Starting dev server"
+                    : "Preparing preview…",
+              pulse: true,
+            }
+          : state === "restarting"
+            ? { tone: "working", label: "Restarting dev server", pulse: true }
+            : state === "loading"
+              ? { tone: "working", label: "Checking preview status…", pulse: true }
+              : state === "stale"
+                ? { tone: "working", label: "Preview may be stale" }
+                : state === "failed"
+                  ? { tone: "error", label: "Preview failed to start" }
+                  : state === "unreachable"
+                    ? { tone: "error", label: "Preview runtime unreachable" }
+                    : { tone: "idle", label: "Preview not started" };
+    setPanelStatus("preview", status);
+  }, [state, startPhase, frameFailed, stylingFailed, setPanelStatus]);
+  useEffect(() => () => setPanelStatus("preview", null), [setPanelStatus]);
+
   // Verify the preview address answers before calling it ready. Iframes do
   // not raise onError for HTTP 404/5xx, so the probe is what catches a
   // runtime that reports ready while serving nothing.
@@ -1300,8 +1385,12 @@ export default function StudioPreviewPanel({
       setFrameError(null);
     }
     let cancelled = false;
+    let timedOut = false;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FRAME_PROBE_TIMEOUT_MS);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, FRAME_PROBE_TIMEOUT_MS);
     (async () => {
       try {
         const response = await fetch(effectivePreviewUrl, { cache: "no-store", credentials: "include", signal: controller.signal });
@@ -1318,7 +1407,17 @@ export default function StudioPreviewPanel({
       } catch {
         if (cancelled) return;
         setFrameCheck("failed");
-        setFrameError("The preview address did not respond. Retry to check it again.");
+        // Round 14: a thrown fetch is two different failures wearing
+        // one message. If OUR probe timer fired, the address was
+        // reached but never answered in time (a black-holed upstream
+        // makes the terminal proxy hang past this probe's budget).
+        // Any other throw means the request never completed at all —
+        // network failure or a cross-origin rejection in the browser.
+        // Say which one happened; the old single "did not respond"
+        // hid the distinction the diagnosis needed.
+        setFrameError(timedOut
+          ? "The preview address did not answer in time — it may still be starting, or the connection is stuck. Retry to check it again."
+          : "The preview address could not be reached from your browser. Retry to check it again.");
       } finally {
         clearTimeout(timer);
       }
@@ -1660,7 +1759,7 @@ export default function StudioPreviewPanel({
           </div>
         )}
         {isLive && displayUrl && !frameFailed ? (
-          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-lg border shadow-sm" style={{ borderColor: "var(--studio-border-strong)", backgroundColor: "var(--studio-surface)" }}>
+          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-lg border shadow-sm" style={{ borderColor: "var(--studio-border-strong)", backgroundColor: "var(--studio-surface)" }}>
             <iframe
               key={frameKey}
               ref={iframeRef}
@@ -1674,6 +1773,12 @@ export default function StudioPreviewPanel({
                 maxWidth: "100%",
                 borderRadius: "8px",
                 boxShadow: deviceMode === "desktop" ? "0 1px 3px rgba(14,60,26,0.12)" : "0 4px 24px rgba(0,0,0,0.4)",
+                // Curtain lift (Kimi wiring item 1): blur→sharp over the
+                // reveal window; the .preview-reveal class in globals.css
+                // reduces this to an opacity fade under reduced motion.
+                filter: revealing ? "blur(10px)" : "blur(0px)",
+                opacity: revealing ? 0.4 : 1,
+                transition: "filter 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1)",
               }}
               sandbox={isStaticProject 
                 ? "allow-scripts allow-forms allow-modals allow-popups" 
@@ -1683,6 +1788,17 @@ export default function StudioPreviewPanel({
               onError={() => setIframeFailed(true)}
               data-testid="preview-iframe"
             />
+            {revealing && (
+              <div
+                aria-hidden
+                data-testid="preview-reveal-scanline"
+                className="preview-scanline pointer-events-none absolute inset-x-0 h-10"
+                style={{
+                  background:
+                    "linear-gradient(to bottom, transparent, color-mix(in srgb, var(--color-accent) 25%, transparent), transparent)",
+                }}
+              />
+            )}
           </div>
         ) : (
           <div
@@ -1744,36 +1860,53 @@ export default function StudioPreviewPanel({
                 </div>
               </>
             )}
-            {/* Staged loading — show honest progress while the preview starts. */}
-            {(state === "starting" || state === "restarting") && startPhase && (
-              <div className="flex items-center gap-2" data-testid="preview-start-stages" aria-label="Preview startup progress">
-                {START_STAGES.map((stageName) => {
-                  const stageKey = stageName === "Provision" ? "provision" : "devserver";
-                  const isCurrent = startPhase === stageKey || (startPhase === "devserver" && stageKey === "provision");
-                  const isDone = startPhase === "devserver" && stageKey === "provision";
-                  return (
-                    <div key={stageName} className="flex items-center gap-1.5">
-                      <span
-                        className={`h-1.5 w-1.5 rounded-full ${isCurrent && !isDone ? "animate-pulse" : ""}`}
-                        style={{
-                          backgroundColor: isDone
-                            ? "var(--litt-primary)"
-                            : isCurrent
-                              ? "#e3b341"
-                              : "var(--text-muted)",
-                          opacity: isDone || isCurrent ? 1 : 0.4,
-                        }}
-                        aria-hidden
-                      />
-                      <span
-                        className="text-[10px] font-bold"
-                        style={{ color: isDone || isCurrent ? "var(--text-primary)" : "var(--text-muted)" }}
-                      >
-                        {stageName}
-                      </span>
-                    </div>
-                  );
-                })}
+            {/* Staged loading — show honest progress while the preview
+                starts (Kimi wiring item 1 presentation over the SAME
+                derived stages). Segments render ONLY when startPhase
+                distinguishes a stage from real signals; when it cannot,
+                no segments appear — the single "Preparing preview…"
+                label above and the elapsed timer below are all that is
+                claimed. The timer measures this panel's actual wait. */}
+            {(state === "starting" || state === "restarting") && (
+              <div className="flex flex-col items-center gap-2">
+                {startPhase && (
+                  <div className="flex items-center gap-2" data-testid="preview-start-stages" aria-label="Preview startup progress">
+                    {START_STAGES.map((stageName) => {
+                      const stageKey = stageName === "Provision" ? "provision" : "devserver";
+                      const isCurrent = startPhase === stageKey || (startPhase === "devserver" && stageKey === "provision");
+                      const isDone = startPhase === "devserver" && stageKey === "provision";
+                      return (
+                        <div key={stageName} className="flex items-center gap-1.5">
+                          <span
+                            className={`h-1 w-6 rounded-full ${isCurrent && !isDone ? "animate-pulse" : ""}`}
+                            style={{
+                              backgroundColor: isDone
+                                ? "var(--litt-primary)"
+                                : isCurrent
+                                  ? "var(--color-accent)"
+                                  : "var(--studio-border-strong)",
+                            }}
+                            aria-hidden
+                          />
+                          <span
+                            className="text-[10px] font-bold"
+                            style={{ color: isDone || isCurrent ? "var(--text-primary)" : "var(--text-muted)" }}
+                          >
+                            {stageName}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <span
+                  className="font-mono text-[10px] tabular-nums"
+                  style={{ color: "var(--text-muted)" }}
+                  data-testid="preview-start-elapsed"
+                  aria-label="Time spent starting the preview"
+                >
+                  {(startElapsedMs / 1000).toFixed(1)}s
+                </span>
               </div>
             )}
             {/* Retry button for unreachable/failed states. not_started is
@@ -1813,6 +1946,25 @@ export default function StudioPreviewPanel({
                     Add Clerk keys
                   </button>
                 )}
+                {/* View logs (Kimi wiring item 1): on the board this
+                    summons the Terminal / Logs panel; elsewhere it opens
+                    this panel's own logs strip. Rendered only when one
+                    of those real log surfaces exists. */}
+                {(state === "failed" || state === "unreachable" || (isLive && frameFailed)) &&
+                  (onViewLogs || logs.length > 0) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onViewLogs) onViewLogs();
+                        else setLogsOpen(true);
+                      }}
+                      className="flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold transition hover:bg-black/5"
+                      style={{ borderColor: "var(--studio-border)", color: "var(--text-secondary)" }}
+                      data-testid="preview-view-logs"
+                    >
+                      View logs
+                    </button>
+                  )}
               </>
             )}
           </div>

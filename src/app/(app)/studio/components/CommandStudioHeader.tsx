@@ -27,12 +27,14 @@ import {
   PanelBottom,
   MoreHorizontal,
   Plus,
+  Share2,
   Terminal,
   Trash2,
   Edit2,
   Download,
   Eraser,
 } from "lucide-react";
+import { copyToClipboard } from "@/lib/studio/message-copy";
 import {
   runtimePhaseLabel,
   HOST_EXECUTION_UNAVAILABLE_LABEL,
@@ -101,6 +103,7 @@ export default function CommandStudioHeader({
   onExecutionModeChange,
   layoutMode,
   onLayoutModeChange,
+  onReconnectWorkspaceAction,
 }: {
   onPreviewAction?: () => void;
   /** Toggles the bottom dock (Activity/Terminal/Inspector/Media). */
@@ -154,6 +157,14 @@ export default function CommandStudioHeader({
    */
   layoutMode?: StudioLayoutMode;
   onLayoutModeChange?: (mode: StudioLayoutMode) => void;
+  /**
+   * Workspace chip click (Kimi wiring item 6): runs the real guarded
+   * workspace prepare (CommandStudio's handlePrepareWorkspace). The
+   * chip is deliberately SEPARATE from the agent-status pill — the
+   * pill blends agent/runtime state; this chip reports the workspace
+   * alone and reconnects it.
+   */
+  onReconnectWorkspaceAction?: () => void | Promise<void>;
 }) {
   const { balance, isLoading: walletLoading } = useWallet();
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
@@ -162,6 +173,9 @@ export default function CommandStudioHeader({
 
   const [statusOpen, setStatusOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  const [workspaceReconnecting, setWorkspaceReconnecting] = useState(false);
+  // Share (Kimi wiring item 16): transient "Link copied" confirmation.
+  const [shareCopied, setShareCopied] = useState(false);
   const statusTriggerRef = useRef<HTMLButtonElement>(null);
   const overflowTriggerRef = useRef<HTMLButtonElement>(null);
   const [statusRect, setStatusRect] = useState<DOMRect | null>(null);
@@ -281,6 +295,101 @@ export default function CommandStudioHeader({
         onDeleteProject={(projectId) => onDeleteProjectAction?.(projectId)}
         onProjectRenamed={(projectId, name) => onProjectRenamedAction?.(projectId, name)}
       />
+
+      {/* Share (Kimi wiring item 16): copies the current Studio URL —
+          the active project rides in ?project= (CommandStudio keeps
+          the param durable), so the link lands on this project. */}
+      {capabilities.projectId && (
+        <button
+          type="button"
+          data-testid="studio-share-button"
+          className="flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold transition-all hover:bg-black/5 active:scale-95 lg:min-h-6"
+          style={{
+            borderColor: "var(--studio-border)",
+            color: shareCopied ? "#177a36" : "var(--text-secondary)",
+            backgroundColor: "var(--studio-surface)",
+          }}
+          aria-label={shareCopied ? "Studio link copied" : "Copy link to this Studio project"}
+          title={shareCopied ? "Link copied" : "Copy link to this Studio project"}
+          onClick={() => {
+            if (typeof window === "undefined") return;
+            void copyToClipboard(window.location.href).then((ok) => {
+              if (!ok) return;
+              setShareCopied(true);
+              window.setTimeout(() => setShareCopied(false), 1600);
+            });
+          }}
+        >
+          {shareCopied ? <CircleCheck size={11} aria-hidden /> : <Share2 size={11} aria-hidden />}
+          <span className="hidden md:inline">{shareCopied ? "Copied" : "Share"}</span>
+        </button>
+      )}
+
+      {/* Workspace chip (Kimi wiring item 6) — the workspace's OWN
+          status, separate from the blended agent-status pill beside
+          it. Clicking while not ready runs the real reconnect
+          (guarded workspace prepare); while ready it is a plain
+          indicator. Renders only when a project is selected. */}
+      {capabilities.projectId && (() => {
+        const ws = runtime.workspaceStatus;
+        const chip = workspaceReconnecting
+          ? { color: "#e3b341", label: "Workspace reconnecting…", short: "Reconnecting", pulse: true }
+          : ws === "ready"
+            ? { color: "#48EE38", label: "Workspace ready", short: "Workspace ready", pulse: false }
+            : ws === "provisioning" || ws === "preparing"
+              ? { color: "#e3b341", label: "Workspace provisioning", short: "Provisioning", pulse: true }
+              : ws === "error" || ws === "failed"
+                ? { color: "#EF4444", label: "Workspace error — click to reconnect", short: "Workspace error", pulse: false }
+                : ws === "unavailable"
+                  ? { color: "#e3b341", label: HOST_EXECUTION_UNAVAILABLE_SHORT, short: "Unavailable", pulse: false }
+                  : runtimeLoading || ws === null
+                    ? { color: "#8a8f98", label: "Workspace status checking", short: "Checking", pulse: true }
+                    : { color: "#e3b341", label: "Workspace not connected — click to reconnect", short: "Not connected", pulse: false };
+        const clickable = ws !== "ready" && Boolean(onReconnectWorkspaceAction) && !workspaceReconnecting;
+        const chipClass =
+          "flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold lg:min-h-6";
+        const chipStyle = {
+          borderColor: `${chip.color}32`,
+          backgroundColor: `${chip.color}08`,
+          color: chip.color,
+        } as const;
+        const chipInner = (
+          <>
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${chip.pulse ? "animate-pulse" : ""}`}
+              aria-hidden
+              style={{ backgroundColor: chip.color, boxShadow: `0 0 4px ${chip.color}` }}
+            />
+            <span className="hidden md:inline">{chip.short}</span>
+          </>
+        );
+        return clickable ? (
+          <button
+            type="button"
+            onClick={() => {
+              setWorkspaceReconnecting(true);
+              void Promise.resolve(onReconnectWorkspaceAction?.()).finally(() => setWorkspaceReconnecting(false));
+            }}
+            className={`${chipClass} transition-all hover:bg-black/5 active:scale-95`}
+            style={chipStyle}
+            aria-label={chip.label}
+            title={chip.label}
+            data-testid="workspace-status-chip"
+          >
+            {chipInner}
+          </button>
+        ) : (
+          <span
+            className={chipClass}
+            style={chipStyle}
+            aria-label={chip.label}
+            title={chip.label}
+            data-testid="workspace-status-chip"
+          >
+            {chipInner}
+          </span>
+        );
+      })()}
 
       {/* Agent-status pill — truthful: working / approval needed / ambient runtime.
           Clicking opens the full workspace-status popover. */}
