@@ -185,6 +185,36 @@ export interface PreviewRuntime {
    * round produces a readable verdict or a healthy probe.
    */
   healthLivenessUnreadableCount?: number;
+  /**
+   * Round 16 (C2): consecutive live-verify rounds whose EXTERNAL
+   * probe failed generically (verifySandboxPreviewHealth). Unlike
+   * healthFailureCount, this accounting is NOT reset by alive or
+   * unreadable verdict rounds — a dead preview address fails every
+   * round while the server stays alive, and that sustained external
+   * failure is exactly the recreation trigger's evidence. Reset
+   * only by a genuinely healthy probe (or at a recreation launch,
+   * so the fresh address earns its own window).
+   */
+  healthExternalFailureCount?: number;
+  /** Timestamp of the first external failure in the current window. */
+  healthExternalFailureSince?: number | null;
+  /**
+   * Round 16 (C2): sandbox recreations performed for this runtime
+   * (verifySandboxPreviewHealth's gated repair for a verifiably
+   * dead preview address). Capped per session — see
+   * PREVIEW_RECREATION_MAX_PER_SESSION in sandbox-runtime.ts.
+   */
+  healthRecreationCount?: number;
+  /** Timestamp of the last recreation launch (cooldown gate). */
+  healthLastRecreationAt?: number | null;
+  /** A recreation is currently in flight (detached from the verify). */
+  healthRecreationInFlight?: boolean;
+  /**
+   * The package manager the sandbox start resolved, recorded by
+   * startSandboxPreview so a recreation re-runs the start with the
+   * same manager instead of re-deriving it.
+   */
+  packageManager?: string;
 }
 
 interface PreviewStartInput {
