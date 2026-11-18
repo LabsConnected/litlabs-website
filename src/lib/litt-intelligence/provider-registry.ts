@@ -327,6 +327,11 @@ function geminiAttemptTimeoutMs(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : 60_000;
 }
 
+function cloudflareAttemptTimeoutMs(): number {
+  const configured = Number(process.env.CLOUDFLARE_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 120_000;
+}
+
 function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
   return [
     {
@@ -422,7 +427,15 @@ function providerDefs(requirements?: RouteRequirements): ProviderDef[] {
       adapter: "openai-compatible",
       costClass: "FREE_MANAGED",
       capabilities: TOOL_CAPABLE,
-      timeoutMs: DEFAULT_ATTEMPT_TIMEOUT_MS,
+      // Workers AI file-write generations legitimately exceed the shared
+      // 30s cap: mistral-small-3.1 produced a 1,695-token files_write call
+      // in 31.6s on a TINY prompt (probe 2026-11-18) — with a real ~30k-token
+      // build transcript the same step runs past 60s. At 30s the cap killed
+      // the ONLY long-context route left after Gemini billing + OpenRouter
+      // cooldowns, twice per call, and failed the run (Nov 18 staging).
+      // Per-route cap only; the agent's absolute deadline still bounds
+      // every attempt via computeAttemptTimeout.
+      timeoutMs: cloudflareAttemptTimeoutMs(),
       credentialState: () =>
         envPresent("CLOUDFLARE_ACCOUNT_ID") && envPresent("CLOUDFLARE_AI_API_TOKEN")
           ? "available"
