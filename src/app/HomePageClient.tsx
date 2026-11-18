@@ -1,71 +1,532 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import { track } from "@/lib/analytics";
 import {
   ArrowRight,
   ArrowUpRight,
+  Bot,
   BrainCircuit,
   Braces,
   Check,
+  ChevronDown,
+  Code2,
+  Cpu,
+  Database,
+  FileCheck2,
   FileStack,
-  ImageIcon,
-  Mic2,
+  Mic,
+  MoonStar,
   Palette,
-  Play,
   Rocket,
+  ShieldCheck,
   Sparkles,
   TestTube2,
+  Wand2,
   Workflow,
 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { EggHuntProvider } from "@/components/landing/EggHunt";
 import "@/app/homepage-tlc.css";
-// Above-the-fold sections stay in the main bundle.
-import { LandingHeroV3 } from "@/components/landing/LandingHeroV3";
-// Below-the-fold sections are code-split (ssr: true keeps them in the
-// server-rendered HTML for SEO; the client JS loads on demand). This
-// keeps the initial homepage JS payload to hero + capabilities.
-const InteractiveProductDemo = dynamic(
-  () => import("@/components/landing/InteractiveProductDemo").then((m) => m.InteractiveProductDemo),
-  { ssr: true },
-);
-const RealProjectWalkthrough = dynamic(
-  () => import("@/components/landing/RealProjectWalkthrough").then((m) => m.RealProjectWalkthrough),
-  { ssr: true },
-);
-const AgentCrew = dynamic(
-  () => import("@/components/landing/AgentCrew").then((m) => m.AgentCrew),
-  { ssr: true },
-);
-const RealCreations = dynamic(
-  () => import("@/components/landing/RealCreations").then((m) => m.RealCreations),
-  { ssr: true },
-);
-const TrustSection = dynamic(
-  () => import("@/components/landing/TrustSection").then((m) => m.TrustSection),
-  { ssr: true },
-);
-const HowItsMade = dynamic(
-  () => import("@/components/landing/HowItsMade").then((m) => m.HowItsMade),
-  { ssr: true },
-);
-const OnboardingSteps = dynamic(
-  () => import("@/components/landing/OnboardingSteps").then((m) => m.OnboardingSteps),
-  { ssr: true },
-);
-const ComparisonTable = dynamic(
-  () => import("@/components/landing/ComparisonTable").then((m) => m.ComparisonTable),
-  { ssr: true },
-);
-const FAQSection = dynamic(
-  () => import("@/components/landing/FAQSection").then((m) => m.FAQSection),
-  { ssr: true },
-);
-import { useViewportReveals } from "@/components/landing/useViewportReveals";
+import "@/app/homepage-mockup.css";
+
+/* ============================================================
+   Homepage — mockup port (2026-11-18)
+
+   Larry approved porting his uploaded marketing mockup
+   (Littree_Labstudios_Mockup_Pages) as the new homepage.
+   The sections below follow that mockup's layout and copy,
+   adapted to the real site: CTAs point at real routes, and
+   the mockup's simulated workspace panel is labeled as an
+   example / recorded preview (the site's truth standard —
+   a simulated panel is never presented as a live feed).
+   Prices: the mockup homepage shows no plan prices; the
+   canonical tiers live in src/config/plans.ts and /pricing.
+   ============================================================ */
+
+function MpPill({
+  children,
+  tone = "green",
+}: {
+  children: React.ReactNode;
+  tone?: "green" | "purple" | "white";
+}) {
+  const c =
+    tone === "green"
+      ? "border-[var(--hm-green)]/40 bg-[var(--hm-green)]/10 text-[var(--hm-green)]"
+      : tone === "purple"
+        ? "border-purple-400/40 bg-purple-500/10 text-purple-300"
+        : "border-white/20 bg-white/5 text-white";
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.14em] ${c}`}
+    >
+      {children}
+    </span>
+  );
+}
+
+function MpSectionHead({
+  kicker,
+  title,
+  copy,
+  align = "left",
+}: {
+  kicker: string;
+  title: React.ReactNode;
+  copy?: string;
+  align?: "left" | "center";
+}) {
+  return (
+    <div className={`${align === "center" ? "mx-auto items-center text-center" : ""} flex max-w-3xl flex-col gap-3`}>
+      <span className="hm-mono text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--hm-green)]">{kicker}</span>
+      <h2 className="text-[clamp(1.85rem,5vw,3.25rem)] font-bold leading-[0.98] tracking-tight">{title}</h2>
+      {copy && <p className="text-base leading-relaxed text-[#b9b9cd] sm:text-lg">{copy}</p>}
+    </div>
+  );
+}
+
+function MpCheckItem({ children }: { children: React.ReactNode }) {
+  return (
+    <li className="flex gap-2.5 text-sm leading-relaxed text-[#c8c8da]">
+      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--hm-green)]/15 text-[var(--hm-green)]">
+        <Check size={13} />
+      </span>
+      {children}
+    </li>
+  );
+}
+
+const HOME_FAQS = [
+  {
+    q: "Is LiTT a chatbot with a code box?",
+    a: "No. LiTT is a complete building workspace. You describe the outcome, then watch the plan, preview, checks, files, and launch happen in one connected loop.",
+  },
+  {
+    q: "What happens if a build fails?",
+    a: "You are charged 0 LiTTBits on a failed build. The workspace keeps the context, shows what went wrong, and helps you retry without starting over.",
+  },
+  {
+    q: "Can I export or leave with my work?",
+    a: "Yes. Export anytime. Your files, project memory, and launch history stay under your control — no lock-in by design.",
+  },
+  {
+    q: "Does LiTT work for creative projects too?",
+    a: "Yes. Design, copy, audio direction, visual production, and engineering can live in the same mission, with one operator keeping the whole project coherent.",
+  },
+] as const;
+
+function HeroSection() {
+  const [mission, setMission] = useState(2);
+
+  return (
+    <section className="hm-noise hm-grid-bg relative overflow-hidden border-b border-white/10">
+      <div className="mx-auto grid max-w-[1280px] gap-10 px-4 pb-12 pt-28 sm:px-6 sm:pb-16 lg:grid-cols-[1.2fr_.8fr] lg:py-20 lg:pt-32">
+        <div>
+          <div className="flex flex-wrap gap-2">
+            <MpPill>
+              <Sparkles size={13} /> Creative Workspace
+            </MpPill>
+            <MpPill tone="purple">
+              <Cpu size={13} /> Project Operator
+            </MpPill>
+          </div>
+          <h1 className="mt-5 text-[clamp(2.7rem,8vw,5.8rem)] font-black leading-[0.88] tracking-[-0.04em]">
+            Describe it.
+            <br />
+            <span className="hm-glow-green text-[var(--hm-green)]">LiTT builds it.</span>
+          </h1>
+          <p className="mt-6 max-w-2xl text-lg leading-relaxed text-[#c8c8da] sm:text-xl">
+            LiTT is a complete building workspace — not a chatbot with a code box. You describe the site you want in
+            plain words, and LiTT generates it, shows you a live preview, lets you edit by talking, checks the work,
+            and publishes it to a real address.
+          </p>
+          <div className="mt-7 flex flex-wrap gap-3">
+            <Link
+              href="/sign-up"
+              onClick={() => track("hero_cta_click", { source: "homepage_mockup_hero" })}
+              className="hm-btn-primary flex items-center gap-2 rounded-full bg-[var(--hm-green)] px-6 py-3.5 font-black text-black"
+            >
+              Start Building <ArrowRight size={18} />
+            </Link>
+            <a
+              href="#after-midnight"
+              className="hm-btn-ghost flex items-center gap-2 rounded-full border border-white/20 px-6 py-3.5 font-bold"
+            >
+              See After Midnight <MoonStar size={18} />
+            </a>
+          </div>
+          <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs text-zinc-400">
+            <span className="flex items-center gap-1.5">
+              <Check size={14} className="text-[var(--hm-green)]" /> No credit card to start
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Check size={14} className="text-[var(--hm-green)]" /> Live preview
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Check size={14} className="text-[var(--hm-green)]" /> 0 LiTTBits on failed builds
+            </span>
+          </div>
+        </div>
+
+        {/* Example workspace panel — a recorded preview of the Studio
+            loop, labeled as an example (never presented as live). */}
+        <div className="overflow-hidden rounded-3xl border border-white/15 bg-[#0b0b17] shadow-2xl">
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+            <div className="flex gap-1.5">
+              <i className="h-3 w-3 rounded-full bg-red-400" />
+              <i className="h-3 w-3 rounded-full bg-yellow-400" />
+              <i className="h-3 w-3 rounded-full bg-[var(--hm-green)]" />
+            </div>
+            <span className="hm-mono text-[10px] uppercase tracking-widest text-zinc-400">LITT // EXAMPLE MISSION</span>
+            <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-300">
+              Recorded preview
+            </span>
+          </div>
+          <div className="p-4">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+              <p className="hm-mono text-[11px] text-zinc-400">YOU</p>
+              <p className="mt-1 text-sm">
+                “Make a moody, cinematic site for After Midnight — dark, neon, and easy to explore.”
+              </p>
+            </div>
+            <div className="mt-3 space-y-2">
+              {[
+                "Plan created — 6 sections, 2 flows",
+                "Hero + story pages drafted",
+                "Preview generated",
+                "Checks passed — 14 / 14",
+              ].map((s, i) => (
+                <div
+                  key={s}
+                  className="flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2.5 text-sm"
+                >
+                  <span className="flex gap-2">
+                    <Check size={16} className="text-[var(--hm-green)]" />
+                    {s}
+                  </span>
+                  <span className="hm-mono text-[10px] text-zinc-500">0{i + 1}</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-xl bg-purple-500/10 p-3">
+                <p className="text-xl font-black text-purple-300">14/14</p>
+                <p className="text-[10px] text-zinc-400">CHECKS</p>
+              </div>
+              <div className="rounded-xl bg-[var(--hm-green)]/10 p-3">
+                <p className="text-xl font-black text-[var(--hm-green)]">0</p>
+                <p className="text-[10px] text-zinc-400">FAILED COST</p>
+              </div>
+              <div className="rounded-xl bg-white/5 p-3">
+                <p className="text-xl font-black">READY</p>
+                <p className="text-[10px] text-zinc-400">TO LAUNCH</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setMission((m) => m + 1)}
+              className="hm-btn-primary mt-4 w-full rounded-xl bg-white py-3 text-sm font-black text-black"
+            >
+              Continue mission {mission} →
+            </button>
+            <p className="mt-2 text-center text-[11px] text-zinc-500">
+              Example workspace panel — recorded preview, not a live feed.
+            </p>
+          </div>
+        </div>
+      </div>
+      <div className="mx-auto max-w-[1280px] px-4 pb-10 sm:px-6">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[
+            ["6", "Plain steps", "One clear path from idea to launch"],
+            ["1", "Workspace", "Everything in one connected place"],
+            ["Every", "Build checked", "Quality is part of the loop"],
+            ["0", "LiTTBits on failed build", "You only pay for work that lands"],
+          ].map(([n, l, d]) => (
+            <div key={l} className="rounded-2xl border border-white/10 bg-black/30 p-4">
+              <p className="text-2xl font-black text-[var(--hm-green)] sm:text-3xl">{n}</p>
+              <p className="mt-1 font-bold">{l}</p>
+              <p className="mt-1 text-xs leading-relaxed text-zinc-400">{d}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AfterMidnightSection() {
+  return (
+    <section id="after-midnight" className="border-b border-white/10 bg-[#0a0a14]">
+      <div className="mx-auto max-w-[1280px] px-4 py-14 sm:px-6 sm:py-20">
+        <div className="grid gap-8 lg:grid-cols-[.9fr_1.1fr]">
+          <div>
+            <MpPill tone="purple">
+              <MoonStar size={13} /> Concept page
+            </MpPill>
+            <h2 className="mt-4 text-[clamp(2rem,5vw,3.5rem)] font-black leading-none">
+              After Midnight
+              <br />
+              <span className="text-purple-300">— a site, start to finish.</span>
+            </h2>
+            <p className="mt-4 leading-relaxed text-zinc-400">
+              Concept page — not a real artist release. Follow one idea as it becomes a complete, atmospheric site
+              with story, visuals, and a launch-ready structure.
+            </p>
+            <Link
+              href="/showcase/artist-launch-site"
+              className="hm-btn-ghost mt-6 inline-flex items-center gap-2 rounded-full border border-white/20 px-5 py-3 font-bold"
+            >
+              Open the case study <ArrowUpRight size={18} />
+            </Link>
+          </div>
+          <div className="space-y-3">
+            {[
+              ["01", "The brief", "A late-night world. Cinematic, neon, a little haunted — and easy to explore."],
+              ["02", "The direction", "Deep blacks, electric green, violet fog. Big type. Room to breathe."],
+              ["03", "The build", "Story, visuals, navigation, and launch checks — shaped together, not bolted on."],
+              ["04", "The result", "A site that feels like the world it describes — and is ready to share."],
+            ].map(([n, t, d]) => (
+              <div key={n} className="hm-card-hover flex gap-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4 sm:p-5">
+                <span className="hm-mono text-2xl font-bold text-[var(--hm-green)]">{n}</span>
+                <div>
+                  <h3 className="font-bold">{t}</h3>
+                  <p className="mt-1 text-sm leading-relaxed text-zinc-400">{d}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function EverythingSection() {
+  const cards = [
+    {
+      icon: <Wand2 />,
+      t: "Design + engineering",
+      d: "Look, feel, layout, and working code — designed and built as one thing.",
+    },
+    {
+      icon: <Sparkles />,
+      t: "Creative production",
+      d: "Visual direction, copy, and story shaped around the world you are building.",
+    },
+    {
+      icon: <Bot />,
+      t: "Orchestration",
+      d: "LiTT sequences the work, keeps dependencies clear, and moves the mission forward.",
+    },
+    {
+      icon: <Database />,
+      t: "Project memory",
+      d: "Decisions, files, and context stay attached to the project — not scattered in chats.",
+    },
+    {
+      icon: <FileCheck2 />,
+      t: "Quality + control",
+      d: "Checks, approvals, and review points before anything goes live.",
+    },
+    {
+      icon: <Rocket />,
+      t: "Files + launch",
+      d: "Real files, real preview, real address. Publish when you are ready.",
+    },
+  ];
+  return (
+    <section className="mx-auto max-w-[1280px] px-4 py-14 sm:px-6 sm:py-20">
+      <MpSectionHead
+        kicker="Everything between idea and done"
+        title={
+          <>
+            One workspace. <span className="text-[var(--hm-green)]">The whole job.</span>
+          </>
+        }
+        copy="LiTT keeps the creative, technical, and operational work in the same loop — so nothing gets lost between tools."
+      />
+      <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {cards.map((c) => (
+          <article key={c.t} className="hm-card-hover rounded-3xl border border-white/10 bg-[var(--hm-surface)] p-6">
+            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--hm-green)]/10 text-[var(--hm-green)]">
+              {c.icon}
+            </span>
+            <h3 className="mt-4 text-xl font-bold">{c.t}</h3>
+            <p className="mt-2 text-sm leading-relaxed text-zinc-400">{c.d}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function LoopSection() {
+  const steps = [
+    { icon: <Mic size={18} />, t: "Talk", d: "Describe the outcome in plain words." },
+    { icon: <Sparkles size={18} />, t: "Create", d: "LiTT drafts direction, copy, and visuals." },
+    { icon: <Check size={18} />, t: "Review", d: "You shape it by talking. Nothing is final until you say so." },
+    { icon: <Code2 size={18} />, t: "Build", d: "The site becomes real files, not a screenshot." },
+    { icon: <ShieldCheck size={18} />, t: "Check", d: "Every build is checked before it can ship." },
+    { icon: <Rocket size={18} />, t: "Launch", d: "Publish to a real address. Export anytime." },
+  ];
+  return (
+    <section className="border-y border-white/10 bg-gradient-to-br from-purple-900/30 via-[#0b0b17] to-[#04170f]">
+      <div className="mx-auto max-w-[1280px] px-4 py-14 sm:px-6 sm:py-20">
+        <MpSectionHead
+          kicker="Brief in. Verified work out."
+          title={<>Talk. Create. Build. Launch.</>}
+          copy="A simple loop — with real checks and real control at every step."
+        />
+        <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {steps.map((s, idx) => (
+            <div key={s.t} className="rounded-2xl border border-white/10 bg-black/30 p-5">
+              <span className="hm-mono flex items-center justify-between text-xs text-[var(--hm-green)]">
+                STEP 0{idx + 1}
+                <span className="text-[var(--hm-green)]">{s.icon}</span>
+              </span>
+              <h3 className="mt-3 text-xl font-bold">{s.t}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-zinc-400">{s.d}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-10 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-3xl border border-[var(--hm-green)]/30 bg-[var(--hm-green)]/5 p-6 sm:p-8">
+            <h3 className="text-2xl font-black">Not a chat. A working system.</h3>
+            <p className="mt-3 leading-relaxed text-zinc-300">
+              Chats forget. Workspaces remember. LiTT turns conversation into plans, files, previews, checks, and
+              launches — with a trail you can inspect.
+            </p>
+          </div>
+          <div className="rounded-3xl border border-purple-400/30 bg-purple-500/10 p-6 sm:p-8">
+            <h3 className="text-2xl font-black">One operator. The whole project loop.</h3>
+            <p className="mt-3 leading-relaxed text-zinc-300">
+              One operator keeps design, production, engineering, and launch moving together — so you stop being the
+              glue between tools.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FastStartSection() {
+  const [faq, setFaq] = useState(0);
+  return (
+    <section className="mx-auto max-w-[1280px] px-4 py-14 sm:px-6 sm:py-20">
+      <MpSectionHead kicker="Fast start" title="From signup to first mission in minutes" />
+      <ol className="mt-10 grid gap-3 md:grid-cols-5">
+        {[
+          "Create your workspace",
+          "Describe your first idea",
+          "Review the plan",
+          "Preview the build",
+          "Launch or keep shaping",
+        ].map((s, i) => (
+          <li key={s} className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+            <span className="hm-mono text-2xl font-black text-purple-300">0{i + 1}</span>
+            <p className="mt-3 font-bold leading-snug">{s}</p>
+            <p className="mt-1 text-xs text-zinc-500">Step {i + 1} of 5</p>
+          </li>
+        ))}
+      </ol>
+      <div className="mt-10 grid gap-4 lg:grid-cols-[1.1fr_.9fr]">
+        <div className="rounded-3xl border border-white/10 bg-[var(--hm-surface)] p-6 sm:p-8">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="text-[var(--hm-green)]" />
+            <h3 className="text-2xl font-black">Your work. Your control.</h3>
+          </div>
+          <ul className="mt-5 space-y-3">
+            <MpCheckItem>Approvals before anything important ships.</MpCheckItem>
+            <MpCheckItem>Export anytime — your files stay yours.</MpCheckItem>
+            <MpCheckItem>Clear project memory, not a black box.</MpCheckItem>
+            <MpCheckItem>0 LiTTBits charged on a failed build.</MpCheckItem>
+          </ul>
+        </div>
+        <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-[#17112a] to-[#07130f] p-6 sm:p-8">
+          <h3 className="text-2xl font-black">FAQ teaser</h3>
+          <p className="mt-2 text-sm text-zinc-400">The short version — before you start building.</p>
+          <div className="mt-5 space-y-2">
+            {HOME_FAQS.map((f, i) => (
+              <button
+                key={f.q}
+                onClick={() => setFaq(i)}
+                aria-expanded={faq === i}
+                className={`w-full rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${
+                  faq === i
+                    ? "border-[var(--hm-green)]/50 bg-[var(--hm-green)]/10"
+                    : "border-white/10 bg-black/20 hover:border-white/25"
+                }`}
+              >
+                <span className="flex justify-between gap-3">
+                  {f.q}
+                  <ChevronDown size={16} className={faq === i ? "rotate-180" : ""} />
+                </span>
+              </button>
+            ))}
+          </div>
+          <p className="mt-4 rounded-xl bg-black/30 p-3 text-sm leading-relaxed text-zinc-300">{HOME_FAQS[faq].a}</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FinalCtaSection() {
+  return (
+    <section className="mx-auto max-w-[1280px] px-4 pb-16 sm:px-6">
+      <div className="hm-noise relative overflow-hidden rounded-[2rem] border border-[var(--hm-green)]/30 bg-[#07130f] px-5 py-12 text-center sm:px-8 sm:py-16">
+        <MpPill>Ready when you are</MpPill>
+        <h2 className="mx-auto mt-5 max-w-3xl text-[clamp(2.1rem,6vw,4rem)] font-black leading-[0.95]">
+          Your next project starts with one sentence.
+        </h2>
+        <p className="mx-auto mt-4 max-w-xl text-zinc-300">
+          Describe it. Preview it. Shape it by talking. Launch it to a real address.
+        </p>
+        <div className="mt-7 flex flex-wrap justify-center gap-3">
+          <Link
+            href="/sign-up"
+            onClick={() => track("hero_cta_click", { source: "homepage_mockup_final_cta" })}
+            className="hm-btn-primary rounded-full bg-[var(--hm-green)] px-7 py-3.5 font-black text-black"
+          >
+            Start Building — it’s free
+          </Link>
+          <Link
+            href="/showcase/artist-launch-site"
+            className="hm-btn-ghost rounded-full border border-white/25 px-7 py-3.5 font-bold"
+          >
+            Explore examples
+          </Link>
+        </div>
+        <p className="hm-mono mt-5 text-[10px] uppercase tracking-[0.2em] text-zinc-500">
+          No credit card required • Starter is free
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function LandingPage() {
+  return (
+    <main id="main-content" className="litt-home-mockup min-h-dvh overflow-x-clip text-white">
+      <HeroSection />
+      <AfterMidnightSection />
+      <EverythingSection />
+      <LoopSection />
+      <FastStartSection />
+      <FinalCtaSection />
+    </main>
+  );
+}
+
+/* ============================================================
+   CapabilityGrid — preserved verbatim from the previous
+   homepage. It is imported by src/app/(marketing)/capabilities
+   /page.tsx, so it stays exported from this module even though
+   the homepage itself now renders the mockup's sections.
+   ============================================================ */
 
 const CAPABILITIES = [
   {
@@ -212,178 +673,6 @@ export function CapabilityGrid() {
         </div>
       </div>
     </section>
-  );
-}
-
-function MissionDemo() {
-  return (
-    <section id="how-it-works" className="litt-section relative overflow-hidden">
-      <div className="pointer-events-none absolute left-1/2 top-0 h-[420px] w-[760px] -translate-x-1/2 rounded-full bg-[#177A36]/6 blur-[140px]" />
-      <div className="relative mx-auto max-w-[1500px] px-5 lg:px-8">
-        <div className="grid items-end gap-8 lg:grid-cols-[1fr_auto]">
-          <SectionHeading
-            align="left"
-            eyebrow="See the work happen"
-            title={<>Brief in. <span className="litt-gradient-text">Verified work out.</span></>}
-            copy="Step through a complete mission—from your brief to a verified, approval-ready result. Every stage has a purpose, an owner, and visible output."
-          />
-          <div className="flex flex-wrap gap-2 lg:justify-end">
-            {[{ icon: Mic2, label: "Talk" }, { icon: ImageIcon, label: "Create" }, { icon: Braces, label: "Build" }, { icon: Rocket, label: "Launch" }].map(({ icon: Icon, label }) => (
-              <span key={label} className="inline-flex items-center gap-2 rounded-full border border-[#CFDEC4] bg-white px-3 py-2 text-xs font-bold text-[#37463A]">
-                <Icon size={13} className="text-accent" /> {label}
-              </span>
-            ))}
-          </div>
-        </div>
-        <div data-reveal className="litt-demo-shell mt-12">
-          <InteractiveProductDemo />
-        </div>
-      </div>
-    </section>
-  );
-}
-
-const SYSTEM_STEPS = [
-  {
-    icon: Sparkles,
-    title: "Build",
-    copy: "Describe the whole site — or just the next page — and watch it generate with real photos and real words, not lorem ipsum.",
-    points: ["Full sites or single pages", "Real images, checked as they load", "Your words, kept yours"],
-  },
-  {
-    icon: Palette,
-    title: "Refine",
-    copy: "See it live while you edit. Say “make the header bolder” or “move the menu up” — no settings maze, no code.",
-    points: ["Live preview, desktop & phone", "Edit by describing the change", "Every version saved"],
-  },
-  {
-    icon: Rocket,
-    title: "Ship",
-    copy: "LiTT runs its checks first — pages, photos, buttons — and only then publishes to your own LiTT address.",
-    points: ["Quality & safety checks before publish", "A real, working address", "Republish edits anytime"],
-  },
-] as const;
-
-function CreationsSection() {
-  const handleWatchClick = () => {
-    track("watch_litt_click", { source: "real_proof" });
-  };
-
-  return (
-    <section id="creations" className="litt-section relative overflow-hidden">
-      <div className="pointer-events-none absolute left-1/2 top-0 h-[380px] w-[680px] -translate-x-1/2 rounded-full bg-accent/6 blur-[140px]" />
-      <div className="relative mx-auto max-w-[1500px] px-5 lg:px-8">
-        <SectionHeading
-          eyebrow="The Studio"
-          title={<>One system. <span className="litt-gradient-text">Every step in one place.</span></>}
-          copy="Building, fixing, and publishing used to be three different tools in three different tabs. In LiTT it's one connected workspace — what you change in one step carries into the next."
-        />
-
-        {/* One connected panel: Build → Refine → Ship, then the outcomes —
-            the mockup's #system structure replacing three loose cards. */}
-        <div data-reveal className="litt-system-panel mt-12 p-5 sm:p-8 lg:p-10">
-          <div className="grid items-stretch gap-4 lg:grid-cols-[1fr_auto_1fr_auto_1fr] lg:gap-3">
-            {SYSTEM_STEPS.map((step, index) => {
-              const Icon = step.icon;
-              return (
-                <div key={step.title} className="contents">
-                  <article className="litt-system-step">
-                    <div className="flex items-center gap-2.5">
-                      <span className="grid h-9 w-9 place-items-center rounded-lg bg-[#E4F2D6] text-[#0C5A26]">
-                        <Icon size={17} />
-                      </span>
-                      <h3 className="text-lg font-black tracking-[-0.02em] text-[#0E1510]">{step.title}</h3>
-                    </div>
-                    <p className="mt-3 text-sm leading-6 text-[#37463A]">{step.copy}</p>
-                    <ul className="mt-4 space-y-1.5">
-                      {step.points.map((point) => (
-                        <li key={point} className="flex items-start gap-2 text-xs font-semibold leading-5 text-[#37463A]">
-                          <Check size={12} className="mt-1 shrink-0 text-[#177A36]" /> {point}
-                        </li>
-                      ))}
-                    </ul>
-                  </article>
-                  {index < SYSTEM_STEPS.length - 1 ? (
-                    <div className="litt-system-arrow" aria-hidden="true">
-                      <ArrowRight size={20} className="rotate-90 lg:rotate-0" />
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 border-t border-[#CFDEC4] pt-5 text-center text-xs font-bold text-[#63745F]">
-            <span>One workspace</span>
-            <span aria-hidden="true" className="text-[#177A36]">·</span>
-            <span>One project file</span>
-            <span aria-hidden="true" className="text-[#177A36]">·</span>
-            <span>One palette across every section</span>
-            <span aria-hidden="true" className="text-[#177A36]">·</span>
-            <span>Zero tab-hopping</span>
-          </div>
-
-          <div className="mt-10 border-t border-[#CFDEC4] pt-8">
-            <div className="max-w-2xl">
-              <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[#177A36]">Start from an idea</div>
-              <h3 className="mt-2 text-2xl font-black tracking-[-0.03em] text-[#0E1510] sm:text-3xl">
-                Bring an idea. <span className="litt-gradient-text">Leave with a working site.</span>
-              </h3>
-              <p className="mt-2 text-sm leading-6 text-[#63745F]">
-                You don&apos;t need a plan, a designer, or a free weekend. You need one sentence about what you&apos;re making — each card below starts with a real first prompt.
-              </p>
-            </div>
-            <div className="mt-8"><RealCreations /></div>
-          </div>
-        </div>
-
-        <div data-reveal className="mt-12 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
-          <Link
-            href="/sign-up"
-            className="litt-primary-button"
-            onClick={() => track("hero_cta_click", { source: "real_proof" })}
-          >
-            Start building free <ArrowRight size={16} />
-          </Link>
-          <a
-            href="#how-it-works"
-            className="litt-secondary-button"
-            onClick={handleWatchClick}
-          >
-            <Play size={13} fill="currentColor" /> See the walkthrough
-          </a>
-          <Link
-            href="/showcase/artist-launch-site"
-            className="litt-secondary-button"
-          >
-            See an example session <ArrowRight size={13} />
-          </Link>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function LandingPage() {
-  const landingRef = useRef<HTMLElement>(null);
-  useViewportReveals(landingRef);
-
-  return (
-    <main ref={landingRef} id="main-content" className="litt-landing litt-home min-h-dvh overflow-hidden bg-white text-[#0E1510] selection:bg-accent selection:text-on-accent">
-      <EggHuntProvider>
-        <LandingHeroV3 />
-        <RealProjectWalkthrough />
-        <CapabilityGrid />
-        <MissionDemo />
-        <HowItsMade />
-        <ComparisonTable />
-        <AgentCrew />
-        <CreationsSection />
-        <OnboardingSteps />
-        <TrustSection />
-        <FAQSection />
-      </EggHuntProvider>
-    </main>
   );
 }
 
