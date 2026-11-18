@@ -86,6 +86,7 @@ import { useExecutionStore, type MutationSummary } from "../stores/useExecutionS
 import { submitApprovalAndPoll, watchApprovalResolution, type ApprovalRunResult } from "../lib/approval-polling";
 import { createApprovalOutcomeGuard } from "../lib/approval-outcome-guard";
 import { StudioActivityPanel, StudioInspector, type StudioInspectorData } from "./StudioWorkspaceFrame";
+import StudioEntrySkeleton, { StudioEntryClassicSkeleton } from "./StudioEntrySkeleton";
 import StudioBoard from "./board/StudioBoard";
 import BoardPanelBindings from "./board/BoardPanelBindings";
 import BoardChatPanel from "./board/BoardChatPanel";
@@ -4029,7 +4030,20 @@ function CommandStudioContent() {
             Mobile behavior is unchanged: ContextDrawer is a right-side fixed
             overlay, LiTTPanel is a mobile sheet, Preview is a workspace tab. */}
         <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden" data-studio-body>
-        {studioShellActive ? (
+        {viewportTier === null && destination === "studio" ? (
+          // First paint before the viewport tier resolves (Studio
+          // entry fix, Larry 2026-11-18): render the CHOSEN layout's
+          // skeleton in place — board-shaped by default, classic when
+          // Regular is the persisted choice — instead of falling
+          // through to the classic body (whose chat column is gated
+          // on a resolved tier, which is what produced the brief
+          // centered-chat flash before the real layout took over).
+          classicOverride ? (
+            <StudioEntryClassicSkeleton />
+          ) : (
+            <StudioEntrySkeleton />
+          )
+        ) : studioShellActive ? (
           // Board-only shell (rebuild 2026-11-14): no stage rail, no
           // second nav rail, no bottom Developer bar, no rounded pale
           // container, no expansion step — the board fills ALL the
@@ -4049,17 +4063,18 @@ function CommandStudioContent() {
                 renderPanel={renderBoardPanel}
               />
             ) : (
-              // No project in scope yet: the conversation is the landing
-              // surface (its empty state carries the honest status
-              // notice and the primary action). Once a project binds,
-              // the board takes over with this same chat as a panel.
-              <div
-                className="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col border-x"
-                style={{ borderColor: "var(--studio-border)" }}
-                data-testid="studio-board-shell-noproject"
-              >
-                {boardChatContent}
-              </div>
+              // No project bound yet (auth / capabilities still
+              // resolving): the board skeleton occupies the board's
+              // geometry with panel placeholders at the default
+              // panels' positions, and the real conversation already
+              // lives inside the Chat panel's normal board slot —
+              // anchored top-center at its seeded rect. When the
+              // project binds, StudioBoard swaps in panel for panel;
+              // nothing is a lone centered column and nothing
+              // disappears (Studio entry fix, Larry 2026-11-18 —
+              // this replaces the retired centered-chat landing
+              // surface).
+              <StudioEntrySkeleton chatContent={boardChatContent} />
             )}
           </div>
         ) : (

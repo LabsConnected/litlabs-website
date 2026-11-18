@@ -85,17 +85,46 @@ describe("DiscoverShell", () => {
 });
 
 describe("StudioShell", () => {
-  it("renders the canvas-first 2-zone Studio chrome", () => {
+  it("renders the board-shaped Studio entry skeleton by default", () => {
     render(<StudioShell />);
     expect(screen.getByTestId("studio-shell")).toHaveAttribute(
       "aria-label",
       "Loading Studio",
     );
+    expect(screen.getByTestId("studio-shell")).toHaveAttribute(
+      "data-layout",
+      "board",
+    );
     expect(screen.getByTestId("studio-shell-header")).toBeInTheDocument();
-    expect(screen.getByTestId("studio-shell-chat")).toBeInTheDocument();
+    // The board area holds floating panel placeholders; the chat
+    // placeholder is one panel among them (its top-center board
+    // slot), never a lone centered column, and the retired 2-zone
+    // chrome (bottom dock / mobile nav) is gone.
+    const board = screen.getByTestId("studio-shell-board");
+    expect(board).toBeInTheDocument();
+    expect(board.contains(screen.getByTestId("studio-shell-chat"))).toBe(true);
+    expect(screen.getByTestId("studio-shell-panel-preview")).toBeInTheDocument();
+    expect(screen.getByTestId("studio-shell-panel-files")).toBeInTheDocument();
+    expect(screen.getByTestId("studio-shell-panel-media")).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-shell-dock")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("studio-shell-mobile-nav")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("studio-shell-classic")).not.toBeInTheDocument();
+    expectNoFakeContent();
+  });
+
+  it("renders the classic (Regular) entry skeleton when chosen", () => {
+    render(<StudioShell layout="classic" />);
+    expect(screen.getByTestId("studio-shell")).toHaveAttribute(
+      "data-layout",
+      "classic",
+    );
+    expect(screen.getByTestId("studio-shell-header")).toBeInTheDocument();
+    // Chat placeholder in its real in-flow left column, workspace
+    // main beside it.
+    const classic = screen.getByTestId("studio-shell-classic");
+    expect(classic.contains(screen.getByTestId("studio-shell-chat"))).toBe(true);
     expect(screen.getByTestId("studio-shell-workspace")).toBeInTheDocument();
-    expect(screen.getByTestId("studio-shell-dock")).toBeInTheDocument();
-    expect(screen.getByTestId("studio-shell-mobile-nav")).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-shell-board")).not.toBeInTheDocument();
     expectNoFakeContent();
   });
 });
