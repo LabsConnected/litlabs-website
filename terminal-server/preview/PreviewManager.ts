@@ -38,6 +38,11 @@ import {
   HEALTH_PROBE_TIMEOUT_MS as SANDBOX_HEALTH_PROBE_TIMEOUT_MS,
   type SandboxPreviewSupport,
 } from "./sandbox-runtime";
+import {
+  createPreviewVerifySweeper,
+  type PreviewVerifySweeper,
+  type PreviewVerifySweepSession,
+} from "./preview-verify-sweeper";
 
 /**
  * Environment variables that may be inherited from the terminal server.
@@ -2039,6 +2044,68 @@ export async function verifyPreviewHealth(workspaceId: string): Promise<boolean>
   rt.errorCode = "preview_dev_server_failed";
   rt.error = "Health check failed — process may have crashed";
   return false;
+}
+
+// ─── Preview verify sweeper (round 16 follow-up) ───────────────────
+// The live verify above was driven ONLY by clients polling the
+// preview status endpoint (the Studio panel, ~30 s, and only while
+// it sat in its local "ready" state). When the panel left that state
+// the rounds stopped entirely and C2's external-failure counter
+// could freeze below the recreation gate — the 2026-11-18 live proof
+// of PR #1040 froze at 3 of 4 rounds with the span long satisfied.
+// The sweeper runs the SAME verifyPreviewHealth on a terminal-side
+// interval for every ready runtime, so the accounting advances
+// whether or not anyone is polling. It adds no verdict logic:
+// C2's thresholds, caps, and cooldown are exactly as shipped.
+// See preview-verify-sweeper.ts for the tracking model.
+
+function previewVerifySweepSession(
+  rt: PreviewRuntime,
+): PreviewVerifySweepSession {
+  return {
+    workspaceId: rt.workspaceId,
+    sandboxId: rt.upstream?.kind === "sandbox" ? rt.upstream.sandboxId : null,
+    externalFailureCount: rt.healthExternalFailureCount ?? 0,
+  };
+}
+
+const previewVerifySweeper: PreviewVerifySweeper = createPreviewVerifySweeper({
+  // Rounds start only for runtimes currently "ready" — the same
+  // condition the status route applies before verifying.
+  listSessions: () => {
+    const sessions: PreviewVerifySweepSession[] = [];
+    for (const rt of runtimes.values()) {
+      if (rt.status === "ready") sessions.push(previewVerifySweepSession(rt));
+    }
+    return sessions;
+  },
+  // A session "exists" while its runtime is in the registry (this
+  // registry never deletes entries; stop flips status instead, and
+  // listSessions above is what ends its rounds).
+  getSession: (workspaceId) => {
+    const rt = runtimes.get(workspaceId);
+    return rt ? previewVerifySweepSession(rt) : undefined;
+  },
+  verify: (workspaceId) => verifyPreviewHealth(workspaceId),
+  log: (workspaceId, line) => {
+    const rt = runtimes.get(workspaceId);
+    // pushLog mirrors [preview] lines to the service stdout (C5), so
+    // the round lands in the service logs AND the runtime's own log
+    // ring. If the runtime vanished mid-round, keep the line on
+    // stdout directly rather than dropping it.
+    if (rt) pushLog(rt, line);
+    else console.log(line);
+  },
+});
+
+/** Start the terminal-side preview verify sweeper (server boot). */
+export function startPreviewVerifySweeper(): void {
+  previewVerifySweeper.start();
+}
+
+/** Stop the preview verify sweeper (tests / shutdown). */
+export function stopPreviewVerifySweeper(): void {
+  previewVerifySweeper.stop();
 }
 
 // ─── Proxy-time servability guard (2026-09-18) ──────────────────────

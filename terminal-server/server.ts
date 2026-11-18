@@ -72,6 +72,7 @@ import {
   getPreviewLogs,
   verifyPreviewHealth,
   registerSandboxPreviewSupport,
+  startPreviewVerifySweeper,
 } from "./preview/PreviewManager";
 
 /**
@@ -355,6 +356,12 @@ registerSandboxPreviewSupport({
   executor: sandboxExecutor,
   provider: sandboxStack.provider,
 });
+// Terminal-side driver for the live preview verify: runs
+// verifyPreviewHealth for every ready preview on an interval, so
+// C2's recreation accounting advances even when no Studio panel is
+// polling the status endpoint (round 16 follow-up; the 2026-11-18
+// proof of PR #1040 froze at 3 of 4 rounds when polling stopped).
+startPreviewVerifySweeper();
 
 /**
  * Forward a completed /ws-files volume mutation into the workspace's
