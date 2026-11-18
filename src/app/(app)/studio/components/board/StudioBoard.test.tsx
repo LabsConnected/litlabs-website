@@ -87,6 +87,45 @@ describe("StudioBoard surface (board-only)", () => {
     expect(toolbar.className).not.toContain("right-3");
   });
 
+  it("the toolbar menus live outside its scroll region, so no scroll container clips them into the pill (2026-11-17 strip defect)", () => {
+    renderBoard();
+    const toolbar = screen.getByTestId("board-toolbar");
+    const scrollRegion = screen.getByTestId("board-toolbar-scroll");
+    // The pill itself is NOT a scroll container. overflow-x:auto on
+    // it forces overflow-y to compute to auto too, which clipped the
+    // menus into a ~35px strip inside the pill on the live board.
+    expect(toolbar.className).not.toContain("overflow-x-auto");
+    expect(toolbar.className).not.toContain("overflow-y-auto");
+    // Only the summon row scrolls horizontally, and it can shrink.
+    expect(scrollRegion.className).toContain("overflow-x-auto");
+    expect(scrollRegion.className).toContain("min-w-0");
+    expect(scrollRegion).toContainElement(screen.getByTestId("board-summon-chat"));
+    // Neither menu trigger is inside the scroll region.
+    expect(scrollRegion).not.toContainElement(screen.getByTestId("board-layout-menu"));
+    expect(scrollRegion).not.toContainElement(screen.getByTestId("board-settings-button"));
+    // Open both popovers: each renders inside the toolbar but NOT
+    // inside the scroll region, and no ancestor between a popover
+    // and the toolbar is a scroll container — a scroll container on
+    // that chain is exactly what clips an absolutely-positioned
+    // popover to the pill's box.
+    fireEvent.click(screen.getByTestId("board-layout-menu"));
+    fireEvent.click(screen.getByTestId("board-settings-button"));
+    const popovers = [
+      screen.getByTestId("board-layout-menu-popover"),
+      screen.getByTestId("board-settings-menu"),
+    ];
+    for (const popover of popovers) {
+      expect(toolbar).toContainElement(popover);
+      expect(scrollRegion).not.toContainElement(popover);
+      let node = popover.parentElement;
+      while (node && node !== toolbar) {
+        expect(node.className).not.toContain("overflow-x-auto");
+        expect(node.className).not.toContain("overflow-y-auto");
+        node = node.parentElement;
+      }
+    }
+  });
+
   it("the toolbar summons a closed panel — user action only", () => {
     renderBoard();
     fireEvent.click(screen.getByTestId("board-summon-code"));
