@@ -64,6 +64,17 @@ jobs:
           fi
           exit 0
 
+      - name: Provider error lines from staging web logs (filtered, no secrets)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        continue-on-error: true
+        run: |
+          railway logs --service "@litlabs/litt-shell" --lines 2000 2>&1 \
+            | grep -iE "gemini|provider|fallback|429|quota|billing|RESOURCE_EXHAUSTED|model_routing|API key" \
+            | sed -E 's/(key|token|secret|password)([=: \t]+)[A-Za-z0-9_./+-]{8,}/\1\2<redacted>/gi' \
+            | tail -80 || true
+          exit 0
+
       - name: Service domains (non-secret)
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
