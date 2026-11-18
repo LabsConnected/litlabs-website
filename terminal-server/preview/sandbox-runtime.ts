@@ -595,6 +595,46 @@ export const PREVIEW_RECREATION_COOLDOWN_MS = 120_000;
  */
 export const PREVIEW_RECREATION_SETTLE_WATCHDOG_MS = 600_000;
 
+/**
+ * Round 16 settle follow-up — per-call settle bounds inside a
+ * launched recreation. The watchdog above bounds the recreation
+ * as a whole, but it is a backstop: when it fires it can only
+ * clear the flag and leave the attempt running. The 2026-11-18
+ * 12:30 ET production recreation proved the gap — the sweeper
+ * declared the address dead, recreation attempt 1 of 2 launched,
+ * the destroy started and NEVER settled (no destroyed/created
+ * line ever followed), and the watchdog's +600 s release left
+ * the attempt wedged behind a provider call that never returns.
+ * These bounds make each provider call in the recreation path
+ * answer for itself, in time for the recreation to proceed or
+ * to fail cleanly through its own catch/finally.
+ *
+ * The destroy bound is 120 s: provider.destroy is a single kill
+ * call — the ground-truth exec is granted 30 s and the verify
+ * probe 15 s — and the executor's lock queue ahead of it is
+ * normally free or draining; the value matches the start loop's
+ * 120 s health budget (HEALTH_PROBE_TIMEOUT_MS). A destroy that
+ * has not settled in two minutes is wedged, not slow. Timing
+ * out is safe: the old sandbox is abandoned (the provider
+ * expires it on its own lifetime cap), and in the recreation's
+ * own sequence the abandoned destroy sits AHEAD of the fresh
+ * start in the workspace's FIFO lock chain, so if it ever lands
+ * it clears the old binding before the fresh sandbox provisions
+ * — the new sandbox does not exist yet when the destroy runs.
+ */
+export const PREVIEW_RECREATION_DESTROY_TIMEOUT_MS = 120_000;
+
+/**
+ * The create bound is 480 s: roughly 1.6× the worst cold
+ * provision observed in production (~298.5 s, round 15 — the
+ * same yardstick the settle watchdog's 600 s is justified
+ * against), so a slow-but-healthy provision is never cut off,
+ * while a hung create fails the attempt through the recreation's
+ * own failure path — counted, logged, flag freed — a full two
+ * minutes before the watchdog would have to act as backstop.
+ */
+export const PREVIEW_RECREATION_CREATE_TIMEOUT_MS = 480_000;
+
 /** Bounded tail of the preview log carried in a failure diagnostic. */
 const PREVIEW_LOG_DIAGNOSTIC_MAX_CHARS = 2_000;
 
@@ -891,6 +931,45 @@ function armRecreationSettleWatchdog(args: {
 }
 
 /**
+ * The outcome of racing a promise against a settle deadline
+ * (round 16 settle follow-up): the promise's own value when it
+ * settles in time, or a timeout marker when the deadline wins.
+ * A rejection before the deadline PROPAGATES — a call that
+ * failed is a different event from a call that never answered,
+ * and the recreation handles them differently (only a timeout
+ * abandons the destroy and proceeds; a rejection fails the
+ * attempt through the existing path).
+ */
+type SettleOutcome<T> = { settled: true; value: T } | { settled: false };
+
+/**
+ * Race `promise` against a settle deadline of `timeoutMs`
+ * (round 16 settle follow-up). The promise is never cancelled —
+ * a promise cannot be — it keeps running detached, and the
+ * race's own handlers consume its eventual settle, so a late
+ * rejection is never an unhandled rejection. The timer is
+ * unref'd (the settle watchdog's precedent): a pending bound
+ * must not keep the process alive on its own.
+ */
+async function settleWithin<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<SettleOutcome<T>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise.then((value): SettleOutcome<T> => ({ settled: true, value })),
+      new Promise<SettleOutcome<T>>((resolve) => {
+        timer = setTimeout(() => resolve({ settled: false }), timeoutMs);
+        if (typeof timer.unref === "function") timer.unref();
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
  * Round 16 (C2) — recreate the sandbox to mint a genuinely new
  * preview address.
  *
@@ -924,6 +1003,17 @@ function armRecreationSettleWatchdog(args: {
  * "starting", unless the start itself already recorded a terminal
  * state (e.g. an install failure, which startSandboxPreview marks
  * failed with its own error).
+ *
+ * Round 16 settle follow-up: both provider calls are settle-
+ * bounded (see PREVIEW_RECREATION_DESTROY_TIMEOUT_MS /
+ * PREVIEW_RECREATION_CREATE_TIMEOUT_MS). A destroy that does not
+ * settle in time is logged and ABANDONED — the recreation
+ * proceeds to provision the fresh sandbox anyway, and the
+ * provider expires the old sandbox on its own lifetime cap. A
+ * start that does not settle in time throws into the failure
+ * path below, so the attempt ends counted and logged with the
+ * in-flight flag freed by the finally, instead of hanging until
+ * the settle watchdog has to release it.
  */
 async function recreateSandboxPreview(args: {
   support: SandboxPreviewSupport;
@@ -931,6 +1021,10 @@ async function recreateSandboxPreview(args: {
   ws: WorkspaceDescriptor;
   /** Launch generation (round 16 follow-up) — see recreationGenerations. */
   generation: number;
+  /** Settle bound for the destroy call (round 16 settle follow-up). */
+  destroyTimeoutMs: number;
+  /** Settle bound for the fresh start (round 16 settle follow-up). */
+  createTimeoutMs: number;
   probe?: (
     origin: string,
     headers: Record<string, string>,
@@ -960,22 +1054,57 @@ async function recreateSandboxPreview(args: {
       `[preview] Destroying sandbox ${oldSandboxId} — the recreation ` +
         `continues once the destroy settles`,
     );
-    await support.executor.destroySandbox(ws);
-    pushPreviewLog(
-      runtime,
-      `[preview] Destroyed sandbox ${oldSandboxId} (dead address ${oldOrigin}) — ` +
-        `provisioning a fresh sandbox through the standard path`,
+    // Round 16 settle follow-up: the destroy is settle-bounded.
+    // A destroy that REJECTS still fails the attempt (the catch
+    // below) — a refused kill is news, not silence. A destroy
+    // that never answers is abandoned and the recreation
+    // proceeds: waiting on it forever is the 2026-11-18 12:30 ET
+    // wedge, and the old sandbox needs no one's permission to
+    // die — the provider expires it on its own lifetime cap.
+    const destroyOutcome = await settleWithin(
+      support.executor.destroySandbox(ws),
+      args.destroyTimeoutMs,
     );
-    const started = await startSandboxPreview({
-      support,
-      runtime,
-      ws,
-      framework: runtime.framework,
-      command: runtime.command,
-      packageManager: runtime.packageManager ?? "pnpm",
-      travelingEnv: buildSandboxTravelingEnv(runtime.clerkProjectEnv ?? {}),
-      probe: args.probe,
-    });
+    if (destroyOutcome.settled) {
+      pushPreviewLog(
+        runtime,
+        `[preview] Destroyed sandbox ${oldSandboxId} (dead address ${oldOrigin}) — ` +
+          `provisioning a fresh sandbox through the standard path`,
+      );
+    } else {
+      pushPreviewLog(
+        runtime,
+        `[preview] Destroy of sandbox ${oldSandboxId} did not settle within ` +
+          `${args.destroyTimeoutMs}ms — abandoning the old sandbox (the provider ` +
+          `expires it on its own lifetime cap) and proceeding to provision a ` +
+          `fresh sandbox through the standard path`,
+      );
+    }
+    // The fresh start is settle-bounded too: a hung provision or
+    // install throws into the failure path below, so the attempt
+    // fails cleanly — counted at launch, logged here, flag freed
+    // by the finally — instead of hanging until the watchdog.
+    const startOutcome = await settleWithin(
+      startSandboxPreview({
+        support,
+        runtime,
+        ws,
+        framework: runtime.framework,
+        command: runtime.command,
+        packageManager: runtime.packageManager ?? "pnpm",
+        travelingEnv: buildSandboxTravelingEnv(runtime.clerkProjectEnv ?? {}),
+        probe: args.probe,
+      }),
+      args.createTimeoutMs,
+    );
+    if (!startOutcome.settled) {
+      throw new Error(
+        `the fresh sandbox start did not settle within ${args.createTimeoutMs}ms — ` +
+          `provisioning or install appears hung; the abandoned start may still ` +
+          `land in the background and will log its own outcome if it does`,
+      );
+    }
+    const started = startOutcome.value;
     const fresh = started.upstream;
     pushPreviewLog(
       runtime,
@@ -1082,6 +1211,15 @@ export async function verifySandboxPreviewHealth(
      * bound to exercise the watchdog without waiting it out.
      */
     recreationSettleWatchdogMs?: number;
+    /**
+     * Per-call settle bounds for a launched recreation (round 16
+     * settle follow-up). Default to
+     * PREVIEW_RECREATION_DESTROY_TIMEOUT_MS /
+     * PREVIEW_RECREATION_CREATE_TIMEOUT_MS; tests inject short
+     * bounds to exercise the timeouts without waiting them out.
+     */
+    recreationDestroyTimeoutMs?: number;
+    recreationCreateTimeoutMs?: number;
   } = {},
 ): Promise<boolean> {
   const upstream = runtime.upstream;
@@ -1338,6 +1476,12 @@ export async function verifySandboxPreviewHealth(
       ws,
       generation,
       probe: (origin, headers) => probe(origin, headers),
+      destroyTimeoutMs:
+        deps.recreationDestroyTimeoutMs ??
+        PREVIEW_RECREATION_DESTROY_TIMEOUT_MS,
+      createTimeoutMs:
+        deps.recreationCreateTimeoutMs ??
+        PREVIEW_RECREATION_CREATE_TIMEOUT_MS,
     });
     recreationPromises.set(runtime, promise);
     armRecreationSettleWatchdog({
