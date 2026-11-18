@@ -176,6 +176,15 @@ export interface PreviewRuntime {
   healthFailureCount?: number;
   /** Timestamp of the first failure in the current verify window. */
   healthFailureSince?: number | null;
+  /**
+   * Round 15 (C1): consecutive live-verify rounds whose liveness
+   * check itself was UNREADABLE (verifySandboxPreviewHealth). An
+   * unreadable verdict is not evidence of death and never counts
+   * toward conviction — but a thermometer that stays broken is
+   * itself surfaced in the log after a few rounds. Reset whenever a
+   * round produces a readable verdict or a healthy probe.
+   */
+  healthLivenessUnreadableCount?: number;
 }
 
 interface PreviewStartInput {
@@ -1048,6 +1057,19 @@ function pushLog(runtime: PreviewRuntime, line: string): void {
   runtime.logs.push(line);
   if (runtime.logs.length > MAX_LOG_LINES) {
     runtime.logs.splice(0, runtime.logs.length - MAX_LOG_LINES);
+  }
+  // Round 15 (C5): mirror the preview machinery's own verdict lines
+  // to the terminal service's stdout, so they survive in the service
+  // logs (Railway) across restarts. Until now every [preview] line —
+  // including the live verify's per-round reasoning — lived only in
+  // this per-runtime memory ring and died with the runtime object,
+  // which starved the round-13/14/15 diagnoses of exactly the
+  // evidence that would have settled them. Only [preview]-prefixed
+  // lines are mirrored: the dev server's own output (pushed raw and
+  // as [stderr]) stays ring-only, so stdout gains the verdicts
+  // without inheriting the guest's noise.
+  if (line.startsWith("[preview]")) {
+    console.info(line);
   }
 }
 
