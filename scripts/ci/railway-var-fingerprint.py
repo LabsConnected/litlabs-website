@@ -20,6 +20,14 @@ URL_VARS = {
     "NEXT_PUBLIC_TERMINAL_HTTP_URL",
     "NEXT_PUBLIC_TERMINAL_WS_URL",
     "RAILWAY_GIT_COMMIT_SHA",
+    # Non-secret provider/config knobs — safe to print in full.
+    "GROQ_REQUEST_TOKEN_CEILING",
+    "OPENROUTER_MODEL",
+    "OPENROUTER_LEGACY_TAIL_MODELS",
+    "GEMINI_MODEL",
+    "GEMINI_MODELS",
+    "GEMINI_PRIMARY_MODEL",
+    "GEMINI_DISABLED",
 }
 
 
