@@ -34,9 +34,30 @@
  * the trigger (12px viewport margin), and flips to open ABOVE the
  * trigger when the space below is tight and above is roomier. The
  * static class cap stays as the pre-measure fallback only.
+ *
+ * Viewport fit hardening (follow-up, 2026-11-18): the one-shot
+ * trigger measurement still failed the live proof — the menu opened
+ * past the bottom edge of a 1919x998 viewport with Deploy cut off
+ * and Media / Browser / Reset unreachable. Three defects compounded:
+ * (1) the flip test used a fixed 360px "tight" guess while this
+ * menu's real content is ~950px tall, so "space below is
+ * insufficient" was judged against the wrong number; (2) the fit was
+ * computed once, at open, from the trigger's rect — never from the
+ * menu's own rendered box, and never re-checked while the board's
+ * layout settled around the toolbar, so a stale or pre-settle
+ * measurement silently left a cap that overflowed; (3) the static
+ * fallback cap (100vh - 96px) ignores the trigger's real anchor
+ * position below the stacked app + Studio headers. The fit now
+ * decides flipping from the menu's ACTUAL content height
+ * (scrollHeight), caps the height to the space measured from the
+ * menu's own rendered top (or bottom, when flipped) to the viewport
+ * edge, and keeps re-fitting while the menu is open (a correction
+ * pass after the fitted render, a ResizeObserver on the menu, and
+ * the window resize listener) — the painted menu cannot extend past
+ * the viewport edge, whatever the anchor measurement assumed.
  */
 
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { SlidersHorizontal } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import {
@@ -106,29 +127,81 @@ export default function BoardSettingsMenu() {
   const settings = useBoardSettingsStore();
   const { layoutMode, setLayoutMode } = useStudioLayoutMode();
   const wrapRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   // Measured viewport fit for the open menu (see the header note):
   // maxHeight is the exact space in the chosen direction; flipped
   // renders the menu above its trigger instead of below it.
   const [menuFit, setMenuFit] = useState<{ maxHeight: number; flipped: boolean } | null>(null);
 
+  // Compute the fit from BOTH rects: the trigger's (where the menu
+  // anchors) and the menu's own rendered box (where it actually
+  // paints). The anchor math proposes; the rendered box disposes —
+  // the final cap never lets the painted menu cross the viewport
+  // edge. Idempotent: re-running it on an already-correct fit is a
+  // no-op, so the correction passes below settle instead of looping.
+  const fitMenu = useCallback(() => {
+    const wrap = wrapRef.current;
+    const menu = menuRef.current;
+    if (!wrap || !menu) return;
+    const rect = wrap.getBoundingClientRect();
+    const gap = 8; // the menu's 8px offset from the trigger
+    const margin = 12; // breathing room at the viewport edge
+    const below = window.innerHeight - rect.bottom - gap - margin;
+    const above = rect.top - gap - margin;
+    // "Insufficient space below" is judged against the menu's real
+    // content height (~950px of sections), not a fixed guess. When
+    // the content height cannot be measured (0), fall back to the
+    // original fixed threshold.
+    const natural = menu.scrollHeight;
+    const insufficient = natural > 0 ? natural > below : below < 360;
+    const flipped = insufficient && above > below;
+    const space = flipped ? above : below;
+    let maxHeight = Math.max(200, Math.floor(space));
+    // Rendered-box correction: cap to the space from the menu's own
+    // rendered top (below placement — the top is the anchored edge)
+    // or rendered bottom (flipped — the bottom is the anchored edge)
+    // to the viewport's far edge. Skipped when the menu has no
+    // measurable box yet (e.g. jsdom), where the anchor math rules.
+    const menuRect = menu.getBoundingClientRect();
+    if (menuRect.height > 0) {
+      const allowance = flipped
+        ? menuRect.bottom - margin
+        : window.innerHeight - margin - menuRect.top;
+      if (allowance > 0) {
+        maxHeight = Math.min(maxHeight, Math.floor(allowance));
+      }
+    }
+    const next = { flipped, maxHeight };
+    setMenuFit((prev) =>
+      prev && prev.flipped === next.flipped && prev.maxHeight === next.maxHeight ? prev : next,
+    );
+  }, []);
+
   useLayoutEffect(() => {
     if (!open) return;
-    const measure = () => {
-      const el = wrapRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const gap = 8; // the menu's 8px offset from the trigger
-      const margin = 12; // breathing room at the viewport edge
-      const below = window.innerHeight - rect.bottom - gap - margin;
-      const above = rect.top - gap - margin;
-      const flipped = below < 360 && above > below;
-      const space = flipped ? above : below;
-      setMenuFit({ flipped, maxHeight: Math.max(200, Math.floor(space)) });
+    fitMenu();
+    window.addEventListener("resize", fitMenu);
+    // The menu's content can change height while open (and the board
+    // can settle around the toolbar after the first paint) — keep
+    // the fit honest for as long as the menu is open.
+    const observer =
+      typeof ResizeObserver !== "undefined" && menuRef.current
+        ? new ResizeObserver(fitMenu)
+        : null;
+    if (observer && menuRef.current) observer.observe(menuRef.current);
+    return () => {
+      window.removeEventListener("resize", fitMenu);
+      observer?.disconnect();
     };
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, [open ]);
+  }, [open, fitMenu ]);
+
+  // Correction pass: once the fitted render has laid out, measure
+  // again — if the first pass worked from a pre-settle anchor, this
+  // is where the rendered box pulls the cap back inside the viewport.
+  useLayoutEffect(() => {
+    if (!open || !menuFit) return;
+    fitMenu();
+  }, [open, menuFit, fitMenu ]);
 
   return (
     <div className="relative shrink-0" ref={wrapRef}>
@@ -150,6 +223,7 @@ export default function BoardSettingsMenu() {
       </button>
       {open && (
         <div
+          ref={menuRef}
           data-testid="board-settings-menu"
           data-placement={menuFit?.flipped ? "above" : "below"}
           className={`pointer-events-auto absolute right-0 ${menuFit?.flipped ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]"} max-h-[calc(100vh-96px)] w-[min(360px,calc(100vw-24px))] overflow-y-auto rounded-xl border p-1.5 shadow-lg`}

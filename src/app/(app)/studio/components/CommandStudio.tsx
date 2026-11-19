@@ -91,6 +91,7 @@ import StudioEntrySkeleton, { StudioEntryClassicSkeleton } from "./StudioEntrySk
 import StudioBoard from "./board/StudioBoard";
 import BoardPanelBindings from "./board/BoardPanelBindings";
 import BoardChatPanel from "./board/BoardChatPanel";
+import ChatJobsView from "./ChatJobsView";
 import { useBoardProjectType } from "./board/useBoardProjectType";
 import { boardScopeKey, type BoardPanelId } from "./board/board-types";
 import { useBoardLayoutStore } from "../stores/useBoardLayoutStore";
@@ -3377,6 +3378,21 @@ function CommandStudioContent() {
     </>
   );
 
+  // The Regular layout's Jobs tab body: the SAME shared ChatJobsView
+  // the board chat panel's Jobs tab renders (Larry's decided chat
+  // structure, 2026-11-18 — Chat | Jobs in both layouts, the run-status
+  // strip mounted only inside Jobs). Its Checks summon opens the right
+  // rail's Checks tab, the Regular layout's one Checks home.
+  const littJobsContent = (
+    <ChatJobsView
+      projectId={capabilities.projectId}
+      conversationId={conversation.selectedConversationId}
+      jobsBusy={conversation.busy}
+      jobsRefreshKey={workspaceRevision}
+      onOpenChecks={() => setRailTab("checks")}
+    />
+  );
+
   // The Command Center chat panel's content (board-only rebuild): the
   // SAME transcript + composer elements the left dock carried, now
   // inside the movable board chat panel. New Chat lives in this panel
@@ -4136,13 +4152,15 @@ function CommandStudioContent() {
               voiceConnected={liveSession.isLive}
               microphoneStatus={liveSession.indicators.microphone}
               chatContent={littChatContent}
+              jobsContent={littJobsContent}
               // Mockup port (2026-11-18): no liveContent / filesContent
               // here anymore — in this non-shell desktop body the
               // Activity feed and the Files surface live in the right
               // rail (StudioRightRail, mounted beside <main> below),
-              // so this panel is Chat-only, matching the mockup's
-              // Regular layout (chat column = conversation + composer).
-              // The mobile sheet keeps its own tabs and contents.
+              // so this panel carries Chat + Jobs only, matching the
+              // mockup's Regular layout (chat column = conversation +
+              // composer, Jobs tab = the run's settlement home). The
+              // mobile sheet keeps its own tabs and contents.
               expandedWidth={littResize.width}
             />
           )}

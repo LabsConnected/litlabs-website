@@ -2,10 +2,15 @@
 
 /**
  * LiTT panel — left side of the Ultra Vision shell, desktop/laptop tier
- * (lg breakpoint and up). One agent, views: Chat | Activity | Files |
- * Components (Files/Components tabs added 2026-11-13 per Larry).
+ * (lg breakpoint and up). One agent, views: Chat | Jobs | Activity |
+ * Files | Components (Files/Components tabs added 2026-11-13 per Larry).
  *
  * Chat: conversation transcript + composer
+ * Jobs: the run's plan steps, live task steps, checks summary, work
+ * log, approvals and changes — the shared ChatJobsView, the same body
+ * the Board layout's chat panel shows. Larry's decided chat structure
+ * (2026-11-18): the Chat panel carries a two-tab Chat | Jobs header in
+ * BOTH layouts, and the run-status runtime strip lives ONLY in Jobs.
  * Activity: real-time execution telemetry (tool calls, diffs, checks, approvals)
  *
  * Both tabs share the same conversation/execution state instances
@@ -33,12 +38,12 @@
  */
 
 import type { ReactNode } from "react";
-import { MessageSquare, Activity, FolderOpen, Component, PanelLeftClose, X } from "lucide-react";
+import { MessageSquare, Activity, Briefcase, FolderOpen, Component, PanelLeftClose, X } from "lucide-react";
 import { BrandLogo } from "@/components/branding/BrandLogo";
 import LiTTAmbientHUD from "./litt/LiTTAmbientHUD";
 import type { DeviceStatus } from "@/lib/litt/live/types";
 
-export type LiTTTab = "chat" | "live" | "files" | "components";
+export type LiTTTab = "chat" | "jobs" | "live" | "files" | "components";
 
 interface LiTTPanelProps {
   /** Chat tab content — transcript + composer */
@@ -52,6 +57,16 @@ interface LiTTPanelProps {
    * one place per layout, never mounted twice.
    */
   liveContent?: ReactNode;
+  /**
+   * Jobs tab content — the shared ChatJobsView (plan, live run steps,
+   * checks summary, work log, approvals, changes). When provided, the
+   * tab row gains a Jobs tab directly beside Chat, giving the Regular
+   * layout the same Chat | Jobs two-tab header as the Board layout's
+   * BoardChatPanel (Larry's decided chat structure, 2026-11-18). The
+   * run-status runtime strip mounts ONLY inside this content — never
+   * in the Chat pane.
+   */
+  jobsContent?: ReactNode;
   /**
    * Files / Components tab content — the StudioProjectFiles surface.
    * When provided, the tab row gains Files and Components tabs beside
@@ -93,6 +108,7 @@ interface LiTTPanelProps {
 export default function LiTTPanel({
   chatContent,
   liveContent,
+  jobsContent,
   filesContent,
   activeTab,
   onTabChange,
@@ -185,6 +201,22 @@ export default function LiTTPanel({
             <MessageSquare size={12} className="pointer-events-none" />
             Chat
           </button>
+          {jobsContent ? (
+            <button
+              type="button"
+              onClick={() => onTabChange("jobs")}
+              className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+              style={{
+                color: activeTab === "jobs" ? "var(--color-accent)" : "var(--text-muted)",
+                backgroundColor: activeTab === "jobs" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
+              }}
+              aria-pressed={activeTab === "jobs"}
+              data-testid="litt-tab-jobs"
+            >
+              <Briefcase size={12} className="pointer-events-none" />
+              Jobs
+            </button>
+          ) : null}
           {liveContent ? (
             <button
               type="button"
@@ -276,6 +308,19 @@ export default function LiTTPanel({
           >
             {chatContent}
           </div>
+          {jobsContent ? (
+            <div
+              className="absolute inset-0 flex flex-col overflow-hidden"
+              style={{
+                visibility: activeTab === "jobs" ? "visible" : "hidden",
+                pointerEvents: activeTab === "jobs" ? "auto" : "none",
+              }}
+              data-active={activeTab === "jobs"}
+              data-testid="litt-jobs-panel"
+            >
+              {jobsContent}
+            </div>
+          ) : null}
           {liveContent ? (
             <div
               className="absolute inset-0 flex flex-col overflow-hidden"

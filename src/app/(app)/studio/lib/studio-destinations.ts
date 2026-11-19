@@ -120,7 +120,10 @@ export const DIRECTIVE_STAGE_LABELS: Record<DirectiveStage, string> = {
   plan: "Plan",
   "canvas-design": "Canvas & Design",
   code: "Code",
-  preview: "Preview",
+  // The standalone preview surface is named "Static View" (Larry,
+  // 2026-11-18) — this record drives the Regular layout's workspace
+  // tabs, which the stage-surfaces rename missed.
+  preview: "Static View",
   media: "Media",
 };
 

@@ -255,13 +255,14 @@ export function MobileCommandNav({
   onSelectSurface?: (surface: MobileStudioSurface) => void;
 }) {
   // Phone bottom navigation (Studio Finish Spec, Larry 2026-11-14 —
-  // supersedes the 2026-11-13 removal): exactly Chat · Preview ·
-  // Files · More. Activity lives inside More (the Tools sheet) and in
-  // its own board panel; Settings lives inside More too. Every target
-  // is at least 44×44 CSS px.
+  // supersedes the 2026-11-13 removal): exactly Chat · Static View ·
+  // Files · More. (The surface id stays "preview"; its name is
+  // "Static View" — Larry, 2026-11-18.) Activity lives inside More
+  // (the Tools sheet) and in its own board panel; Settings lives
+  // inside More too. Every target is at least 44×44 CSS px.
   const surfaceItems: { id: MobileStudioSurface; label: string; icon: typeof MessageSquare }[] = [
     { id: "chat", label: "Chat", icon: MessageSquare },
-    { id: "preview", label: "Preview", icon: Eye },
+    { id: "preview", label: "Static View", icon: Eye },
     { id: "files", label: "Files", icon: FolderOpen },
     { id: "more", label: "More", icon: MoreHorizontal },
   ];

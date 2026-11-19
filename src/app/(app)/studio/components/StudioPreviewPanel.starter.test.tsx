@@ -61,7 +61,7 @@ describe("StudioPreviewPanel starter-template honesty", () => {
     act(() => useExecutionStore.getState().reset());
   });
 
-  it("labels an untouched starter scaffold as a template, never 'Preview ready'", async () => {
+  it("labels an untouched starter scaffold as a template, never 'Static View ready'", async () => {
     mockFetch({ scaffolded: true, touched: false, starterContent: true }, STATIC_READY);
     renderPanel();
 
@@ -69,7 +69,7 @@ describe("StudioPreviewPanel starter-template honesty", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Starter template — not built yet").length).toBeGreaterThan(0);
     });
-    expect(screen.queryByText("Preview ready")).toBeNull();
+    expect(screen.queryByText("Static View ready")).toBeNull();
     const notice = await screen.findByTestId("preview-starter-notice");
     expect(notice.textContent).toMatch(/nothing has been built/i);
   });
@@ -83,7 +83,7 @@ describe("StudioPreviewPanel starter-template honesty", () => {
       expect(notice.textContent).toMatch(/last build failed/i);
     });
     expect(notice.textContent).toContain("AI routes were unavailable");
-    expect(screen.queryByText("Preview ready")).toBeNull();
+    expect(screen.queryByText("Static View ready")).toBeNull();
   });
 
   it("still labels the entry page as starter after edits that never replaced it", async () => {
@@ -92,15 +92,15 @@ describe("StudioPreviewPanel starter-template honesty", () => {
 
     const notice = await screen.findByTestId("preview-starter-notice");
     expect(notice.textContent).toMatch(/starter template/i);
-    expect(screen.queryByText("Preview ready")).toBeNull();
+    expect(screen.queryByText("Static View ready")).toBeNull();
   });
 
-  it("a real built static site keeps the honest 'Preview ready' and no starter notice", async () => {
+  it("a real built static site keeps the honest 'Static View ready' and no starter notice", async () => {
     mockFetch({ scaffolded: false, touched: true, starterContent: false }, STATIC_READY);
     renderPanel();
 
     await waitFor(() => {
-      expect(screen.getAllByText("Preview ready").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Static View ready").length).toBeGreaterThan(0);
     });
     expect(screen.queryByTestId("preview-starter-notice")).toBeNull();
   });
