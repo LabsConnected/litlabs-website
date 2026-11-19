@@ -989,6 +989,37 @@ async function resolveInsertDirectory(
 }
 
 /**
+ * Sleep for a retry backoff, waking early when the caller's deadline
+ * fires. The backoff schedule itself is unchanged — but a caller that
+ * has already spent its budget (the enrichment run's overall signal,
+ * whose contract is that it "cuts the download short") must not be kept
+ * waiting by a sleep it has already cancelled. The single 500ms retry
+ * overshot a spent budget by at most 500ms; an uninterruptible 5s
+ * backoff sleep overshoots it by seconds per download, and stacked
+ * across an enrichment run's downloads it pushed approval-resume
+ * operations past their bounds (CI timeouts, 2026-11-19). With no
+ * caller signal — the registry's post-generation save — the full
+ * schedule runs exactly as before.
+ */
+function sleepUnlessAborted(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
  * Download an image URL and save it into the project workspace as a binary
  * file. Shared core behind the project.insert_asset tool AND the automatic
  * post-generation save in the tool registry: after image.generate succeeds
@@ -1026,9 +1057,9 @@ export async function insertAssetFromUrl(
       buffer = decoded.buffer;
       contentType = decoded.contentType;
     } else {
-      // One retry on transient upstream failures (network blips, 429, 5xx)
-      // — a single free-host hiccup must not strand an otherwise healthy
-      // image the way a definitive 4xx correctly does.
+      // Bounded retries on transient upstream failures (network blips,
+      // 402, 429, 5xx) — a free-host hiccup must not strand an otherwise
+      // healthy image the way a definitive 4xx correctly does.
       let lastErr: unknown = null;
       const download = async (): Promise<Response | null> => {
         try {
@@ -1060,11 +1091,30 @@ export async function insertAssetFromUrl(
       // 402 joins the retryable set: pollinations intermittently answers
       // Payment Required for identical requests (observed 2026-11-10) —
       // one blip must not dead-end an otherwise healthy image lane.
-      if (resp === null || resp.status === 402 || resp.status === 408 || resp.status === 429 || resp.status >= 500) {
+      // The retry window is a bounded backoff (0.5s / 2s / 5s): a
+      // payment/quota gate can stay up for seconds at a time, and the
+      // single 500ms retry proved too thin live (2026-11-19 — two 402s
+      // in a row killed the project save of a healthy generated image).
+      // Once the schedule is exhausted the failure below stays honest:
+      // the caller still gets the real status or network error. The
+      // sleeps honor the caller's deadline (sleepUnlessAborted): the
+      // schedule is for callers still waiting, not for budgets already
+      // spent.
+      const RETRY_DELAYS_MS = [500, 2_000, 5_000];
+      for (const delayMs of RETRY_DELAYS_MS) {
+        if (
+          resp !== null &&
+          resp.status !== 402 &&
+          resp.status !== 408 &&
+          resp.status !== 429 &&
+          resp.status < 500
+        ) {
+          break;
+        }
         if (opts.signal?.aborted) {
           throw lastErr instanceof Error ? lastErr : new Error("Failed to download asset: aborted");
         }
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await sleepUnlessAborted(delayMs, opts.signal);
         resp = await download();
       }
       if (resp === null) {
