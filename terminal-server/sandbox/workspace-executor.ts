@@ -874,6 +874,48 @@ export class SandboxWorkspaceExecutor {
     return this.withLock(descriptor.workspaceId, () => fn(this.fresh(descriptor)));
   }
 
+  // ─── Terminal support (terminal bridge §2.5) ────────────────────
+
+  /**
+   * Ensure a live sandbox for an interactive terminal attach: the
+   * same gate check, lock, mirror bootstrap, and loud pending-forward
+   * flush as a preview start — the shell must land in the ONE sandbox
+   * exec and preview already use, with the volume's latest state in
+   * it. Returns null when the gate is closed so the caller keeps the
+   * fail-closed refusal; never falls back to a host shell.
+   */
+  async ensureSandboxForTerminal(
+    descriptorIn: WorkspaceDescriptor,
+  ): Promise<{ sandboxId: string } | null> {
+    if (!this.isAvailableFor(descriptorIn.userId)) return null;
+    const descriptor = this.fresh(descriptorIn);
+    return this.withLock(descriptor.workspaceId, async () => {
+      const ws = this.fresh(descriptor);
+      const { sandboxId } = await this.ensureSandboxLocked(ws, { bootstrap: "mirror" });
+      await this.flushPendingForwardLocked(ws, sandboxId);
+      return { sandboxId };
+    });
+  }
+
+  /**
+   * Sync the sandbox's tree back to the workspace volume for a
+   * terminal session (terminal bridge §2.5). Interactive-shell edits
+   * bypass exec's held sync-back, so the session manager triggers
+   * this explicitly (on kill / grace expiry and periodically while
+   * attached). Rides the workspace lock chain, so it cannot race
+   * exec/preview syncs. No live binding = nothing to sync (the
+   * volume already holds the last synced state).
+   */
+  async syncBackForTerminal(descriptorIn: WorkspaceDescriptor): Promise<void> {
+    const descriptor = this.fresh(descriptorIn);
+    await this.withLock(descriptor.workspaceId, async () => {
+      const ws = this.fresh(descriptor);
+      const binding = ws.sandbox;
+      if (!binding?.sandboxId || binding.state === "lost") return;
+      await this.syncBackLocked(ws, binding.sandboxId);
+    });
+  }
+
   /** Stamp the binding's preview port (persisted; not the URL). */
   notePreviewPort(descriptorIn: WorkspaceDescriptor, port: number | null): void {
     const descriptor = this.fresh(descriptorIn);

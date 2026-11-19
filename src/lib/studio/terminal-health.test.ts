@@ -9,6 +9,23 @@ describe("deriveTerminalHealth — one canonical terminal state", () => {
       .toMatchObject({ state: "connecting", level: "yellow" });
   });
 
+  it("sandbox-live sessions say so in the detail (terminal bridge §4)", () => {
+    // Explicit route from the producer.
+    expect(deriveTerminalHealth({ storeStatus: "connected", cwd: "/workspace", serverReachable: true, route: "sandbox" }))
+      .toMatchObject({ state: "live", level: "green", label: "Terminal live", detail: "Shell attached · /workspace (sandbox)" });
+    // The §2.5 ready-payload contract: a sandbox session's verified
+    // cwd is exactly "/workspace" — the label holds even when the
+    // producer does not carry the route field yet.
+    expect(deriveTerminalHealth({ storeStatus: "connected", cwd: "/workspace", serverReachable: true }))
+      .toMatchObject({ detail: "Shell attached · /workspace (sandbox)" });
+    // Host sessions keep the plain detail, and an explicit host
+    // route wins over the cwd inference.
+    expect(deriveTerminalHealth({ storeStatus: "connected", cwd: "/data/littree-workspaces/u/p", serverReachable: true }))
+      .toMatchObject({ detail: "Shell attached · /data/littree-workspaces/u/p" });
+    expect(deriveTerminalHealth({ storeStatus: "connected", cwd: "/workspace", serverReachable: true, route: "host" }))
+      .toMatchObject({ detail: "Shell attached · /workspace" });
+  });
+
   it("a healthy server with no attached PTY is idle, never unavailable", () => {
     // Regression: the probe used to omit serverReachable, so this case
     // rendered "Terminal unavailable" next to a header saying "idle".

@@ -806,3 +806,62 @@ describe("ensureSandboxWorkspaceWritable", () => {
     ).resolves.toBeUndefined();
   });
 });
+
+describe("terminal wrappers (terminal bridge §2.5)", () => {
+  it("ensureSandboxForTerminal returns the sandbox when the gate is open, null when closed", async () => {
+    const provider = new FakeSandboxProvider();
+    const executor = executorFor(provider);
+    const ws = seedDescriptor("proj-terminal-ensure");
+    const ensured = await executor.ensureSandboxForTerminal(ws);
+    expect(ensured?.sandboxId).toBeTruthy();
+    expect(provider.calls.create).toBe(1);
+    expect(getWorkspace(ws.workspaceId)?.sandbox?.state).toBe("running");
+    expect(getWorkspace(ws.workspaceId)?.sandbox?.sandboxId).toBe(ensured!.sandboxId);
+
+    const closedProvider = new FakeSandboxProvider();
+    const closedExecutor = executorFor(
+      closedProvider,
+      gateFor(closedProvider, { isVerified: () => false }),
+    );
+    const ws2 = seedDescriptor("proj-terminal-closed");
+    await expect(closedExecutor.ensureSandboxForTerminal(ws2)).resolves.toBeNull();
+    expect(closedProvider.calls.create).toBe(0);
+  });
+
+  it("ensureSandboxForTerminal declines a non-owner without touching the provider", async () => {
+    const provider = new FakeSandboxProvider();
+    const executor = executorFor(provider);
+    const ws = seedDescriptor("proj-terminal-nonowner", OTHER);
+    await expect(executor.ensureSandboxForTerminal(ws)).resolves.toBeNull();
+    expect(provider.calls.create).toBe(0);
+  });
+
+  it("syncBackForTerminal lands shell-created files on the volume and stamps the binding", async () => {
+    const provider = new FakeSandboxProvider();
+    const executor = executorFor(provider);
+    const ws = seedDescriptor("proj-terminal-sync");
+    const ensured = await executor.ensureSandboxForTerminal(ws);
+    expect(ensured).not.toBeNull();
+
+    // An interactive shell writes a file inside the sandbox — no
+    // exec runs, so nothing syncs it until the terminal trigger.
+    await provider.fileTransfer!.writeFile(
+      ensured!.sandboxId,
+      "/workspace/from-shell.txt",
+      new TextEncoder().encode("shell-was-here"),
+    );
+    expect(existsSync(join(ws.root, "from-shell.txt"))).toBe(false);
+
+    await executor.syncBackForTerminal(ws);
+    expect(readFileSync(join(ws.root, "from-shell.txt"), "utf-8")).toBe("shell-was-here");
+    expect(getWorkspace(ws.workspaceId)?.sandbox?.lastSyncBackAt).toBeTruthy();
+  });
+
+  it("syncBackForTerminal is a no-op without a sandbox binding", async () => {
+    const provider = new FakeSandboxProvider();
+    const executor = executorFor(provider);
+    const ws = seedDescriptor("proj-terminal-noop");
+    await expect(executor.syncBackForTerminal(ws)).resolves.toBeUndefined();
+    expect(provider.calls.create).toBe(0);
+  });
+});

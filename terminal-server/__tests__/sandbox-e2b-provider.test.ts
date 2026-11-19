@@ -20,9 +20,14 @@ import {
   clampSandboxTimeoutMs,
   E2B_MAX_TIMEOUT_MS,
   E2bSandboxProvider,
+  SandboxNotFoundError,
   SANDBOX_EGRESS_DENY_OUT,
   type E2bClient,
   type E2bCreateOptions,
+  type E2bPtyConnectOptions,
+  type E2bPtyCreateOptions,
+  type E2bPtyHandle,
+  type E2bPtyInputStream,
   type E2bSandboxHandle,
 } from "../sandbox/e2b-provider";
 import type { CanaryProvider } from "../sandbox/provider";
@@ -141,6 +146,105 @@ class FakeE2bHandle implements E2bSandboxHandle {
 
   async isRunning(): Promise<boolean> {
     return !this.killed && !this.paused;
+  }
+
+  // ─── PTY fake (terminal bridge) ──────────────────────────────────
+  readonly ptyCreates: E2bPtyCreateOptions[] = [];
+  readonly ptyConnects: Array<{ pid: number; opts: E2bPtyConnectOptions }> = [];
+  readonly ptyInputs: Array<{ pid: number; timeoutMs: number; sent: string[] }> = [];
+  readonly ptyResizes: Array<{ pid: number; cols: number; rows: number }> = [];
+  readonly ptyKills: number[] = [];
+  readonly ptys = new Map<number, FakePtyHandle>();
+  private ptySeq = 100;
+
+  async createPty(opts: E2bPtyCreateOptions): Promise<E2bPtyHandle> {
+    this.ptyCreates.push(opts);
+    const handle = new FakePtyHandle(++this.ptySeq, opts.onData);
+    this.ptys.set(handle.pid, handle);
+    return handle;
+  }
+
+  async connectPty(pid: number, opts: E2bPtyConnectOptions): Promise<E2bPtyHandle> {
+    this.ptyConnects.push({ pid, opts });
+    const existing = this.ptys.get(pid);
+    if (!existing || existing.ended) throw new Error(`no such pty ${pid}`);
+    existing.reconnect(opts.onData);
+    return existing;
+  }
+
+  streamPtyInput(pid: number, opts: { timeoutMs: number }): E2bPtyInputStream {
+    const record = { pid, timeoutMs: opts.timeoutMs, sent: [] as string[] };
+    this.ptyInputs.push(record);
+    return {
+      send: async (data: string) => {
+        record.sent.push(data);
+      },
+      close: async () => {},
+    };
+  }
+
+  async resizePty(pid: number, size: { cols: number; rows: number }): Promise<void> {
+    this.ptyResizes.push({ pid, cols: size.cols, rows: size.rows });
+  }
+
+  async killPty(pid: number): Promise<boolean> {
+    this.ptyKills.push(pid);
+    const p = this.ptys.get(pid);
+    if (p) p.end(137);
+    return true;
+  }
+}
+
+/**
+ * Fake PTY at the adapter boundary. Its wait() models the WRAPPED
+ * handle's contract (what wrapSdkPtyHandle guarantees): resolves
+ * with the exit code for ANY process exit, rejects only when the
+ * event stream died without a result.
+ */
+class FakePtyHandle implements E2bPtyHandle {
+  readonly pid: number;
+  private onData: (data: Uint8Array) => void | Promise<void>;
+  private readonly waitPromise: Promise<{ exitCode: number }>;
+  private waitResolve!: (v: { exitCode: number }) => void;
+  private waitReject!: (e: unknown) => void;
+  ended = false;
+  disconnected = false;
+
+  constructor(pid: number, onData: (data: Uint8Array) => void | Promise<void>) {
+    this.pid = pid;
+    this.onData = onData;
+    this.waitPromise = new Promise((res, rej) => {
+      this.waitResolve = res;
+      this.waitReject = rej;
+    });
+  }
+
+  reconnect(onData: (data: Uint8Array) => void | Promise<void>): void {
+    this.onData = onData;
+  }
+
+  emit(text: string): void {
+    void this.onData(new TextEncoder().encode(text));
+  }
+
+  end(exitCode: number): void {
+    if (this.ended) return;
+    this.ended = true;
+    this.waitResolve({ exitCode });
+  }
+
+  failStream(err: unknown): void {
+    if (this.ended) return;
+    this.ended = true;
+    this.waitReject(err);
+  }
+
+  wait(): Promise<{ exitCode: number }> {
+    return this.waitPromise;
+  }
+
+  async disconnect(): Promise<void> {
+    this.disconnected = true;
   }
 }
 
@@ -292,16 +396,21 @@ describe("E2bSandboxProvider — lifecycle", () => {
     expect(Date.parse(endpoint.expiresAt)).toBeGreaterThan(Date.now());
   });
 
-  it("connectTerminal refuses explicitly in Phase 1", async () => {
-    const provider = makeProvider(new FakeE2bClient());
+  it("connectTerminal attaches a PTY (terminal bridge — the Phase 1 refusal is gone)", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
     const instance = await provider.create({
       workspaceId: "ws-1",
       userId: "user-1",
       projectId: "proj-1",
     });
-    await expect(
-      provider.connectTerminal(instance.sandboxId, { shell: "bash", cols: 80, rows: 24 }),
-    ).rejects.toThrow(/workspace\.exec only/);
+    const transport = await provider.connectTerminal(instance.sandboxId, {
+      shell: "bash",
+      cols: 80,
+      rows: 24,
+    });
+    expect(transport.sessionId).toBe(`${instance.sandboxId}:101`);
+    expect(client.handles.get(instance.sandboxId)!.ptyCreates).toHaveLength(1);
   });
 
   it("satisfies the Phase 0 CanaryProvider subset structurally", () => {
@@ -622,5 +731,273 @@ describe("sandbox env allowlist (env.ts)", () => {
       projectEnv: { COREPACK_HOME: "/tmp/elsewhere" },
     });
     expect(env.COREPACK_HOME).toBe("/usr/local/share/corepack");
+  });
+});
+
+/**
+ * Terminal bridge (TERMINAL-BRIDGE-SPEC-2026-11-17 §2.3/§2.4/§5.2):
+ * the provider's PTY attach. The spike fact these tests pin: in the
+ * pinned SDK every PTY stream (create, connect, streamInput)
+ * defaults its timeoutMs to 60,000 — the deadline for the WHOLE
+ * stream — so the provider must pass the clamped session lifetime
+ * (E2B_MAX_TIMEOUT_MS = 3,600,000) explicitly on all three, or a
+ * shell dies 60 seconds after it opens.
+ */
+describe("E2bSandboxProvider — PTY terminal (terminal bridge)", () => {
+  async function createWithSandbox(client: FakeE2bClient) {
+    const provider = makeProvider(client);
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+    const handle = client.handles.get(instance.sandboxId)!;
+    return { provider, instance, handle };
+  }
+
+  it("pins the clamped session timeout on create AND on the input stream — never the 60s default", async () => {
+    const client = new FakeE2bClient();
+    const { provider, instance, handle } = await createWithSandbox(client);
+
+    await provider.connectTerminal(instance.sandboxId, { shell: "bash", cols: 80, rows: 24 });
+
+    expect(handle.ptyCreates).toHaveLength(1);
+    expect(handle.ptyCreates[0].timeoutMs).toBe(E2B_MAX_TIMEOUT_MS);
+    expect(handle.ptyCreates[0].timeoutMs).toBe(3_600_000);
+    expect(handle.ptyCreates[0].timeoutMs).not.toBe(60_000);
+    // The input stream is opened by the transport with the same pin.
+    expect(handle.ptyInputs).toHaveLength(1);
+    expect(handle.ptyInputs[0].timeoutMs).toBe(3_600_000);
+    expect(handle.ptyInputs[0].timeoutMs).not.toBe(60_000);
+  });
+
+  it("creates at /workspace with the stored composed env and clamped dimensions", async () => {
+    const client = new FakeE2bClient();
+    const { provider, instance, handle } = await createWithSandbox(client);
+
+    const transport = await provider.connectTerminal(instance.sandboxId, {
+      shell: "bash",
+      cols: 9999,
+      rows: 0,
+    });
+
+    const create = handle.ptyCreates[0];
+    expect(create.cwd).toBe("/workspace");
+    // Stored composed env verbatim: identity present, HOME default.
+    expect(create.envs.LITTREE_USER_ID).toBe("user-1");
+    expect(create.envs.LITTREE_PROJECT_ID).toBe("proj-1");
+    expect(create.envs.LITTREE_SANDBOX_ID).toBe(instance.sandboxId);
+    expect(create.envs.HOME).toBe("/workspace");
+    expect(JSON.stringify(create.envs)).not.toContain(API_KEY);
+    // Host-manager bounds: cols ∈ [1, 500], rows ∈ [1, 200].
+    expect(create.cols).toBe(500);
+    expect(create.rows).toBe(1);
+    expect(transport.sessionId).toBe(`${instance.sandboxId}:${handle.ptyCreates.length ? 101 : 0}`);
+  });
+
+  it("layers caller env through the value guard: HOME pin lands, identity cannot be forged", async () => {
+    const client = new FakeE2bClient();
+    const { provider, instance, handle } = await createWithSandbox(client);
+
+    await provider.connectTerminal(instance.sandboxId, {
+      shell: "bash",
+      cols: 80,
+      rows: 24,
+      env: { HOME: "/home/litt", LITTREE_USER_ID: "attacker", PROJECT_FLAG: "on" },
+    });
+
+    const envs = handle.ptyCreates[0].envs;
+    expect(envs.HOME).toBe("/home/litt");
+    expect(envs.LITTREE_USER_ID).toBe("user-1");
+    expect(envs.PROJECT_FLAG).toBe("on");
+  });
+
+  it("refuses the terminal's OWN platform-secret value in caller env BEFORE any SDK PTY call", async () => {
+    const client = new FakeE2bClient();
+    const { provider, instance, handle } = await createWithSandbox(client);
+    const secretValue = "platform-terminal-secret-value";
+    const saved = process.env.TERMINAL_AUTH_SECRET;
+    process.env.TERMINAL_AUTH_SECRET = secretValue;
+    try {
+      await expect(
+        provider.connectTerminal(instance.sandboxId, {
+          shell: "bash",
+          cols: 80,
+          rows: 24,
+          env: { INNOCENT_NAME: secretValue },
+        }),
+      ).rejects.toBeInstanceOf(SandboxEnvSecretError);
+      expect(handle.ptyCreates).toHaveLength(0);
+
+      // A project's OWN secret under a platform NAME is fine — the
+      // guard is by value, exactly like execute()'s per-command env.
+      await provider.connectTerminal(instance.sandboxId, {
+        shell: "bash",
+        cols: 80,
+        rows: 24,
+        env: { CLERK_SECRET_KEY: "the-projects-own-key" },
+      });
+      expect(handle.ptyCreates).toHaveLength(1);
+      expect(handle.ptyCreates[0].envs.CLERK_SECRET_KEY).toBe("the-projects-own-key");
+    } finally {
+      if (saved === undefined) delete process.env.TERMINAL_AUTH_SECRET;
+      else process.env.TERMINAL_AUTH_SECRET = saved;
+    }
+  });
+
+  it("write goes through the ordered input stream, in call order", async () => {
+    const client = new FakeE2bClient();
+    const { provider, instance, handle } = await createWithSandbox(client);
+    const transport = await provider.connectTerminal(instance.sandboxId, {
+      shell: "bash",
+      cols: 80,
+      rows: 24,
+    });
+
+    transport.write("ls -la\r");
+    transport.write("pwd\r");
+    // send() is async on the fake; flush microtasks.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(handle.ptyInputs[0].sent).toEqual(["ls -la\r", "pwd\r"]);
+    expect(handle.ptyInputs[0].pid).toBe(101);
+  });
+
+  it("decodes output to strings and replays pre-registration output to the first listener", async () => {
+    const client = new FakeE2bClient();
+    const { provider, instance, handle } = await createWithSandbox(client);
+    const transport = await provider.connectTerminal(instance.sandboxId, {
+      shell: "bash",
+      cols: 80,
+      rows: 24,
+    });
+    const pty = handle.ptys.get(101)!;
+
+    // The shell prints its prompt before anyone registers onOutput.
+    pty.emit("litt@workspace:~$ ");
+    const seen: string[] = [];
+    transport.onOutput((d) => seen.push(d));
+    expect(seen).toEqual(["litt@workspace:~$ "]);
+
+    pty.emit("hello\r\n");
+    expect(seen).toEqual(["litt@workspace:~$ ", "hello\r\n"]);
+  });
+
+  it("onExit carries the real exit code; a stream death without a result reports -1", async () => {
+    const client = new FakeE2bClient();
+    const { provider, instance, handle } = await createWithSandbox(client);
+
+    const t1 = await provider.connectTerminal(instance.sandboxId, { shell: "bash", cols: 80, rows: 24 });
+    const exits1: Array<{ exitCode: number }> = [];
+    t1.onExit((info) => exits1.push(info));
+    handle.ptys.get(101)!.end(3);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(exits1).toEqual([{ exitCode: 3 }]);
+
+    const t2 = await provider.connectTerminal(instance.sandboxId, { shell: "bash", cols: 80, rows: 24 });
+    const exits2: Array<{ exitCode: number }> = [];
+    t2.onExit((info) => exits2.push(info));
+    handle.ptys.get(102)!.failStream(new Error("Process exited without a result"));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(exits2).toEqual([{ exitCode: -1 }]);
+  });
+
+  it("resize and kill forward the right pid (resize clamps too)", async () => {
+    const client = new FakeE2bClient();
+    const { provider, instance, handle } = await createWithSandbox(client);
+    const transport = await provider.connectTerminal(instance.sandboxId, {
+      shell: "bash",
+      cols: 80,
+      rows: 24,
+    });
+
+    transport.resize(1000, 40);
+    await Promise.resolve();
+    expect(handle.ptyResizes).toEqual([{ pid: 101, cols: 500, rows: 40 }]);
+
+    transport.kill();
+    await Promise.resolve();
+    expect(handle.ptyKills).toEqual([101]);
+  });
+
+  it("starts a stopped sandbox before attaching", async () => {
+    const client = new FakeE2bClient();
+    const { provider, instance, handle } = await createWithSandbox(client);
+    await provider.stop(instance.sandboxId);
+    expect(handle.paused).toBe(true);
+
+    await provider.connectTerminal(instance.sandboxId, { shell: "bash", cols: 80, rows: 24 });
+    expect(client.connectCalls).toBe(1);
+    expect(handle.ptyCreates).toHaveLength(1);
+  });
+
+  it("unknown sandbox throws SandboxNotFoundError", async () => {
+    const provider = makeProvider(new FakeE2bClient());
+    await expect(
+      provider.connectTerminal("e2b-nope", { shell: "bash", cols: 80, rows: 24 }),
+    ).rejects.toBeInstanceOf(SandboxNotFoundError);
+    await expect(
+      provider.reattachTerminal("e2b-nope", "e2b-nope:5", { shell: "bash", cols: 80, rows: 24 }),
+    ).rejects.toBeInstanceOf(SandboxNotFoundError);
+  });
+
+  it("reattachTerminal reconnects the same pid with the pinned timeout", async () => {
+    const client = new FakeE2bClient();
+    const { provider, instance, handle } = await createWithSandbox(client);
+    const first = await provider.connectTerminal(instance.sandboxId, {
+      shell: "bash",
+      cols: 80,
+      rows: 24,
+    });
+
+    const second = await provider.reattachTerminal(instance.sandboxId, first.sessionId, {
+      shell: "bash",
+      cols: 100,
+      rows: 30,
+    });
+
+    expect(second.sessionId).toBe(first.sessionId);
+    expect(handle.ptyConnects).toHaveLength(1);
+    expect(handle.ptyConnects[0].pid).toBe(101);
+    expect(handle.ptyConnects[0].opts.timeoutMs).toBe(3_600_000);
+    expect(handle.ptyConnects[0].opts.timeoutMs).not.toBe(60_000);
+    // No second PTY was created.
+    expect(handle.ptyCreates).toHaveLength(1);
+  });
+
+  it("reattachTerminal refuses session ids that do not name a pid of this sandbox", async () => {
+    const client = new FakeE2bClient();
+    const { provider, instance } = await createWithSandbox(client);
+    await expect(
+      provider.reattachTerminal(instance.sandboxId, "someone-elses-sandbox:101", {
+        shell: "bash",
+        cols: 80,
+        rows: 24,
+      }),
+    ).rejects.toThrow(/Invalid sandbox terminal session id/);
+    await expect(
+      provider.reattachTerminal(instance.sandboxId, `${instance.sandboxId}:not-a-pid`, {
+        shell: "bash",
+        cols: 80,
+        rows: 24,
+      }),
+    ).rejects.toThrow(/Invalid sandbox terminal session id/);
+  });
+
+  it("transport.disconnect stops the stream without killing the PTY", async () => {
+    const client = new FakeE2bClient();
+    const { provider, instance, handle } = await createWithSandbox(client);
+    const transport = (await provider.connectTerminal(instance.sandboxId, {
+      shell: "bash",
+      cols: 80,
+      rows: 24,
+    })) as { disconnect: () => void };
+
+    transport.disconnect();
+    await Promise.resolve();
+    expect(handle.ptys.get(101)!.disconnected).toBe(true);
+    expect(handle.ptyKills).toEqual([]);
   });
 });

@@ -127,6 +127,9 @@ describe("handleProjectInsertAsset", () => {
     expect(t.writeBinaryFile).not.toHaveBeenCalled();
   });
 
+  // Explicit timeout: the always-throwing fetch rides the full
+  // bounded-backoff schedule (0.5s / 2s / 5s of real timers) before
+  // the failure surfaces — over the 5s default.
   it("fails closed when the download fails", async () => {
     globalThis.fetch = vi.fn(async () => {
       throw new Error("network down");
@@ -135,7 +138,7 @@ describe("handleProjectInsertAsset", () => {
     const res = await handleProjectInsertAsset({ url: "https://example.com/x.png" }, t);
     expect(res.success).toBe(false);
     expect(t.writeBinaryFile).not.toHaveBeenCalled();
-  });
+  }, 20_000);
 
   it("fails closed on HTTP errors", async () => {
     globalThis.fetch = vi.fn(async () =>
@@ -404,6 +407,7 @@ describe("insertAssetFromUrl (shared core)", () => {
     expect(transport.writeBinaryFile).not.toHaveBeenCalled();
   });
 
+  // Explicit timeout: same bounded-backoff ride as above.
   it("surfaces download failures as errors, never exceptions", async () => {
     globalThis.fetch = vi.fn(async () => {
       throw new Error("boom");
@@ -412,7 +416,7 @@ describe("insertAssetFromUrl (shared core)", () => {
     const result = await insertAssetFromUrl("https://cdn.example.com/hero.png", {}, transport);
     expect(result.success).toBe(false);
     expect(result.error).toBe("boom");
-  });
+  }, 20_000);
 
   // Explicit timeout: this drives the real sharp/mozjpeg fit pipeline on a
   // multi-MB noise image — over the 5s default under full-suite CI load.
