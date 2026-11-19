@@ -240,18 +240,33 @@ describe("AppShell top bar", () => {
     // The identity dock renders a pulsing placeholder while auth loads.
     // An aria-label on a role-less element is an axe critical/serious
     // violation (aria-prohibited-attr) — CI's site-audit scan failed on
-    // /voice and /agents because of it. role="status" keeps the accessible
-    // name legal.
+    // /voice and /agents because of it.
+    //
+    // Corrected contract: naming is prohibited on role="status" itself
+    // too, so the placeholder must not carry an aria-label at all. The
+    // conforming pattern is role="status" whose accessible text is its
+    // content — a visually-hidden "Loading account" span inside the
+    // status element. This test previously selected the placeholder BY
+    // '[aria-label="Loading account"]', which enshrined the very
+    // violation it guards against; it now selects by role and asserts
+    // the prohibited attribute is gone while the announcement remains.
     mockAuthLoaded = false;
     render(
       <AppShell>
         <div>content</div>
       </AppShell>,
     );
-    const placeholder = getHeader().querySelector(
-      '[aria-label="Loading account"]',
-    );
+    const header = getHeader();
+    const placeholder = header.querySelector('[role="status"]');
     expect(placeholder).not.toBeNull();
-    expect(placeholder!.getAttribute("role")).toBe("status");
+    // The prohibited pattern must be gone: no aria-label naming the
+    // status element, anywhere in the header.
+    expect(placeholder!.getAttribute("aria-label")).toBeNull();
+    expect(
+      header.querySelector('[aria-label="Loading account"]'),
+    ).toBeNull();
+    // The loading state is still announced accessibly — via the status
+    // element's text content (the visually-hidden span).
+    expect(placeholder!.textContent).toContain("Loading account");
   });
 });

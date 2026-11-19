@@ -81,6 +81,87 @@ describe("BoardPanel chrome", () => {
     expect(handlers.onRectChange).toHaveBeenCalledTimes(1);
   });
 
+  it("dragging a marked drag-handle strip in the body moves the panel", () => {
+    const handlers = {
+      onRectChange: vi.fn(),
+      onBringToFront: vi.fn(),
+      onMinimize: vi.fn(),
+      onToggleMaximize: vi.fn(),
+      onClose: vi.fn(),
+    };
+    render(
+      <ThemeProvider>
+        <BoardPanel
+          id="preview"
+          title="Preview"
+          rect={RECT}
+          zIndex={3}
+          maximized={false}
+          {...handlers}
+        >
+          <div data-board-drag-handle>
+            <span data-testid="drag-strip-label">strip</span>
+            <button type="button" data-testid="drag-strip-button">
+              strip button
+            </button>
+          </div>
+        </BoardPanel>
+      </ThemeProvider>,
+    );
+    const strip = screen.getByTestId("drag-strip-label");
+    fireEvent.pointerDown(strip, { pointerId: 21, clientX: 150, clientY: 90 });
+    fireEvent.pointerMove(window, { pointerId: 21, clientX: 190, clientY: 125 });
+    expect(handlers.onRectChange).toHaveBeenCalledWith("preview", {
+      x: 140,
+      y: 115,
+      width: 400,
+      height: 300,
+    });
+    fireEvent.pointerUp(window, { pointerId: 21, clientX: 190, clientY: 125 });
+    fireEvent.pointerMove(window, { pointerId: 21, clientX: 400, clientY: 400 });
+    // Session ended on pointer-up — no further rect changes.
+    expect(handlers.onRectChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("a button inside the drag-handle strip does not start a drag, and its click still fires", () => {
+    const onStripButton = vi.fn();
+    const handlers = {
+      onRectChange: vi.fn(),
+      onBringToFront: vi.fn(),
+      onMinimize: vi.fn(),
+      onToggleMaximize: vi.fn(),
+      onClose: vi.fn(),
+    };
+    render(
+      <ThemeProvider>
+        <BoardPanel
+          id="preview"
+          title="Preview"
+          rect={RECT}
+          zIndex={3}
+          maximized={false}
+          {...handlers}
+        >
+          <div data-board-drag-handle>
+            <button type="button" data-testid="drag-strip-button" onClick={onStripButton}>
+              strip button
+            </button>
+          </div>
+        </BoardPanel>
+      </ThemeProvider>,
+    );
+    const button = screen.getByTestId("drag-strip-button");
+    fireEvent.pointerDown(button, { pointerId: 23, clientX: 150, clientY: 90 });
+    // The press still bubbles to the panel's click-to-front…
+    expect(handlers.onBringToFront).toHaveBeenCalledWith("preview");
+    fireEvent.pointerMove(window, { pointerId: 23, clientX: 220, clientY: 160 });
+    // …but no drag session starts from an interactive element.
+    expect(handlers.onRectChange).not.toHaveBeenCalled();
+    fireEvent.pointerUp(window, { pointerId: 23 });
+    fireEvent.click(button);
+    expect(onStripButton).toHaveBeenCalledTimes(1);
+  });
+
   it("drag deltas are divided by the board scale so zoomed drags track 1:1", () => {
     const handlers = renderPanel({ scale: 0.5 });
     const header = screen.getByTestId("board-panel-header-preview");
