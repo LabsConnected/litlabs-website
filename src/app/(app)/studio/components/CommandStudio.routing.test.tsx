@@ -879,21 +879,23 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(codeBtn.className).toContain("glass-active");
     });
 
-    it("opening and closing Files (LiTT panel tab) does not leave Builder", async () => {
+    it("opening and closing Files (right rail tab) does not leave Builder", async () => {
       setUrl("tool=build");
       const view = await renderCommandStudio();
       expectBuilderSurfaceActive();
       const user = userEvent.setup();
-      // Files lives in the LiTT panel's top row now (the dock's Files
-      // tab is retired) — opening it must not change the active
-      // Builder surface or the canonical URL.
-      await user.click(screen.getByTestId("litt-tab-files"));
-      expect(screen.getByTestId("litt-files-panel")).toHaveAttribute("data-active", "true");
+      // Files lives in the right rail now (mockup port, 2026-11-18;
+      // the dock's Files tab is retired and the LiTT panel is
+      // Chat-only in the Regular layout) — opening it must not change
+      // the active Builder surface or the canonical URL.
+      await user.click(screen.getByTestId("studio-rail-tab-files"));
+      expect(screen.getByTestId("studio-rail-pane-files")).toHaveAttribute("data-active", "true");
       act(() => view.rerender(<CommandStudio />));
       expectBuilderSurfaceActive();
       expect(currentTool()).toBe("build");
-      // Back to Chat — still on Builder.
-      await user.click(screen.getByTestId("litt-tab-chat"));
+      // Switch the rail away to Activity — still on Builder.
+      await user.click(screen.getByTestId("studio-rail-tab-activity"));
+      expect(screen.getByTestId("studio-rail-pane-files")).toHaveAttribute("data-active", "false");
       act(() => view.rerender(<CommandStudio />));
       expectBuilderSurfaceActive();
       expect(currentTool()).toBe("build");
@@ -1202,20 +1204,22 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.getByTestId("litt-panel")).toBeTruthy();
     });
 
-    it("collapsed LiTT can be expanded again and preserves the active tab", async () => {
+    it("collapsed LiTT can be expanded again with its chat surface intact", async () => {
       const { user } = await renderCommandStudio();
-      // Switch to Live before collapsing
-      await user.click(screen.getByTestId("litt-tab-live"));
-      expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
+      // The panel's chat surface is active before collapsing. (Mockup
+      // port, 2026-11-18: the panel is Chat-only in the Regular layout
+      // — the Activity/Files tabs it used to carry, whose preservation
+      // this test originally exercised, live in the right rail now.)
+      expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
       // Collapse
       await user.click(screen.getByTestId("litt-panel-collapse"));
       expect(screen.getByTestId("litt-ambient-hud")).toBeTruthy();
       // Expand
       await user.click(screen.getByTestId("litt-hud-expand"));
       expect(screen.getByTestId("litt-panel-expanded-chrome")).toHaveStyle({ display: "flex" });
-      // Active tab (Live) survived the round trip because the content
+      // The chat surface survived the round trip because the content
       // was never unmounted.
-      expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
+      expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
     });
 
     it("collapsed state does not remove workspace tabs", async () => {
@@ -1233,7 +1237,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       await renderCommandStudio();
       // The old desktop Context Drawer is gone from the desktop topology;
       // Activity/Terminal/Inspector/Media live in the bottom dock;
-      // Files lives in the LiTT panel's top row.
+      // Files lives in the right rail (mockup port, 2026-11-18).
       expect(screen.queryByTestId("context-drawer")).toBeNull();
     });
 
@@ -1245,14 +1249,19 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.getByTestId("dock-content-activity")).toBeTruthy();
     });
 
-    it("the LiTT panel Files tab activates the Files panel; the dock has no Files tab", async () => {
+    it("the right rail Files tab activates the Files pane; the dock has no Files tab", async () => {
       const { user } = await renderCommandStudio();
       await user.click(screen.getByTestId("studio-dock-toggle"));
       expect(screen.queryByTestId("dock-tab-files")).toBeNull();
-      await user.click(screen.getByTestId("litt-tab-files"));
-      expect(screen.getByTestId("litt-tab-files")).toHaveAttribute("aria-pressed", "true");
-      expect(screen.getByTestId("litt-tab-chat")).toHaveAttribute("aria-pressed", "false");
-      expect(screen.getByTestId("litt-files-panel")).toHaveAttribute("data-active", "true");
+      // Mockup port (2026-11-18): Files is the right rail's default
+      // tab in the Regular layout.
+      expect(screen.getByTestId("studio-rail-tab-files")).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByTestId("studio-rail-pane-files")).toHaveAttribute("data-active", "true");
+      await user.click(screen.getByTestId("studio-rail-tab-activity"));
+      expect(screen.getByTestId("studio-rail-pane-files")).toHaveAttribute("data-active", "false");
+      await user.click(screen.getByTestId("studio-rail-tab-files"));
+      expect(screen.getByTestId("studio-rail-tab-files")).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByTestId("studio-rail-pane-files")).toHaveAttribute("data-active", "true");
     });
 
     it("Ctrl+Shift+A opens the dock on the Activity tab", async () => {

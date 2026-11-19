@@ -233,7 +233,7 @@ describe("BoardPanelBindings (B3)", () => {
     // The Code box's preview region shows the reverse pointer card.
     expect(screen.getByTestId("code-preview-pointer-to-preview")).toBeInTheDocument();
     expect(screen.getByTestId("code-preview-pointer-to-preview").textContent).toContain(
-      "Preview is showing in the Preview panel",
+      "Preview is showing in the Static View panel",
     );
   });
 
