@@ -179,7 +179,8 @@ export default function BoardChatPanel({
       style={{ backgroundColor: tokens.surface, color: tokens.text }}
     >
       <div
-        className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5"
+        data-board-drag-handle
+        className="flex shrink-0 cursor-grab touch-none items-center gap-1 border-b px-2 py-1.5 active:cursor-grabbing"
         style={{ borderColor: tokens.border }}
       >
         <div
