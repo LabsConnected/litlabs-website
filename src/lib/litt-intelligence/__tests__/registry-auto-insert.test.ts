@@ -196,7 +196,7 @@ describe("maybeAutoInsertGeneratedImage", () => {
           ),
       };
     }) as unknown as typeof fetch;
-    const writeBinaryFile = vi.fn(async () => ({ saved: true }));
+    const writeBinaryFile = vi.fn(async (_path: string, _base64: string) => ({ saved: true }));
     const out = (await maybeAutoInsertGeneratedImage(
       "image.generate",
       {
