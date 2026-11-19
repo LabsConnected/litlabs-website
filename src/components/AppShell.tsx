@@ -163,8 +163,9 @@ function IdentityDock({ T: TProp }: { T?: ResolvedColors }) {
         className="h-9 w-9 animate-pulse rounded-full"
         style={{ background: `${T.borderColor}20` }}
         role="status"
-        aria-label="Loading account"
-      />
+      >
+        <span className="sr-only">Loading account</span>
+      </div>
     );
   }
 
@@ -492,7 +493,7 @@ function TopBar() {
               <span
                 className="inline-block h-3 w-14 animate-pulse rounded align-middle"
                 style={{ background: isStudio ? "rgba(14,60,26,0.08)" : "rgba(255,255,255,0.08)" }}
-                aria-label="Loading balance"
+                aria-hidden="true"
               />
             ) : walletError ? (
               <>-- <span style={{ color: T.accentColor }}>LiTTBits</span></>
