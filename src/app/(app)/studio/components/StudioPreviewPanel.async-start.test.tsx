@@ -77,11 +77,11 @@ describe("StudioPreviewPanel async start (C3/C4)", () => {
     });
     render(panel("project-a"));
 
-    // The panel rides out the dead request in "Preparing…" — never failed.
-    await waitFor(() => expect(screen.getByText("Preparing preview…")).toBeInTheDocument());
-    expect(screen.queryByText("Preview failed to start")).toBeNull();
+    // The panel rides out the dead request in "Preparing Static View…" — never failed.
+    await waitFor(() => expect(screen.getByText("Preparing Static View…")).toBeInTheDocument());
+    expect(screen.queryByText("Static View failed to start")).toBeNull();
 
-    await waitFor(() => expect(screen.getByText("Preview ready")).toBeInTheDocument(), { timeout: 15_000 });
+    await waitFor(() => expect(screen.getByText("Static View ready")).toBeInTheDocument(), { timeout: 15_000 });
     expect(screen.getByTestId("preview-iframe")).toBeInTheDocument();
   }, 20_000);
 
@@ -99,10 +99,10 @@ describe("StudioPreviewPanel async start (C3/C4)", () => {
     });
     render(panel("project-a"));
 
-    await waitFor(() => expect(screen.getByText("Preview ready")).toBeInTheDocument(), { timeout: 15_000 });
-    expect(screen.queryByText("Preview failed to start")).toBeNull();
+    await waitFor(() => expect(screen.getByText("Static View ready")).toBeInTheDocument(), { timeout: 15_000 });
+    expect(screen.queryByText("Static View failed to start")).toBeNull();
     expect(screen.queryByText(/Preview preparation failed/)).toBeNull();
-  });
+  }, 20_000);
 
   it("a failed runtime behind a dead start request still surfaces its real error via polling", async () => {
     let posted = false;
@@ -124,6 +124,6 @@ describe("StudioPreviewPanel async start (C3/C4)", () => {
       () => expect(screen.getByText("Dependency install failed in sandbox (exit 1)")).toBeInTheDocument(),
       { timeout: 15_000 },
     );
-    expect(screen.getByText("Preview failed to start")).toBeInTheDocument();
+    expect(screen.getByText("Static View failed to start")).toBeInTheDocument();
   }, 20_000);
 });
