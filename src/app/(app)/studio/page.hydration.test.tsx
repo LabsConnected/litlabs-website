@@ -74,4 +74,18 @@ describe("StudioPage hydration", () => {
     await act(async () => root?.unmount());
     container.remove();
   });
+
+  it("first paint is the board layout skeleton — no centered spinner or Authenticating screen (entry fix)", () => {
+    // While Clerk / mounting resolve, StudioHub renders the loading
+    // state; its visible content must be the chosen layout's shell
+    // (board by default) with the chat placeholder in its board
+    // panel slot — not the retired centered "Authenticating" spinner.
+    authState.isLoaded = false;
+    const html = renderToString(<StudioPage />);
+    expect(html).toContain('data-testid="studio-loading"');
+    expect(html).toContain('data-testid="studio-shell-board"');
+    expect(html).toContain('data-testid="studio-shell-chat"');
+    expect(html).toContain('data-testid="studio-shell-panel-preview"');
+    expect(html).not.toContain("Authenticating");
+  });
 });
