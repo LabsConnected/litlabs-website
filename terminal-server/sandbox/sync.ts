@@ -479,6 +479,9 @@ export interface MirrorResult {
   manifest: SyncManifest;
 }
 
+/** Volume entries processed between mirror progress callbacks. */
+export const MIRROR_PROGRESS_INTERVAL = 250;
+
 /**
  * Start/resume mirror: make the sandbox tree equal the volume tree.
  * Volume wins on every path (nothing ran git while the sandbox was
@@ -489,7 +492,20 @@ export interface MirrorResult {
 export async function mirrorVolumeToSandbox(
   provider: SandboxProvider,
   sandboxId: string,
-  options: { volumeRoot: string; sandboxRoot: string },
+  options: {
+    volumeRoot: string;
+    sandboxRoot: string;
+    /**
+     * Progress heartbeat: invoked every MIRROR_PROGRESS_INTERVAL
+     * processed volume entries and once at the end with the final
+     * count. The mirror is thousands of sequential provider calls
+     * on a big tree and was completely silent before this — a slow
+     * mirror was indistinguishable from a hung one in the logs
+     * (2026-11-19 terminal stall diagnosis). Optional: callers that
+     * do not pass it get the previous silent behavior.
+     */
+    onProgress?: (info: { processed: number; total: number }) => void;
+  },
 ): Promise<MirrorResult> {
   const transfer = requireFileTransfer(provider);
   const volumeManifest = listVolumeTree(options.volumeRoot);
@@ -505,6 +521,15 @@ export async function mirrorVolumeToSandbox(
     stats.filesDeleted += 1;
   }
 
+  let processed = 0;
+  const total = volumeManifest.size;
+  const noteProcessed = (): void => {
+    processed += 1;
+    if (processed % MIRROR_PROGRESS_INTERVAL === 0) {
+      options.onProgress?.({ processed, total });
+    }
+  };
+
   for (const [rel, entry] of volumeManifest) {
     const sandboxPath = `${options.sandboxRoot}/${rel}`;
     const existing = sandboxManifest.get(rel);
@@ -513,6 +538,7 @@ export async function mirrorVolumeToSandbox(
         await transfer.makeDir(sandboxId, sandboxPath);
         stats.dirsCreated += 1;
       }
+      noteProcessed();
       continue;
     }
     if (entry.type === "symlink") {
@@ -524,6 +550,7 @@ export async function mirrorVolumeToSandbox(
         });
         stats.symlinksCreated += 1;
       }
+      noteProcessed();
       continue;
     }
     // File: copy when absent, differently typed, differently sized,
@@ -540,6 +567,14 @@ export async function mirrorVolumeToSandbox(
       stats.filesCopied += 1;
       stats.bytesCopied += bytes.length;
     }
+    noteProcessed();
+  }
+
+  // Final progress beat: the interval callback alone would leave
+  // the log's last line short of the total on any tree whose size
+  // is not an exact multiple of the interval.
+  if (total > 0 && processed % MIRROR_PROGRESS_INTERVAL !== 0) {
+    options.onProgress?.({ processed, total });
   }
 
   const manifest = await listSandboxTree(provider, sandboxId, options.sandboxRoot);

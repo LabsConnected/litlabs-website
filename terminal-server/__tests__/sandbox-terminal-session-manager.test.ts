@@ -16,9 +16,11 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   SandboxTerminalSessionManager,
   SANDBOX_TERMINAL_IDLE_TIMEOUT_MS,
+  SANDBOX_TERMINAL_PROVISION_TIMEOUT_MS,
   SANDBOX_TERMINAL_SYNC_INTERVAL_MS,
   type SandboxTerminalExecutor,
   type SandboxTerminalProvider,
+  type SandboxTerminalSessionManagerDeps,
 } from "../sandbox-terminal-session-manager";
 import type {
   SandboxInstance,
@@ -88,6 +90,10 @@ class FakeProvider implements SandboxTerminalProvider {
   readonly extendCalls: Array<{ sandboxId: string; timeoutMs: number }> = [];
   readonly alive = new Set<string>(["sbx-1"]);
   reattachError: Error | null = null;
+  /** When set, connectTerminal delegates here (settle-bound tests). */
+  connectOverride:
+    | ((sandboxId: string, options: TerminalConnectOptions) => Promise<TerminalTransport>)
+    | null = null;
   private pidSeq = 500;
 
   async create(): Promise<SandboxInstance> {
@@ -108,6 +114,7 @@ class FakeProvider implements SandboxTerminalProvider {
     options: TerminalConnectOptions,
   ): Promise<TerminalTransport> {
     this.connectCalls.push({ sandboxId, options });
+    if (this.connectOverride) return this.connectOverride(sandboxId, options);
     const t = new FakeTransport(`${sandboxId}:${++this.pidSeq}`);
     this.transports.push(t);
     return t;
@@ -141,11 +148,16 @@ class FakeExecutor implements SandboxTerminalExecutor {
   readonly ensureCalls: WorkspaceDescriptor[] = [];
   readonly syncCalls: WorkspaceDescriptor[] = [];
   syncError: Error | null = null;
+  /** When set, the ensure delegates here (settle-bound tests). */
+  ensureOverride:
+    | ((descriptor: WorkspaceDescriptor) => Promise<{ sandboxId: string } | null>)
+    | null = null;
 
   async ensureSandboxForTerminal(
     descriptor: WorkspaceDescriptor,
   ): Promise<{ sandboxId: string } | null> {
     this.ensureCalls.push(descriptor);
+    if (this.ensureOverride) return this.ensureOverride(descriptor);
     return this.gateOpen ? { sandboxId: "sbx-1" } : null;
   }
   async syncBackForTerminal(descriptor: WorkspaceDescriptor): Promise<void> {
@@ -154,7 +166,9 @@ class FakeExecutor implements SandboxTerminalExecutor {
   }
 }
 
-function makeManager() {
+function makeManager(
+  extraDeps: Partial<SandboxTerminalSessionManagerDeps> = {},
+) {
   const provider = new FakeProvider();
   const executor = new FakeExecutor();
   const logs: string[] = [];
@@ -164,6 +178,7 @@ function makeManager() {
     executor,
     log: (m) => logs.push(m),
     logError: (m) => errors.push(m),
+    ...extraDeps,
   });
   return { manager, provider, executor, logs, errors };
 }
@@ -492,5 +507,148 @@ describe("SandboxTerminalSessionManager — sync-back and exit", () => {
     await flushMicrotasks();
     expect(executor.syncCalls.length).toBeGreaterThanOrEqual(1);
     expect(manager.size).toBe(0);
+  });
+});
+
+describe("SandboxTerminalSessionManager — provision settle bound (2026-11-19 stall fix)", () => {
+  it("exports the production bound: 480s, matching the preview recreation create bound", () => {
+    expect(SANDBOX_TERMINAL_PROVISION_TIMEOUT_MS).toBe(480_000);
+  });
+
+  it("a never-settling ensure rejects within the bound and leaves no session behind", async () => {
+    const { manager, provider, executor } = makeManager({ provisionTimeoutMs: 60 });
+    executor.ensureOverride = () => new Promise(() => {});
+
+    await expect(manager.create(openOpts())).rejects.toThrow(
+      /did not settle within 60 ms \(stage: ensure\)/,
+    );
+    // The failure is a rejection the server's catch turns into
+    // terminal:error — not a session, not a PTY attach attempt.
+    expect(executor.ensureCalls).toHaveLength(1);
+    expect(provider.connectCalls).toHaveLength(0);
+    expect(manager.size).toBe(0);
+  });
+
+  it("a never-settling PTY attach rejects within the bound and deletes the half-created session", async () => {
+    const { manager, provider, executor } = makeManager({ provisionTimeoutMs: 60 });
+    provider.connectOverride = () => new Promise(() => {});
+
+    await expect(manager.create(openOpts())).rejects.toThrow(
+      /did not settle within 60 ms \(stage: connect\)/,
+    );
+    expect(executor.ensureCalls).toHaveLength(1);
+    expect(provider.connectCalls).toHaveLength(1);
+    // No phantom record: the per-user cap is free again, proven by
+    // a successful create once the provider settles normally.
+    expect(manager.size).toBe(0);
+    provider.connectOverride = null;
+    const snapshot = await manager.create(openOpts());
+    expect(snapshot.exited).toBe(false);
+    expect(manager.size).toBe(1);
+  });
+
+  it("a failed flight does not wedge the key: the next create provisions fresh", async () => {
+    const { manager, executor } = makeManager({ provisionTimeoutMs: 60 });
+    executor.ensureOverride = () => new Promise(() => {});
+    await expect(manager.create(openOpts())).rejects.toThrow(/did not settle/);
+    executor.ensureOverride = null;
+    const snapshot = await manager.create(openOpts());
+    expect(snapshot.workspaceId).toBe("ws-1");
+    expect(manager.size).toBe(1);
+  });
+});
+
+describe("SandboxTerminalSessionManager — single-flight create and ready handoff", () => {
+  it("two racing creates share one provisioning and one session; the latest socket owns the output", async () => {
+    const { manager, provider, executor } = makeManager();
+    let releaseEnsure!: (v: { sandboxId: string }) => void;
+    executor.ensureOverride = () =>
+      new Promise((res) => {
+        releaseEnsure = res;
+      });
+
+    const firstData: string[] = [];
+    const secondData: string[] = [];
+    const first = manager.create(openOpts({ onData: (d) => firstData.push(d) }));
+    const second = manager.create(openOpts({ onData: (d) => secondData.push(d) }));
+    // The second create joined the flight instead of ensuring again.
+    expect(executor.ensureCalls).toHaveLength(1);
+
+    releaseEnsure({ sandboxId: "sbx-1" });
+    const [snapA, snapB] = await Promise.all([first, second]);
+
+    // One provision, one PTY, one session record — handed to both
+    // callers under the same id, so each server socket can emit
+    // session:ready for the session that actually exists.
+    expect(snapB.sessionId).toBe(snapA.sessionId);
+    expect(provider.connectCalls).toHaveLength(1);
+    expect(manager.size).toBe(1);
+    // The latest socket wins the output stream.
+    provider.transports[0].pushOutput("prompt$ ");
+    expect(secondData).toEqual(["prompt$ "]);
+    expect(firstData).toEqual([]);
+  });
+
+  it("a create after detach adopts the parked session instead of provisioning a twin", async () => {
+    const { manager, provider, executor } = makeManager();
+    const snapshot = await manager.create(openOpts());
+    expect(manager.detach(snapshot.sessionId, "user-1", 120_000)).toBe(true);
+
+    const adoptedData: string[] = [];
+    const adopted = await manager.create(
+      openOpts({ onData: (d) => adoptedData.push(d) }),
+    );
+
+    expect(adopted.sessionId).toBe(snapshot.sessionId);
+    expect(executor.ensureCalls).toHaveLength(1);
+    expect(provider.connectCalls).toHaveLength(1);
+    expect(manager.size).toBe(1);
+    expect(manager.isDetached(snapshot.sessionId, "user-1")).toBe(false);
+    provider.transports[0].pushOutput("welcome back\r\n");
+    expect(adoptedData).toEqual(["welcome back\r\n"]);
+  });
+
+  it("create adopts the named resume target even while it is still attached (the reattach race)", async () => {
+    const { manager, provider, executor } = makeManager();
+    const snapshot = await manager.create(openOpts());
+    // NOT detached: the old socket's disconnect has not been
+    // processed yet, so reattach() would refuse this session. The
+    // reconnecting socket names it via adoptSessionId instead.
+    const adoptedData: string[] = [];
+    const adopted = await manager.create(
+      openOpts({
+        adoptSessionId: snapshot.sessionId,
+        onData: (d) => adoptedData.push(d),
+      }),
+    );
+
+    expect(adopted.sessionId).toBe(snapshot.sessionId);
+    expect(executor.ensureCalls).toHaveLength(1);
+    expect(provider.connectCalls).toHaveLength(1);
+    expect(manager.size).toBe(1);
+    provider.transports[0].pushOutput("still here\r\n");
+    expect(adoptedData).toEqual(["still here\r\n"]);
+  });
+
+  it("create never adopts a foreign or wrong-workspace named session", async () => {
+    const { manager, executor } = makeManager();
+    const snapshot = await manager.create(openOpts());
+
+    // Another user naming the session: ignored, fresh provision.
+    const otherUser = await manager.create(
+      openOpts({ userId: "user-2", adoptSessionId: snapshot.sessionId }),
+    );
+    expect(otherUser.sessionId).not.toBe(snapshot.sessionId);
+
+    // The owner naming it from a different workspace scope: ignored.
+    const otherWorkspace = await manager.create(
+      openOpts({
+        workspaceId: "ws-2",
+        descriptor: { ...DESCRIPTOR, workspaceId: "ws-2" },
+        adoptSessionId: snapshot.sessionId,
+      }),
+    );
+    expect(otherWorkspace.sessionId).not.toBe(snapshot.sessionId);
+    expect(executor.ensureCalls).toHaveLength(3);
   });
 });
