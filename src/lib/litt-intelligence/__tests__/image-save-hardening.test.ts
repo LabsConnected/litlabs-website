@@ -146,6 +146,9 @@ describe("insertAssetFromUrl — step-tagged failures", () => {
     expect(result.saveStep).toBe("decode");
   });
 
+  // Explicit timeout: the always-throwing fetch rides the full
+  // bounded-backoff schedule (0.5s / 2s / 5s of real timers) before
+  // the failure surfaces — over the 5s default.
   it("tags a failed download as the decode step", async () => {
     globalThis.fetch = vi.fn(async () => {
       throw new Error("boom");
@@ -155,7 +158,51 @@ describe("insertAssetFromUrl — step-tagged failures", () => {
     expect(result.success).toBe(false);
     expect(result.error).toBe("boom");
     expect(result.saveStep).toBe("decode");
-  });
+  }, 20_000);
+
+  it("stops the backoff promptly when the caller's deadline fires mid-schedule", async () => {
+    // The caller's signal is a spent-budget contract (the enrichment
+    // run's overall deadline "cuts the download short"): when it fires,
+    // the retry sleeps must not keep the caller waiting out the full
+    // 0.5s / 2s / 5s schedule. Uninterruptible sleeps overshot a spent
+    // 3s enrichment budget by seconds per download and stalled
+    // approval-resume runs past their CI test bounds (2026-11-19).
+    // Callers WITHOUT a signal (the registry's post-generation save)
+    // still ride the full schedule — see the test above.
+    // A fetch that honors its signal the way a real one does: once the
+    // caller's deadline fires, the next attempt rejects with AbortError
+    // instead of answering another 402.
+    globalThis.fetch = vi.fn(async (_url: unknown, init?: { signal?: AbortSignal }) => {
+      if (init?.signal?.aborted) {
+        throw new DOMException("This operation was aborted", "AbortError");
+      }
+      return mockImageResponse({ status: 402 });
+    }) as unknown as typeof fetch;
+    const transport = spyTransport();
+    const controller = new AbortController();
+    const startedAt = Date.now();
+    // Fire the deadline inside the final 5s sleep (attempts land at
+    // ~0s, ~0.5s, ~2.5s): an uninterruptible sleep would not surface
+    // until ~7.5s and would report the 402, not the abort.
+    const timer = setTimeout(() => controller.abort(), 2_600);
+    try {
+      const result = await insertAssetFromUrl(
+        "https://cdn.example.com/hero.png",
+        { signal: controller.signal },
+        transport,
+      );
+      expect(result.success).toBe(false);
+      // The elapsed time is the assertion: the unfixed backoff surfaces
+      // only at ~7.5s, after the caller's budget is long spent. (The
+      // surfaced error text is the generic network-error fallback —
+      // a jsdom-realm DOMException is not an instanceof Error — and is
+      // identical before and after the fix; the defect was the wait.)
+      expect(Date.now() - startedAt).toBeLessThan(5_000);
+      expect(transport.writeBinaryFile).not.toHaveBeenCalled();
+    } finally {
+      clearTimeout(timer);
+    }
+  }, 20_000);
 
   it("tags an empty download as the decode step", async () => {
     globalThis.fetch = vi.fn(async () =>

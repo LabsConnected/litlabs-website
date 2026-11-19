@@ -346,6 +346,50 @@ describe("generateImage", () => {
     expect(calls.dispatch).toBe(1);
     expect(calls.debit).toHaveLength(0);
   });
+
+  it("persists a pollinations lazy URL to durable storage before completing the job", async () => {
+    // Regression for the live 2026-11-19 failure: handlePollinationsImage
+    // fell back to its lazy generation-endpoint URL, the job completed
+    // against that URL (so Media showed the image), and the registry's
+    // project save then died re-downloading the pay-gated endpoint
+    // (HTTP 402). Pollinations results must pass through persistImage
+    // like the other providers so the job row and the save leg both
+    // point at own storage, never at image.pollinations.ai.
+    const LAZY_URL =
+      "https://image.pollinations.ai/prompt/a%20sunny%20dog%20park?width=1024&height=1024&seed=7&nologo=true&enhance=false&model=flux";
+    const STORAGE_URL =
+      "https://storage.example/internal_1/pollinations-a-sunny-dog-park.png";
+    const persistCalls: Array<{ url: string; providerId: string }> = [];
+    const { deps, jobs } = makeDeps({
+      dispatch: async () => ({
+        id: "res_lazy",
+        status: 200,
+        title: "a sunny dog park",
+        format: "image" as const,
+        downloadUrl: LAZY_URL,
+      }),
+      persistImage: async (_uid, url, providerId) => {
+        persistCalls.push({ url, providerId });
+        return STORAGE_URL;
+      },
+    });
+
+    const result = await generateImage(
+      { userId: "user_abc", requestId: "op_5" },
+      freeInput,
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    expect(persistCalls).toEqual([{ url: LAZY_URL, providerId: "pollinations" }]);
+    if (result.success) {
+      expect(result.downloadUrl).toBe(STORAGE_URL);
+      expect(result.downloadUrl).not.toContain("image.pollinations.ai");
+    }
+    const job = jobs.get("op_5");
+    expect(job?.status).toBe("completed");
+    expect(job?.metadata?.durableUrl).toBe(STORAGE_URL);
+  });
 });
 
 describe("generateImage — provider fallthrough to the no-key last resort", () => {
