@@ -132,11 +132,16 @@ export default function BoardSettingsMenu() {
 
   return (
     <div className="relative shrink-0" ref={wrapRef}>
+      {/* pointer-events-auto on the trigger and the menu: this
+          component renders inside StudioBoard's pill toolbar, whose
+          container is pointer-events-none (click-through, so panel
+          drags at the top of the board are not swallowed) — controls
+          opt back in individually. */}
       <button
         type="button"
         data-testid="board-settings-button"
         aria-expanded={open}
-        className="flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium"
+        className="pointer-events-auto flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium"
         style={{ color: tokens.text }}
         onClick={() => setOpen((value) => !value)}
       >
@@ -147,7 +152,7 @@ export default function BoardSettingsMenu() {
         <div
           data-testid="board-settings-menu"
           data-placement={menuFit?.flipped ? "above" : "below"}
-          className={`absolute right-0 ${menuFit?.flipped ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]"} max-h-[calc(100vh-96px)] w-[min(360px,calc(100vw-24px))] overflow-y-auto rounded-xl border p-1.5 shadow-lg`}
+          className={`pointer-events-auto absolute right-0 ${menuFit?.flipped ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]"} max-h-[calc(100vh-96px)] w-[min(360px,calc(100vw-24px))] overflow-y-auto rounded-xl border p-1.5 shadow-lg`}
           style={{
             backgroundColor: tokens.surface,
             borderColor: tokens.border,

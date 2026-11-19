@@ -310,7 +310,6 @@ export default function BoardPanel({
         className="flex h-11 shrink-0 cursor-grab touch-none items-center gap-1 border-b px-2.5 active:cursor-grabbing md:h-9"
         style={{ borderColor: tokens.border }}
         onPointerDown={(event) => beginSession("move", event)}
-        onDoubleClick={() => onToggleMaximize(id)}
       >
         {icon && (
           <span
@@ -332,7 +331,18 @@ export default function BoardPanel({
             style={{ backgroundColor: BOARD_PANEL_STATUS_COLORS[status.tone] }}
           />
         )}
-        <span className="min-w-0 flex-1 truncate text-xs font-semibold tracking-wide">
+        {/* Double-click maximize lives on the TITLE only (Larry,
+            2026-11-18): when it sat on the whole header, rapid retry
+            clicks while grabbing a panel — especially the sliver of
+            header left exposed under the board's pill toolbar —
+            flipped the panel to full-board and back mid-attempt.
+            The header's maximize button remains the always-available
+            path. */}
+        <span
+          data-testid={`board-panel-title-${id}`}
+          className="min-w-0 flex-1 truncate text-xs font-semibold tracking-wide"
+          onDoubleClick={() => onToggleMaximize(id)}
+        >
           {title}
         </span>
         <button
