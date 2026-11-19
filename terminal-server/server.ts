@@ -2307,6 +2307,12 @@ io.on("connection", (socket) => {
           projectId: projectId ?? null,
           workspaceId,
           descriptor,
+          // When the resume above missed only because the old
+          // socket's disconnect had not parked the session yet,
+          // create() adopts that named live session (ownership and
+          // scope re-checked in the manager) instead of provisioning
+          // a second shell for the same workspace.
+          adoptSessionId: resumeId ?? null,
           onData: sandboxCallbacks.onData,
           onExit: sandboxCallbacks.onExit,
           onOutputDropped: ({ sessionId, dropped }) => {

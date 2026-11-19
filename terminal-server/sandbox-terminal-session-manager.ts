@@ -40,6 +40,13 @@
  * Fail-closed: create() runs only after the executor's gate-checked
  * ensure returns a sandbox; there is no path from here to a host
  * process, and a failed attach is an error, never a fallback.
+ *
+ * Create is single-flight per (userId, workspaceId) and adopts
+ * existing live sessions on reconnect (see create()'s own
+ * docstring), and each provisioning stage is settle-bounded
+ * (SANDBOX_TERMINAL_PROVISION_TIMEOUT_MS) — both added after the
+ * 2026-11-19 live proof, where a cold open raced a second
+ * provision and hung past every client timeout with no error.
  */
 
 import { randomUUID } from "crypto";
@@ -84,6 +91,49 @@ export const SANDBOX_TERMINAL_REARM_TIMEOUT_MS =
 /** Default PTY dimensions at open; the client resizes right after ready. */
 const PTY_DEFAULT_COLS = 120;
 const PTY_DEFAULT_ROWS = 32;
+/**
+ * Settle bound for one provisioning stage of create() (the executor
+ * ensure, then the provider PTY attach). Matches the preview
+ * recreation path's create bound
+ * (PREVIEW_RECREATION_CREATE_TIMEOUT_MS = 480_000): a legitimate
+ * first-open mirror of the biggest tree on the platform takes
+ * minutes, so the bound must be generous — its job is to convert a
+ * NEVER-settling await into a bounded, surfaced failure (the
+ * server's catch emits terminal:error and the panel offers Retry)
+ * instead of an eternal "provisioning" heartbeat. Added after the
+ * 2026-11-19 live proof: a cold terminal open hung silently for
+ * 13+ minutes because no layer of this path had any deadline.
+ */
+export const SANDBOX_TERMINAL_PROVISION_TIMEOUT_MS = 480_000;
+
+/**
+ * Race `promise` against a settle deadline of `timeoutMs`. Same
+ * shape and discipline as the preview path's settleWithin
+ * (preview/sandbox-runtime.ts): the promise is never cancelled —
+ * a promise cannot be — it keeps running detached, and the race's
+ * own handlers consume its eventual settle, so a late rejection is
+ * never an unhandled rejection. The timer is unref'd: a pending
+ * bound must not keep the process alive on its own.
+ */
+type SettleOutcome<T> = { settled: true; value: T } | { settled: false };
+
+async function settleWithin<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<SettleOutcome<T>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise.then((value): SettleOutcome<T> => ({ settled: true, value })),
+      new Promise<SettleOutcome<T>>((resolve) => {
+        timer = setTimeout(() => resolve({ settled: false }), timeoutMs);
+        if (typeof timer.unref === "function") timer.unref();
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
 
 // ─── Dependency shapes ──────────────────────────────────────────────
 
@@ -121,6 +171,13 @@ export interface SandboxTerminalSessionManagerDeps {
   logError?: (message: string) => void;
   /** Clock injection (tests). */
   now?: () => number;
+  /**
+   * Per-stage settle bound for create()'s provisioning
+   * (ensure, then PTY attach). Defaults to
+   * SANDBOX_TERMINAL_PROVISION_TIMEOUT_MS; tests inject a short
+   * bound so a never-settling fake fails in milliseconds.
+   */
+  provisionTimeoutMs?: number;
 }
 
 // ─── Session shapes ─────────────────────────────────────────────────
@@ -171,6 +228,19 @@ export interface CreateSandboxTerminalSessionOptions {
    * to the socket so the line lands in the panel's Logs tab.
    */
   onLog?: (message: string) => void;
+  /**
+   * The session id the connecting client offered for resume, when
+   * the caller's reattach() attempt already missed. The miss happens
+   * in a real race: a fast reconnect is processed before the old
+   * socket's disconnect parks the session, so reattach() — which
+   * only accepts parked sessions — refuses a session that is in
+   * fact the caller's own live shell. create() then adopts that
+   * named session (callbacks rebound to this caller) instead of
+   * provisioning a second shell for the same workspace. Ownership
+   * and workspace scope are re-checked here exactly as in
+   * reattach(); a stale or foreign id is ignored, never adopted.
+   */
+  adoptSessionId?: string | null;
 }
 
 export interface SandboxTerminalCallbacks {
@@ -232,11 +302,24 @@ interface SandboxTerminalSession {
 
 export class SandboxTerminalSessionManager {
   private readonly sessions = new Map<string, SandboxTerminalSession>();
+  /**
+   * In-flight provisioning per (userId, workspaceId). Two sockets
+   * racing one workspace (a reconnect during a cold open, a second
+   * mounted panel) must not each run the executor ensure — the
+   * second would queue behind the workspace lock for the whole
+   * mirror and then open a duplicate shell. The later create()
+   * joins the flight and adopts the resulting session instead.
+   */
+  private readonly createFlights = new Map<
+    string,
+    Promise<SandboxTerminalSession>
+  >();
   private readonly provider: SandboxTerminalProvider;
   private readonly executor: SandboxTerminalExecutor;
   private readonly log: (message: string) => void;
   private readonly logError: (message: string) => void;
   private readonly now: () => number;
+  private readonly provisionTimeoutMs: number;
 
   constructor(deps: SandboxTerminalSessionManagerDeps) {
     this.provider = deps.provider;
@@ -244,20 +327,150 @@ export class SandboxTerminalSessionManager {
     this.log = deps.log ?? ((m) => console.info(m));
     this.logError = deps.logError ?? ((m) => console.error(m));
     this.now = deps.now ?? Date.now;
+    this.provisionTimeoutMs =
+      deps.provisionTimeoutMs ?? SANDBOX_TERMINAL_PROVISION_TIMEOUT_MS;
   }
 
   // ─── Create ─────────────────────────────────────────────────────
 
   /**
-   * Open a new sandbox shell: gate-checked ensure through the
-   * executor, then the provider's PTY attach. Throws when the
-   * per-user cap is reached, when the gate is closed (ensure
-   * declined), or when the attach itself fails — never falls back
-   * to any host path.
+   * Open a sandbox shell for a connecting socket. Three paths, in
+   * order:
+   *
+   *   1. ADOPT — the caller names its previous session
+   *      (adoptSessionId, offered when its reattach() missed the
+   *      disconnect-parking race), or a parked live session exists
+   *      for this (userId, workspaceId): the existing shell is
+   *      handed to the new socket by rebinding its callbacks. No
+   *      second provision, no duplicate PTY — a reconnect reaches
+   *      the already-provisioned session and the server can emit
+   *      session:ready for it immediately.
+   *   2. JOIN — a provisioning for this (userId, workspaceId) is
+   *      already in flight (a racing socket): join it and adopt
+   *      the resulting session instead of queueing a second ensure
+   *      behind the workspace lock.
+   *   3. PROVISION — provisionSession(): gate-checked ensure
+   *      through the executor, then the provider's PTY attach,
+   *      each stage settle-bounded.
+   *
+   * Throws when the per-user cap is reached, when the gate is
+   * closed (ensure declined), when a stage does not settle within
+   * the provision bound, or when the attach itself fails — never
+   * falls back to any host path.
    */
   async create(
     opts: CreateSandboxTerminalSessionOptions,
   ): Promise<SandboxTerminalSessionSnapshot> {
+    // 1a. The named resume target reattach() could not take (it was
+    // not parked yet when the reconnect was processed). Ownership
+    // and workspace scope are re-checked; anything else is ignored.
+    if (opts.adoptSessionId) {
+      const named = this.assertOwner(opts.adoptSessionId, opts.userId);
+      if (
+        named &&
+        !named.exited &&
+        named.workspaceId === opts.workspaceId &&
+        this.sessions.get(named.sessionId) === named
+      ) {
+        return this.adoptSession(named, opts, "resume target");
+      }
+    }
+
+    // 1b. A parked (socketless) live session for this workspace is
+    // the caller's shell coming back — hand it over rather than
+    // provisioning a twin the user never asked for.
+    const parked = this.findLiveSession(
+      opts.userId,
+      opts.workspaceId,
+      (s) => s.detachedAt !== null,
+    );
+    if (parked) {
+      return this.adoptSession(parked, opts, "parked session");
+    }
+
+    // 2. Join an in-flight provisioning for the same workspace.
+    const key = `${opts.userId}\n${opts.workspaceId}`;
+    const flight = this.createFlights.get(key);
+    if (flight) {
+      const session = await flight;
+      if (!session.exited && this.sessions.get(session.sessionId) === session) {
+        return this.adoptSession(session, opts, "joined in-flight create");
+      }
+      // The joined session died before the handoff (exit raced the
+      // attach) — fall through and provision a fresh one.
+      return this.create(opts);
+    }
+
+    // 3. Provision, registered as the flight for this key until it
+    // settles so a racing create() joins instead of duplicating it.
+    const tracked = this.provisionSession(opts).finally(() => {
+      if (this.createFlights.get(key) === tracked) {
+        this.createFlights.delete(key);
+      }
+    });
+    this.createFlights.set(key, tracked);
+    const session = await tracked;
+    return this.toSnapshot(session);
+  }
+
+  /**
+   * Hand an existing live session to a new socket: the session's
+   * output/exit/log callbacks are rebound to the caller (the latest
+   * socket wins — the previous socket is gone or going), any park
+   * is cancelled, output buffered while parked is replayed, and
+   * the idle clock restarts. The PTY stream itself is untouched:
+   * output already flows through the session record's callbacks.
+   */
+  private adoptSession(
+    session: SandboxTerminalSession,
+    opts: CreateSandboxTerminalSessionOptions,
+    reason: string,
+  ): SandboxTerminalSessionSnapshot {
+    if (session.detachTimer) clearTimeout(session.detachTimer);
+    session.detachTimer = null;
+    session.detachedAt = null;
+    session.emitData = opts.onData;
+    session.emitExit = opts.onExit;
+    session.notifyDropped = opts.onOutputDropped ?? null;
+    session.notifyBpWarning = opts.onBackpressureWarning ?? null;
+    session.isTransportWritable = opts.isTransportWritable ?? null;
+    session.onLog = opts.onLog ?? null;
+    session.lastActivityAt = this.now();
+    this.resetIdleTimer(session);
+    this.flushPending(session);
+    this.log(
+      `[sandbox-terminal] adopted session=${session.sessionId} sandbox=${session.sandboxId} ` +
+        `user=${opts.userId} workspace=${opts.workspaceId} (${reason})`,
+    );
+    return this.toSnapshot(session);
+  }
+
+  /** First live session for (userId, workspaceId) matching `where`. */
+  private findLiveSession(
+    userId: string,
+    workspaceId: string,
+    where: (s: SandboxTerminalSession) => boolean,
+  ): SandboxTerminalSession | null {
+    for (const session of this.sessions.values()) {
+      if (session.userId !== userId) continue;
+      if (session.workspaceId !== workspaceId) continue;
+      if (session.exited) continue;
+      if (where(session)) return session;
+    }
+    return null;
+  }
+
+  /**
+   * The provisioning path of create(): cap check, settle-bounded
+   * ensure, session record, settle-bounded PTY attach. On a
+   * non-settling attach the half-created record is deleted before
+   * the throw, so no phantom session consumes the per-user cap or
+   * adopts a later caller; a transport that arrives late anyway is
+   * killed on arrival rather than left as an orphan shell.
+   */
+  private async provisionSession(
+    opts: CreateSandboxTerminalSessionOptions,
+  ): Promise<SandboxTerminalSession> {
     const userCount = this.countByUser(opts.userId);
     if (userCount >= SANDBOX_TERMINAL_MAX_SESSIONS_PER_USER) {
       throw new Error(
@@ -265,7 +478,16 @@ export class SandboxTerminalSessionManager {
       );
     }
 
-    const ensured = await this.executor.ensureSandboxForTerminal(opts.descriptor);
+    const ensureOutcome = await settleWithin(
+      this.executor.ensureSandboxForTerminal(opts.descriptor),
+      this.provisionTimeoutMs,
+    );
+    if (!ensureOutcome.settled) {
+      throw new Error(
+        `sandbox terminal provisioning did not settle within ${this.provisionTimeoutMs} ms (stage: ensure)`,
+      );
+    }
+    const ensured = ensureOutcome.value;
     if (!ensured) {
       // The gate closed between the socket gate and now (canary went
       // stale, routing flipped). Fail closed with the refusal truth.
@@ -316,19 +538,43 @@ export class SandboxTerminalSessionManager {
     };
     this.sessions.set(sessionId, session);
 
+    const connectPromise = this.provider.connectTerminal(ensured.sandboxId, {
+      shell: "bash",
+      cols: PTY_DEFAULT_COLS,
+      rows: PTY_DEFAULT_ROWS,
+      // The composed base env's HOME is /workspace (Phase 1
+      // default); exec pins HOME to the sandbox home per command
+      // so caches and git config stay out of the synced tree. The
+      // shell gets the same pin through the contract's caller-env
+      // channel (value-guarded by the provider).
+      env: { HOME: SANDBOX_HOME_DIR },
+    });
+    const connectOutcome = await settleWithin(
+      connectPromise,
+      this.provisionTimeoutMs,
+    );
+    if (!connectOutcome.settled) {
+      // Half-created session: delete the record before throwing so
+      // nothing phantom holds the per-user cap. The attach promise
+      // itself cannot be cancelled; if a transport ever arrives,
+      // kill it on arrival instead of leaking an orphan shell.
+      this.sessions.delete(sessionId);
+      void connectPromise.then(
+        (lateTransport) => {
+          try {
+            lateTransport.kill();
+          } catch {
+            // best effort — the sandbox's own lifetime is the ceiling
+          }
+        },
+        () => {},
+      );
+      throw new Error(
+        `sandbox terminal provisioning did not settle within ${this.provisionTimeoutMs} ms (stage: connect)`,
+      );
+    }
     try {
-      const transport = await this.provider.connectTerminal(ensured.sandboxId, {
-        shell: "bash",
-        cols: PTY_DEFAULT_COLS,
-        rows: PTY_DEFAULT_ROWS,
-        // The composed base env's HOME is /workspace (Phase 1
-        // default); exec pins HOME to the sandbox home per command
-        // so caches and git config stay out of the synced tree. The
-        // shell gets the same pin through the contract's caller-env
-        // channel (value-guarded by the provider).
-        env: { HOME: SANDBOX_HOME_DIR },
-      });
-      this.wireTransport(session, transport);
+      this.wireTransport(session, connectOutcome.value);
     } catch (err) {
       this.sessions.delete(sessionId);
       throw err;
@@ -340,7 +586,7 @@ export class SandboxTerminalSessionManager {
       `[sandbox-terminal] opened session=${sessionId} sandbox=${ensured.sandboxId} ` +
         `user=${opts.userId} workspace=${opts.workspaceId} transport=${session.transportSessionId}`,
     );
-    return this.toSnapshot(session);
+    return session;
   }
 
   // ─── Detach / resume ────────────────────────────────────────────
