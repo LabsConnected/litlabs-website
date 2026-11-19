@@ -101,6 +101,12 @@ import { mintTerminalToken, verifyTerminalToken, bearerToken } from "./auth";
 import { isTerminalOwner, warnIfOwnerAllowlistUnset } from "./terminal-owner-gate";
 import { createSandboxExecStack } from "./sandbox/exec-router";
 import {
+  SandboxTerminalSessionManager,
+  type SandboxTerminalExitInfo,
+  type SandboxTerminalSessionSnapshot,
+} from "./sandbox-terminal-session-manager";
+import { decideTerminalSocketRoute } from "./terminal-socket-route";
+import {
   assertHostExecutionPermitted,
   evaluateTerminalIsolation,
   isTrustedLocalEnvironment,
@@ -351,6 +357,17 @@ const sandboxExecutor = new SandboxWorkspaceExecutor({
 registerSandboxPrepareHandler({
   isAvailableFor: (userId) => sandboxExecutor.isAvailableFor(userId),
   prepare: (input) => sandboxExecutor.prepareRepoWorkspace(input),
+});
+
+// ─── Sandbox terminal sessions (terminal bridge) ───────────────────
+// Interactive shells inside the workspace's sandbox, for sockets the
+// isolation gate routes here (see the gate middleware below). Shares
+// the executor's gate + provider with exec/preview, so availability
+// is the same decision everywhere; with the gate closed no socket is
+// ever routed here and behavior is exactly as before the bridge.
+const sandboxTerminalManager = new SandboxTerminalSessionManager({
+  provider: sandboxStack.provider,
+  executor: sandboxExecutor,
 });
 registerSandboxPreviewSupport({
   executor: sandboxExecutor,
@@ -1946,6 +1963,18 @@ io.use((socket, next) => {
 // Runs after authentication so unauthenticated callers learn nothing.
 // When terminal execution is disabled (production without a working Docker
 // runtime) the socket is refused before any workspace or PTY work happens.
+//
+// Terminal bridge (TERMINAL-BRIDGE-SPEC-2026-11-17 §2.2): the host
+// verdict above is about HOST execution and stays exactly as it was.
+// A socket the host verdict refuses may still hold a SANDBOX route:
+// it carries a workspace (auth middleware verified it exists, is
+// owned by this user, and is ready) AND the sandbox gate — the same
+// gate exec/preview trust: real provider, routing enabled, owner
+// allowlist, fresh verified canary — is open for this user. Such a
+// socket is routed to the sandbox session manager; the shell runs
+// inside the workspace's microVM, never on the host. Every other
+// refused socket gets today's refusal, word for word. There is no
+// fallback from a failed sandbox attach to a host shell.
 io.use((socket, next) => {
   if (isTrustedLocalEnvironment(process.env) && isUntrustedLocalRequest(socket.handshake.headers)) {
     next(new Error("Terminal unavailable: local execution serves direct local requests only"));
@@ -1953,12 +1982,23 @@ io.use((socket, next) => {
   }
   getTerminalIsolationVerdict()
     .then((verdict) => {
-      if (verdict.terminalExecution !== "enabled") {
-        console.error("[Terminal] Connection refused:", verdict.reason);
-        next(new Error("Terminal unavailable: isolation not verified"));
+      const route = decideTerminalSocketRoute({
+        terminalExecution: verdict.terminalExecution,
+        userId: socket.data.userId as string | undefined,
+        workspaceId: socket.data.workspaceId as string | undefined,
+        sandboxAvailable: (userId) => sandboxExecutor.isAvailableFor(userId),
+      });
+      if (route === "host") {
+        next();
         return;
       }
-      next();
+      if (route === "sandbox") {
+        socket.data.terminalRoute = "sandbox";
+        next();
+        return;
+      }
+      console.error("[Terminal] Connection refused:", verdict.reason);
+      next(new Error("Terminal unavailable: isolation not verified"));
     })
     .catch(() => next(new Error("Terminal unavailable: isolation check failed")));
 });
@@ -2010,6 +2050,319 @@ io.on("connection", (socket) => {
     },
   };
 
+  // ─── Shared per-session socket handlers ─────────────────────────
+  // One binding for both session kinds. The host PTY manager and the
+  // sandbox terminal manager hand the handler the same per-connection
+  // controls (input / resize / detach), so the socket event handlers
+  // — input rate limiting, isBlockedCommand screening, auditCommand,
+  // mobile-command dispatch, and the chat/model bridges — are shared,
+  // not forked (spec §2.2). The sandbox route changes WHERE commands
+  // run, never how they are screened.
+  const bindSessionHandlers = (controls: {
+    sessionId: string;
+    input: (data: string) => boolean;
+    resize: (cols: number, rows: number) => void;
+    detach: () => void;
+  }): void => {
+    const sessionId = controls.sessionId;
+
+    socket.on("terminal:input", (data: string) => {
+      if (typeof data !== "string") return;
+
+      const userId = socket.data.userId || "unknown";
+
+      // Rate limiting: max 60 inputs per 10s per socket
+      const now = Date.now();
+      const window = 10_000;
+      if (!(socket as any).__rateBuckets) (socket as any).__rateBuckets = [];
+      const buckets = (socket as any).__rateBuckets as number[];
+      const recent = buckets.filter((t) => now - t < window);
+      recent.push(now);
+      (socket as any).__rateBuckets = recent;
+      if (recent.length > 60) {
+        socket.emit("terminal:output", "\r\n\x1b[33m⚠ Rate limit: too many commands. Slow down.\x1b[0m\r\n");
+        return;
+      }
+
+      if (isBlockedCommand(data)) {
+        auditCommand(userId, sessionId, data, true);
+        socket.emit("terminal:output", "\r\n\x1b[31m⛔ Blocked unsafe command.\x1b[0m\r\n");
+        return;
+      }
+
+      auditCommand(userId, sessionId, data, false);
+      if (!controls.input(data)) {
+        // input rejected — wrong owner, exited, or oversized
+        socket.emit("terminal:output", "\r\n\x1b[33m⚠ Input rejected (session ended or too large).\x1b[0m\r\n");
+      }
+    });
+
+    socket.on("litt-code:command", async (input: string) => {
+      if (typeof input !== "string") return;
+
+      // Mobile commands (litt mobile:check, mobile:start, etc.) are dispatched
+      // directly to the PTY as real shell commands — no LLM round-trip.
+      const mobileCmd = dispatchMobileCommand(input);
+      if (mobileCmd) {
+        const userId = socket.data.userId || "unknown";
+        auditCommand(userId, sessionId, mobileCmd.shellCommand, false);
+        socket.emit("terminal:output", `\r\n\x1b[36m📱 ${mobileCmd.label}\x1b[0m\r\n`);
+        controls.input(mobileCmd.shellCommand + "\r");
+        return;
+      }
+
+      socket.emit("terminal:output", "\r\n\x1b[36mLiTT is thinking...\x1b[0m\r\n");
+      const cmdStart = Date.now();
+      const userId = socket.data.userId || "unknown";
+
+      // ─── Canonical operator path ───────────────────────────────────
+      // Route through runLiTTOperator → runAgentLoop → ExecutionGateway.
+      // This gives the NL path: tools, gateway enforcement, canonical
+      // runId, RuntimeStore lifecycle events, and cross-surface identity.
+      //
+      // Falls back to the legacy askLiTTCode path ONLY if the model
+      // provider is unreachable (no Ollama + no OPENROUTER_API_KEY).
+      const canUseOperator = await operatorAvailable().catch(() => false);
+
+      if (canUseOperator) {
+        try {
+          const result = await runLiTTOperator({
+            prompt: input,
+            cwd: workspace,
+            userId,
+            mode: "act",
+            onModelStream: (event) => {
+              if (event.type === "delta") {
+                socket.emit("terminal:output", event.text.replace(/\n/g, "\r\n"));
+              }
+            },
+          });
+
+          socket.emit("terminal:output", "\r\n\x1b[36mLiTT:\x1b[0m\r\n");
+          socket.emit("terminal:output", result.content.replace(/\n/g, "\r\n") + "\r\n");
+          socket.emit("terminal:output", `\r\n\x1b[2mrunId: ${result.runId} (${result.termination}, ${result.rounds} rounds)\x1b[0m\r\n`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "LiTT operator failed";
+          socket.emit("terminal:output", `\r\n\x1b[31m⚠ ${message}\x1b[0m\r\n`);
+        }
+        return;
+      }
+
+      // ─── Legacy fallback (no model provider available) ─────────────
+      runtimeSetPhase("thinking");
+      try {
+        const reply = await handleLiTTCodeCommand(input);
+        runtimeCommandEnd("litt-code:command", true, 0, Date.now() - cmdStart, "LiTT replied (legacy)");
+        socket.emit("terminal:output", "\r\n\x1b[36mLiTT:\x1b[0m\r\n");
+        socket.emit("terminal:output", reply.replace(/\n/g, "\r\n") + "\r\n");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "LiTT failed";
+        runtimeCommandEnd("litt-code:command", false, 1, Date.now() - cmdStart, message);
+        socket.emit("terminal:output", `\r\n\x1b[31m⚠ ${message}\x1b[0m\r\n`);
+      }
+    });
+
+    socket.on("terminal:resize", ({ cols, rows }: { cols: number; rows: number }) => {
+      if (typeof cols === "number" && typeof rows === "number") {
+        controls.resize(cols, rows);
+      }
+    });
+
+    // ── Natural-language chat ────────────────────────────────────────
+    // Thin bridge: authenticated socket → streamLiTTCode → litt:event streaming back
+    socket.on("litt:chat", async (req: { turnId: string; message: string }) => {
+      if (!req?.turnId || typeof req?.message !== "string" || !req.message.trim()) {
+        socket.emit("litt:event", { type: "error", turnId: req?.turnId ?? "unknown", message: "Invalid request: require turnId and non-empty message" });
+        return;
+      }
+
+      const turnId = req.turnId;
+      const message = req.message;
+
+      console.log("[LiTT Chat] turn cwd:", desktopCwd || "none");
+
+      // Call the canonical natural-language entrypoint
+      try {
+        if (!desktopCwd) {
+          socket.emit("litt:event", {
+            type: "error",
+            turnId,
+            message: "Authenticated Desktop project cwd is unavailable.",
+          });
+          return;
+        }
+
+        await streamLiTTOperator(
+          message,
+          desktopCwd,
+          (event: LiTTEvent) => {
+            // Re-emit only to the originating authenticated Desktop turn.
+            socket.emit("litt:event", { ...event, turnId });
+          },
+        );
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : "LiTT chat failed";
+        socket.emit("litt:event", { type: "error", turnId, message: errorMsg });
+      }
+    });
+
+    // ── Remote model transport (CLI interactive cockpit) ───────────────
+    //
+    // Unlike litt:chat (streamLiTTOperator, above), this is a PURE model
+    // completion proxy: it streams text + relays OpenRouter's native
+    // tool_calls back to the caller, and never executes any tool or
+    // touches any gateway/filesystem itself. The CLI's LOCAL project
+    // tools execute on the user's own machine (the server has no access
+    // to it) — the CLI's existing agent loop handles that unchanged;
+    // only the model call moves server-side.
+    //
+    // Gated by the SAME billing.ts entitlement/credit check Commit A
+    // added for the /api/command ask path — no separate, looser entry
+    // point into model execution exists on this server.
+    const activeModelStreams = new Map<string, AbortController>();
+
+    socket.on("litt:model:request", (payload: ModelRequestPayload) =>
+      handleModelRequest(userId, payload, (p) => socket.emit("litt:model:event", p), activeModelStreams),
+    );
+
+    socket.on("litt:model:cancel", (payload: { requestId?: string }) =>
+      handleModelCancel(activeModelStreams, payload?.requestId),
+    );
+
+    socket.on("disconnect", () => {
+      console.log("[Terminal] Disconnected:", sessionId);
+      // A disconnect abandons any in-flight model streams for this socket
+      // — abort them rather than letting them run to completion unheard.
+      for (const controller of activeModelStreams.values()) controller.abort();
+      activeModelStreams.clear();
+      // Park the session instead of killing it: a refresh, an in-app
+      // navigation or a network blip closes the socket, and the client
+      // resumes with the same sessionId. The shell is killed only if nobody
+      // resumes it within the grace window. userId came from the JWT, so
+      // ownership is enforced by the manager.
+      controls.detach();
+    });
+  };
+
+  // ─── Sandbox session callbacks ──────────────────────────────────
+  // Same output/backpressure plumbing as the host path; the exit
+  // notice additionally renders the honest sandbox-ended state
+  // (spec §4) when the microVM itself reached its lifetime limit.
+  const sandboxCallbacks = {
+    onData: socketCallbacks.onData,
+    onExit: ({ sessionId, exitCode, signal, sandboxEnded }: SandboxTerminalExitInfo) => {
+      console.log("[Terminal] Sandbox exit:", { sessionId, exitCode, signal, sandboxEnded });
+      if (sandboxEnded) {
+        socket.emit(
+          "terminal:output",
+          "\r\n\x1b[33m[Session ended — the sandbox reached its 1-hour limit. Reconnect to start a fresh one. Your files are saved.]\x1b[0m\r\n",
+        );
+      } else {
+        socket.emit("terminal:output", `\r\n\x1b[31m[Session ended ${exitCode ?? signal}]\x1b[0m\r\n`);
+      }
+    },
+    isTransportWritable: socketCallbacks.isTransportWritable,
+    onBackpressureWarning: socketCallbacks.onBackpressureWarning,
+    onLog: (message: string) => socket.emit("terminal:error", message),
+  };
+
+  // ─── Sandbox session start (terminal bridge §2.2/§2.5) ──────────
+  // Async, unlike the host path: ensuring the workspace's sandbox
+  // (create + mirror on first open) takes real time. The panel gets
+  // terminal:status progress while it runs (§2.6) — emitted
+  // immediately and every few seconds, so its connect clock keeps
+  // restarting on signs of life and the hard timeout applies only
+  // once the server goes silent.
+  const startSandboxTerminalSession = async (): Promise<void> => {
+    const descriptor = workspaceId ? getWorkspace(workspaceId) : undefined;
+    if (!descriptor || !workspaceId) {
+      socket.emit("terminal:error", "Workspace not found");
+      socket.disconnect();
+      return;
+    }
+
+    socket.emit("terminal:status", { state: "provisioning", workspaceId });
+    const progressTimer = setInterval(() => {
+      socket.emit("terminal:status", { state: "provisioning", workspaceId });
+    }, 5_000);
+    if (progressTimer.unref) progressTimer.unref();
+
+    let sandboxSession: SandboxTerminalSessionSnapshot | null = null;
+    let sandboxResumed = false;
+    const resumeId = socket.data.resumeSessionId as string | undefined;
+    try {
+      if (resumeId) {
+        sandboxSession = await sandboxTerminalManager.reattach(
+          resumeId,
+          userId,
+          { workspaceId: workspaceId ?? null },
+          sandboxCallbacks,
+        );
+        sandboxResumed = sandboxSession !== null;
+        console.log("[Terminal] Sandbox resume", sandboxResumed ? "succeeded" : "missed", { resumeSessionId: resumeId });
+      }
+      if (!sandboxSession) {
+        sandboxSession = await sandboxTerminalManager.create({
+          userId,
+          projectId: projectId ?? null,
+          workspaceId,
+          descriptor,
+          onData: sandboxCallbacks.onData,
+          onExit: sandboxCallbacks.onExit,
+          onOutputDropped: ({ sessionId, dropped }) => {
+            console.warn("[Terminal] Sandbox output dropped:", { sessionId, dropped });
+          },
+          isTransportWritable: sandboxCallbacks.isTransportWritable,
+          onBackpressureWarning: sandboxCallbacks.onBackpressureWarning,
+          onLog: sandboxCallbacks.onLog,
+        });
+      }
+    } catch (err) {
+      clearInterval(progressTimer);
+      const message = err instanceof Error ? err.message : "Failed to start sandbox terminal";
+      console.error("[Terminal] Sandbox start failed:", message);
+      socket.emit("terminal:error", message);
+      socket.disconnect();
+      return;
+    }
+    clearInterval(progressTimer);
+    if (!sandboxSession) return;
+
+    if (socket.disconnected) {
+      // The client went away while the sandbox was starting: park
+      // the fresh shell so its next connect can resume it.
+      sandboxTerminalManager.detach(sandboxSession.sessionId, userId, PTY_RESUME_GRACE_MS);
+      return;
+    }
+
+    const sandboxSessionId = sandboxSession.sessionId;
+    socket.emit("session:ready", {
+      sessionId: sandboxSessionId,
+      cwd: sandboxSession.cwd,
+      workspaceId: workspaceId ?? null,
+      projectId: projectId ?? null,
+      shell: sandboxSession.shell,
+      resumed: sandboxResumed,
+      route: "sandbox",
+    });
+
+    bindSessionHandlers({
+      sessionId: sandboxSessionId,
+      input: (data) => sandboxTerminalManager.input(sandboxSessionId, data, userId),
+      resize: (cols, rows) => {
+        sandboxTerminalManager.resize(sandboxSessionId, cols, rows, userId);
+      },
+      detach: () => {
+        sandboxTerminalManager.detach(sandboxSessionId, userId, PTY_RESUME_GRACE_MS);
+      },
+    });
+  };
+
+  if (socket.data.terminalRoute === "sandbox") {
+    void startSandboxTerminalSession();
+    return;
+  }
+
   let session: PtySessionSnapshot | null = null;
   let resumed = false;
   const resumeSessionId = socket.data.resumeSessionId as string | undefined;
@@ -2057,181 +2410,15 @@ io.on("connection", (socket) => {
     resumed,
   });
 
-  socket.on("terminal:input", (data: string) => {
-    if (typeof data !== "string") return;
-
-    const userId = socket.data.userId || "unknown";
-
-    // Rate limiting: max 60 inputs per 10s per socket
-    const now = Date.now();
-    const window = 10_000;
-    if (!(socket as any).__rateBuckets) (socket as any).__rateBuckets = [];
-    const buckets = (socket as any).__rateBuckets as number[];
-    const recent = buckets.filter((t) => now - t < window);
-    recent.push(now);
-    (socket as any).__rateBuckets = recent;
-    if (recent.length > 60) {
-      socket.emit("terminal:output", "\r\n\x1b[33m⚠ Rate limit: too many commands. Slow down.\x1b[0m\r\n");
-      return;
-    }
-
-    if (isBlockedCommand(data)) {
-      auditCommand(userId, sessionId, data, true);
-      socket.emit("terminal:output", "\r\n\x1b[31m⛔ Blocked unsafe command.\x1b[0m\r\n");
-      return;
-    }
-
-    auditCommand(userId, sessionId, data, false);
-    if (!ptyManager.input(sessionId, data, userId)) {
-      // input rejected — wrong owner, exited, or oversized
-      socket.emit("terminal:output", "\r\n\x1b[33m⚠ Input rejected (session ended or too large).\x1b[0m\r\n");
-    }
-  });
-
-    socket.on("litt-code:command", async (input: string) => {
-    if (typeof input !== "string") return;
-
-    // Mobile commands (litt mobile:check, mobile:start, etc.) are dispatched
-    // directly to the PTY as real shell commands — no LLM round-trip.
-    const mobileCmd = dispatchMobileCommand(input);
-    if (mobileCmd) {
-      const userId = socket.data.userId || "unknown";
-      auditCommand(userId, sessionId, mobileCmd.shellCommand, false);
-      socket.emit("terminal:output", `\r\n\x1b[36m📱 ${mobileCmd.label}\x1b[0m\r\n`);
-      ptyManager.input(sessionId, mobileCmd.shellCommand + "\r", userId);
-      return;
-    }
-
-    socket.emit("terminal:output", "\r\n\x1b[36mLiTT is thinking...\x1b[0m\r\n");
-    const cmdStart = Date.now();
-    const userId = socket.data.userId || "unknown";
-
-    // ─── Canonical operator path ───────────────────────────────────
-    // Route through runLiTTOperator → runAgentLoop → ExecutionGateway.
-    // This gives the NL path: tools, gateway enforcement, canonical
-    // runId, RuntimeStore lifecycle events, and cross-surface identity.
-    //
-    // Falls back to the legacy askLiTTCode path ONLY if the model
-    // provider is unreachable (no Ollama + no OPENROUTER_API_KEY).
-    const canUseOperator = await operatorAvailable().catch(() => false);
-
-    if (canUseOperator) {
-      try {
-        const result = await runLiTTOperator({
-          prompt: input,
-          cwd: workspace,
-          userId,
-          mode: "act",
-          onModelStream: (event) => {
-            if (event.type === "delta") {
-              socket.emit("terminal:output", event.text.replace(/\n/g, "\r\n"));
-            }
-          },
-        });
-
-        socket.emit("terminal:output", "\r\n\x1b[36mLiTT:\x1b[0m\r\n");
-        socket.emit("terminal:output", result.content.replace(/\n/g, "\r\n") + "\r\n");
-        socket.emit("terminal:output", `\r\n\x1b[2mrunId: ${result.runId} (${result.termination}, ${result.rounds} rounds)\x1b[0m\r\n`);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "LiTT operator failed";
-        socket.emit("terminal:output", `\r\n\x1b[31m⚠ ${message}\x1b[0m\r\n`);
-      }
-      return;
-    }
-
-    // ─── Legacy fallback (no model provider available) ─────────────
-    runtimeSetPhase("thinking");
-    try {
-      const reply = await handleLiTTCodeCommand(input);
-      runtimeCommandEnd("litt-code:command", true, 0, Date.now() - cmdStart, "LiTT replied (legacy)");
-      socket.emit("terminal:output", "\r\n\x1b[36mLiTT:\x1b[0m\r\n");
-      socket.emit("terminal:output", reply.replace(/\n/g, "\r\n") + "\r\n");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "LiTT failed";
-      runtimeCommandEnd("litt-code:command", false, 1, Date.now() - cmdStart, message);
-      socket.emit("terminal:output", `\r\n\x1b[31m⚠ ${message}\x1b[0m\r\n`);
-    }
-  });
-
-  socket.on("terminal:resize", ({ cols, rows }: { cols: number; rows: number }) => {
-    if (typeof cols === "number" && typeof rows === "number") {
+  bindSessionHandlers({
+    sessionId,
+    input: (data) => ptyManager.input(sessionId, data, userId),
+    resize: (cols, rows) => {
       ptyManager.resize(sessionId, cols, rows, userId);
-    }
-  });
-
-  // ── Natural-language chat ────────────────────────────────────────
-  // Thin bridge: authenticated socket → streamLiTTCode → litt:event streaming back
-  socket.on("litt:chat", async (req: { turnId: string; message: string }) => {
-    if (!req?.turnId || typeof req?.message !== "string" || !req.message.trim()) {
-      socket.emit("litt:event", { type: "error", turnId: req?.turnId ?? "unknown", message: "Invalid request: require turnId and non-empty message" });
-      return;
-    }
-
-    const turnId = req.turnId;
-    const message = req.message;
-
-    console.log("[LiTT Chat] turn cwd:", desktopCwd || "none");
-
-    // Call the canonical natural-language entrypoint
-    try {
-      if (!desktopCwd) {
-        socket.emit("litt:event", {
-          type: "error",
-          turnId,
-          message: "Authenticated Desktop project cwd is unavailable.",
-        });
-        return;
-      }
-
-      await streamLiTTOperator(
-        message,
-        desktopCwd,
-        (event: LiTTEvent) => {
-          // Re-emit only to the originating authenticated Desktop turn.
-          socket.emit("litt:event", { ...event, turnId });
-        },
-      );
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "LiTT chat failed";
-      socket.emit("litt:event", { type: "error", turnId, message: errorMsg });
-    }
-  });
-
-  // ── Remote model transport (CLI interactive cockpit) ───────────────
-  //
-  // Unlike litt:chat (streamLiTTOperator, above), this is a PURE model
-  // completion proxy: it streams text + relays OpenRouter's native
-  // tool_calls back to the caller, and never executes any tool or
-  // touches any gateway/filesystem itself. The CLI's LOCAL project
-  // tools execute on the user's own machine (the server has no access
-  // to it) — the CLI's existing agent loop handles that unchanged;
-  // only the model call moves server-side.
-  //
-  // Gated by the SAME billing.ts entitlement/credit check Commit A
-  // added for the /api/command ask path — no separate, looser entry
-  // point into model execution exists on this server.
-  const activeModelStreams = new Map<string, AbortController>();
-
-  socket.on("litt:model:request", (payload: ModelRequestPayload) =>
-    handleModelRequest(userId, payload, (p) => socket.emit("litt:model:event", p), activeModelStreams),
-  );
-
-  socket.on("litt:model:cancel", (payload: { requestId?: string }) =>
-    handleModelCancel(activeModelStreams, payload?.requestId),
-  );
-
-  socket.on("disconnect", () => {
-    console.log("[Terminal] Disconnected:", sessionId);
-    // A disconnect abandons any in-flight model streams for this socket
-    // — abort them rather than letting them run to completion unheard.
-    for (const controller of activeModelStreams.values()) controller.abort();
-    activeModelStreams.clear();
-    // Park the session instead of killing it: a refresh, an in-app
-    // navigation or a network blip closes the socket, and the client
-    // resumes with the same sessionId. The shell is killed only if nobody
-    // resumes it within the grace window. userId came from the JWT, so
-    // ownership is enforced by the manager.
-    ptyManager.detach(sessionId, userId, PTY_RESUME_GRACE_MS);
+    },
+    detach: () => {
+      ptyManager.detach(sessionId, userId, PTY_RESUME_GRACE_MS);
+    },
   });
 });
 
@@ -2276,6 +2463,7 @@ function shutdown(signal: string) {
   console.log(`[terminal-server] Received ${signal}, shutting down...`);
   sandboxStack.verification.stopPeriodicRefresh();
   ptyManager.shutdown();
+  sandboxTerminalManager.shutdown();
   io.close(() => {
     server.close(() => {
       console.log("[terminal-server] All connections closed.");
