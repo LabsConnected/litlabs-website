@@ -319,7 +319,7 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
                 inCode ? undefined : (
                   <PreviewPointerCard
                     testId="code-preview-pointer-to-preview"
-                    message="Preview is showing in the Preview panel"
+                    message="Preview is showing in the Static View panel"
                     actionLabel="Bring preview here"
                     onAction={() => setBoardPreviewHome("code")}
                   />
