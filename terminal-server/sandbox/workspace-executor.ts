@@ -344,6 +344,17 @@ export class SandboxWorkspaceExecutor {
       const mirror = await mirrorVolumeToSandbox(this.provider, created.sandboxId, {
         volumeRoot: descriptor.root,
         sandboxRoot: SANDBOX_WORKSPACE_ROOT,
+        // The mirror of a big tree is thousands of sequential
+        // provider calls; without these lines the log is silent
+        // from "created sandbox=" until the ensure returns, and a
+        // slow mirror is indistinguishable from a hung one
+        // (2026-11-19 terminal stall diagnosis).
+        onProgress: ({ processed, total }) => {
+          this.log(
+            `[sandbox-lifecycle] mirror workspace=${descriptor.workspaceId} ` +
+              `sandbox=${created.sandboxId} ${processed}/${total} files`,
+          );
+        },
       });
       this.manifests.set(descriptor.workspaceId, mirror.manifest);
       // The mirror writes the tree (including .git) through the

@@ -169,6 +169,21 @@ describe("mirrorVolumeToSandbox + pushVolumePath", () => {
     expect(new TextDecoder().decode(bytes)).toBe("volume-wins-content");
   });
 
+  it("mirror: onProgress reports the final processed/total count", async () => {
+    writeFileSync(join(volume, "a.txt"), "a");
+    writeFileSync(join(volume, "b.txt"), "b");
+    const progress: Array<{ processed: number; total: number }> = [];
+    await mirrorVolumeToSandbox(provider, sandboxId, {
+      sandboxRoot: ROOT,
+      volumeRoot: volume,
+      onProgress: (info) => progress.push(info),
+    });
+    // Two files, no dirs: total counts every volume entry, and the
+    // final beat lands exactly on it even below the 250 interval.
+    expect(progress.length).toBeGreaterThanOrEqual(1);
+    expect(progress[progress.length - 1]).toEqual({ processed: 2, total: 2 });
+  });
+
   it("pushVolumePath forwards a single file write and a delete", async () => {
     writeFileSync(join(volume, "one.txt"), "pushed");
     await pushVolumePath(provider, sandboxId, { sandboxRoot: ROOT, volumeRoot: volume, relPath: "one.txt" });
