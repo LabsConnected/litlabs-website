@@ -11,31 +11,31 @@ import {
   peekFirstRunProjectId,
   writeFirstRunHandoff,
 } from "./lib/first-run-handoff";
-import { Terminal, Loader2 } from "lucide-react";
+import StudioShell from "@/components/page-shells/StudioShell";
+import { useStudioLayoutMode } from "./stores/useStudioLayoutMode";
 
 /**
  * Studio initialization phases.
  *
- * These labels map to real signals:
- *  1. "Authenticating" — Clerk isLoaded becomes true
- *  2. "Loading workspace" — CommandStudio mounts and loads project context
- *  3. "Connecting runtime" — terminal-server connection established
- *  4. "Ready" — all signals green, Studio is interactive
+ * These map to real signals:
+ *  1. Clerk isLoaded becomes true
+ *  2. CommandStudio mounts and loads project context
+ *  3. terminal-server connection established
+ *  4. all signals green, Studio is interactive
  *
- * The loading UI only shows "Authenticating" while Clerk is loading —
- * the remaining phases are handled inside CommandStudio once it mounts.
+ * While they resolve, the visible first paint is the chosen layout's
+ * shell skeleton (StudioShell) — phases 2–4 are handled inside
+ * CommandStudio once it mounts. INIT_TIMEOUT_MS bounds the wait:
+ * past it, the loading state becomes the failure/retry state only.
  */
-const INIT_STEPS = [
-  "Authenticating",
-  "Loading workspace",
-  "Connecting runtime",
-  "Ready",
-] as const;
-
 const INIT_TIMEOUT_MS = 8_000;
 
 function StudioLoadingState({ onRetry }: { onRetry: () => void }) {
   const { tokens } = useTheme();
+  // The chosen layout's shell is the first paint (Studio entry fix,
+  // Larry 2026-11-18): board by default, Regular when that is the
+  // persisted choice — never a centered spinner / welcome screen.
+  const { layoutMode } = useStudioLayoutMode();
   const [elapsed, setElapsed] = useState(false);
 
   useEffect(() => {
@@ -73,55 +73,19 @@ function StudioLoadingState({ onRetry }: { onRetry: () => void }) {
     );
   }
 
+  // Normal first paint: the chosen layout's shell skeleton, in
+  // place — header + panel-shaped placeholders with the chat
+  // placeholder in its real panel position. The centered
+  // "Authenticating" spinner this replaced was the loading-type
+  // screen Larry ruled out (2026-11-18); the timeout branch above
+  // remains ONLY as a failure state after INIT_TIMEOUT_MS.
   return (
     <div
-      className="relative flex min-h-full items-center justify-center overflow-hidden p-6"
+      className="relative min-h-full overflow-hidden"
       style={{ backgroundColor: tokens.background }}
       data-testid="studio-loading"
     >
-      <div className="pointer-events-none absolute inset-0">
-        <div
-          className="absolute left-1/2 top-1/2 h-64 w-64 -translate-x-1/2 -translate-y-1/2 rounded-full blur-[80px] opacity-20"
-          style={{ backgroundColor: tokens.primary }}
-        />
-      </div>
-      <div className="relative flex flex-col items-center gap-4">
-        <div className="relative">
-          <div
-            className="absolute inset-0 animate-ping rounded-full opacity-20"
-            style={{ backgroundColor: tokens.primary }}
-          />
-          <div
-            className="relative flex h-12 w-12 items-center justify-center rounded-full"
-            style={{
-              backgroundColor: `${tokens.primary}15`,
-              border: `1px solid ${tokens.primary}30`,
-            }}
-          >
-            <Terminal size={20} style={{ color: tokens.primary }} />
-          </div>
-        </div>
-        <div className="text-center">
-          <div
-            className="text-xs font-black uppercase tracking-widest"
-            style={{ color: tokens.textMuted }}
-          >
-            {INIT_STEPS[0]}
-          </div>
-          <div className="mt-1 flex items-center justify-center gap-1">
-            {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                className="h-1 w-1 rounded-full animate-pulse"
-                style={{
-                  backgroundColor: tokens.primary,
-                  animationDelay: `${i * 150}ms`,
-                }}
-              />
-            ))}
-          </div>
-        </div>
-      </div>
+      <StudioShell layout={layoutMode === "classic" ? "classic" : "board"} />
     </div>
   );
 }
@@ -411,32 +375,14 @@ function StudioHub() {
 }
 
 export default function StudioPage() {
-  const { tokens } = useTheme();
-
   return (
     <Suspense
       fallback={
-        <div
-          className="flex min-h-full items-center justify-center p-6"
-          style={{
-            backgroundColor: tokens.background,
-            color: tokens.textMuted,
-          }}
-        >
-          <div className="flex flex-col items-center gap-4">
-            <Loader2
-              size={24}
-              className="animate-spin"
-              style={{ color: tokens.primary }}
-            />
-            <span
-              className="text-xs font-black uppercase tracking-widest"
-              style={{ color: tokens.textMuted }}
-            >
-              Loading Studio
-            </span>
-          </div>
-        </div>
+        // The route's very first paint is already the layout's shell
+        // (board-shaped: the default layout — the persisted choice
+        // is client state and resolves a beat later in StudioHub,
+        // which renders the matching skeleton for Regular users).
+        <StudioShell layout="board" />
       }
     >
       <StudioHub />

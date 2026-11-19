@@ -3,7 +3,9 @@
  * Studio initialization truth regression.
  *
  * Behaviors under test:
- *  6. Studio labels map to actual auth/workspace/runtime signals.
+ *  6. The loading state is honest: while auth resolves it renders
+ *     the chosen layout's skeleton shell — no phase labels, no fake
+ *     progress, nothing that disappears once Studio mounts.
  *  7. Eight-second timeout does not fire after Studio becomes ready.
  *  8. Retry restarts the failed initialization (re-mounts the loading
  *     state, not merely re-animating the spinner).
@@ -84,13 +86,16 @@ describe("Studio initialization labels", () => {
     vi.clearAllMocks();
   });
 
-  it("INIT_STEPS labels map to real phases (auth → workspace → runtime → ready)", async () => {
-    // The loading state shows INIT_STEPS[0] = "Authenticating" while
-    // Clerk auth is loading. This is the auth phase. The remaining
-    // labels ("Loading workspace", "Connecting runtime", "Ready")
-    // describe the phases that CommandStudio's useConnectionSummary
-    // drives after the loading state unmounts. We verify the labels
-    // are defined and correspond to real phases — not fake progress.
+  it("first paint while auth loads is the layout skeleton shell — no phase-label interstitial", async () => {
+    // Entry truth (Studio entry fix, Larry 2026-11-18): while Clerk
+    // auth is loading, the loading state is the chosen layout's
+    // shell skeleton (StudioShell) — the board's panel geometry with
+    // the chat placeholder in its real panel slot. INIT_STEPS and
+    // its "Authenticating" label were retired with the centered
+    // spinner: the skeleton shows no text labels at all, so there is
+    // nothing fake to cycle and nothing that disappears. The later
+    // initialization phases (workspace, runtime) are driven inside
+    // CommandStudio after this state unmounts.
     mockClerkAuth.mockReturnValue({ isLoaded: false, isSignedIn: false });
 
     const mod = await import("@/app/(app)/studio/page");
@@ -98,13 +103,19 @@ describe("Studio initialization labels", () => {
       render(React.createElement(mod.default));
     });
 
-    // The loading state should show "Authenticating" — the real auth
-    // phase label, not a fake progress step.
-    expect(screen.getByText("Authenticating")).toBeTruthy();
+    // The loading state is mounted and shows the board shell with
+    // its panels — the real first paint, in the real geometry.
+    expect(screen.getByTestId("studio-loading")).toBeTruthy();
+    expect(screen.getByTestId("studio-shell-board")).toBeTruthy();
+    expect(screen.getByTestId("studio-shell-panel-preview")).toBeTruthy();
+    expect(screen.getByTestId("studio-shell-panel-files")).toBeTruthy();
+    expect(screen.getByTestId("studio-shell-chat")).toBeTruthy();
+    // The retired "Authenticating" interstitial must NOT appear.
+    expect(screen.queryByText("Authenticating")).toBeNull();
   });
 
   it("does not show fake progress labels while waiting for auth", async () => {
-    // Only "Authenticating" should be visible during the auth phase.
+    // No phase labels at all should be visible during the auth phase.
     // "Loading workspace", "Connecting runtime", "Ready" must NOT
     // appear — they would imply the loading state is cycling through
     // phases it cannot actually observe.
@@ -207,7 +218,7 @@ describe("Studio Retry restarts the failed initialization", () => {
     expect(screen.getByTestId("studio-timeout")).toBeTruthy();
 
     // Click Retry — should re-mount the loading state via retryKey,
-    // which resets the timeout and shows "Authenticating" again.
+    // which resets the timeout and shows the skeleton shell again.
     const retryButton = screen.getByText("Retry");
     expect(retryButton).toBeTruthy();
 
@@ -216,10 +227,11 @@ describe("Studio Retry restarts the failed initialization", () => {
     });
 
     // After retry: the loading state should be back (not the timeout),
-    // and "Authenticating" should be visible again — proving the
-    // initialization restarted, not just the animation.
+    // and the layout skeleton shell should be rendered again —
+    // proving the initialization restarted, not just the animation.
     expect(screen.queryByTestId("studio-timeout")).toBeNull();
     expect(screen.getByTestId("studio-loading")).toBeTruthy();
-    expect(screen.getByText("Authenticating")).toBeTruthy();
+    expect(screen.getByTestId("studio-shell-board")).toBeTruthy();
+    expect(screen.queryByText("Authenticating")).toBeNull();
   });
 });
