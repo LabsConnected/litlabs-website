@@ -63,7 +63,7 @@ import {
 import { checkExpectedSha256 } from "./workspace/cas";
 import { evaluateWorkspaceRoot } from "./workspace/durability";
 import {
-  startPreview,
+  startPreviewAccepted,
   stopPreview,
   stopPreviewAndWait,
   restartPreview,
@@ -1350,7 +1350,15 @@ app.post("/internal/workspace/:workspaceId/preview/start", requireInternalServic
   }
 
   try {
-    const runtime = await startPreview({ workspaceId, userId, framework, command, packageManager, projectEnv });
+    // Async accept (C3/C4): the start's long phase (sandbox
+    // provision/install, host dependency install) legitimately runs
+    // minutes — far past every HTTP budget above this service — so
+    // the route answers as soon as the "starting" runtime is
+    // registered and the start completes in the background. Callers
+    // poll the status endpoint for the verdict. Fast validation
+    // failures still throw before registration and land in the
+    // catch below with their typed codes, unchanged.
+    const runtime = await startPreviewAccepted({ workspaceId, userId, framework, command, packageManager, projectEnv });
     res.json({
       workspaceId: runtime.workspaceId,
       status: runtime.status,

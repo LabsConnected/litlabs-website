@@ -253,6 +253,7 @@ export type PreviewErrorCode =
   | "preview_dev_server_failed"
   | "preview_workspace_not_found"
   | "preview_port_never_ready"
+  | "preview_address_unreachable"
   | "preview_spawn_error"
   | "preview_no_free_port"
   | "preview_port_conflict"
@@ -1377,6 +1378,7 @@ async function startSandboxPreviewBranch(
     logs: [...preservedLogs],
   };
   runtimes.set(workspaceId, runtime);
+  notifyPreviewStartRegistered(workspaceId);
 
   try {
     return await startSandboxPreview({
@@ -1542,14 +1544,6 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
     resolvedPackageManager = resolved;
   }
 
-  if (resolvedPackageManager) {
-    await installWorkspaceDependencies(
-      ws.root,
-      detected.packageManager,
-      resolvedPackageManager.executable,
-    );
-  }
-
   const port = await allocateFreePort();
 
   // Build the actual command, replacing $PORT with the allocated port
@@ -1679,6 +1673,42 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
   };
 
   runtimes.set(workspaceId, runtime);
+  notifyPreviewStartRegistered(workspaceId);
+
+  // Dependency install runs AFTER registration (C3/C4 async start):
+  // it is the host path's one legitimately long phase, and with the
+  // runtime registered the accepted start has already returned
+  // "starting" — callers poll this runtime to its verdict instead of
+  // holding one request open for the whole install. A failure flips
+  // the registered runtime to failed with the typed code (mirroring
+  // the sandbox branch's catch) instead of dying as a bare HTTP
+  // error on a request the caller may already have lost.
+  if (resolvedPackageManager) {
+    try {
+      await installWorkspaceDependencies(
+        ws.root,
+        detected.packageManager,
+        resolvedPackageManager.executable,
+      );
+    } catch (err) {
+      if (runtime.status === "starting") {
+        runtime.status = "failed";
+        runtime.errorCode = "preview_dependency_install_failed";
+        runtime.error = err instanceof Error ? err.message : String(err);
+        pushLog(runtime, `[preview] Dependency install failed: ${runtime.error}`);
+      }
+      releasePort(port);
+      throw err;
+    }
+  }
+
+  // A stop (or a superseding start) that landed while the install
+  // ran owns this workspace now — never spawn over it.
+  if (runtimes.get(workspaceId) !== runtime || runtime.status !== "starting") {
+    pushLog(runtime, `[preview] Start superseded during dependency install — not spawning`);
+    releasePort(port);
+    return runtime;
+  }
 
   // Parse command into shell + args
   const isWin = process.platform === "win32";
@@ -1911,6 +1941,108 @@ export async function stopPreviewAndWait(workspaceId: string): Promise<void> {
   pushLog(rt, "[preview] Stopped (waited for exit)");
 }
 
+// ─── Async start accept (C3/C4) ────────────────────────────────────
+// A preview start's synchronous phase legitimately runs for minutes
+// (sandbox provision ~298 s; dependency install up to the 900 s
+// SANDBOX_INSTALL_TIMEOUT_MS budget), while every budget above this
+// module is shorter: the web route's prepare (180 s) and start
+// (330 s) calls run serially in front of it, and the Studio panel's
+// start POST aborts at 330 s. The 502/524 the panel showed was the
+// EXPECTED outcome of a slow-but-healthy start — and when the
+// panel's request died it stopped polling, so a start that finished
+// a minute later never surfaced.
+//
+// startPreviewAccepted splits the start at its natural seam: the
+// fast, synchronous validation (host-exec guard, workspace
+// existence/ownership/readiness, framework + Clerk validation) still
+// runs — and still throws — before anything is registered, exactly
+// as startPreview does today, so fast failures keep their HTTP error
+// semantics. The accept resolves as soon as the "starting" runtime
+// is REGISTERED (both branches register before their long phases:
+// the sandbox branch before provision/install/launch, the host
+// branch before its dependency install); the long phase then
+// completes in the background and the runtime itself carries the
+// verdict — ready, or failed with the typed error the branch's own
+// catch records. Callers poll getPreviewStatus, which was always
+// the honest channel. If the flight settles before registration
+// (a reuse hit, or a fast validation failure), the accept settles
+// with it, result or error alike.
+
+const startAcceptsInFlight = new Map<string, Promise<PreviewRuntime>>();
+const startRegistrationWaiters = new Map<string, Set<() => void>>();
+
+/** Called by both start branches the moment a "starting" runtime lands. */
+function notifyPreviewStartRegistered(workspaceId: string): void {
+  const waiters = startRegistrationWaiters.get(workspaceId);
+  if (!waiters) return;
+  startRegistrationWaiters.delete(workspaceId);
+  for (const resolve of waiters) resolve();
+}
+
+function waitForPreviewStartRegistration(workspaceId: string): Promise<void> {
+  const existing = runtimes.get(workspaceId);
+  if (existing && existing.status === "starting") return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const waiters = startRegistrationWaiters.get(workspaceId) ?? new Set<() => void>();
+    waiters.add(resolve);
+    startRegistrationWaiters.set(workspaceId, waiters);
+  });
+}
+
+/**
+ * Start a preview, resolving as soon as the start is ACCEPTED (the
+ * "starting" runtime registered) instead of when it completes.
+ * Single-flight per workspace, mirroring verifyPreviewHealth: a
+ * second accept while a start is in flight joins the same flight
+ * rather than launching a second provision/install. Background
+ * completion is logged; a background failure is recorded on the
+ * runtime by the start branches themselves, so nothing is swallowed.
+ */
+export function startPreviewAccepted(input: PreviewStartInput): Promise<PreviewRuntime> {
+  const { workspaceId } = input;
+  const inFlight = startAcceptsInFlight.get(workspaceId);
+  if (inFlight) return inFlight;
+
+  const flight = startPreview(input);
+  const accept = Promise.race([
+    flight,
+    waitForPreviewStartRegistration(workspaceId).then(() => {
+      const runtime = runtimes.get(workspaceId);
+      if (runtime) return runtime;
+      // Registration fired for a runtime that has already been
+      // replaced — the flight's own settlement is the truth.
+      return flight;
+    }),
+  ]);
+  startAcceptsInFlight.set(workspaceId, accept);
+  // The map entry lives until the FLIGHT settles (not the accept):
+  // a caller arriving while the background phase still runs joins
+  // this accept instead of launching a second start. The handlers
+  // also log the background outcome — a late background failure is
+  // recorded on the runtime by the start branches themselves, so
+  // nothing is swallowed and nothing rejects unhandled.
+  flight.then(
+    (runtime) => {
+      if (startAcceptsInFlight.get(workspaceId) === accept) {
+        startAcceptsInFlight.delete(workspaceId);
+      }
+      console.info(
+        `[preview] Background start settled workspace=${workspaceId} status=${runtime.status}`,
+      );
+    },
+    (err: unknown) => {
+      if (startAcceptsInFlight.get(workspaceId) === accept) {
+        startAcceptsInFlight.delete(workspaceId);
+      }
+      console.warn(
+        `[preview] Background start failed workspace=${workspaceId}: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    },
+  );
+  return accept;
+}
+
 export async function restartPreview(
   workspaceId: string,
   projectEnv?: Record<string, string>,
@@ -1940,8 +2072,11 @@ export async function restartPreview(
   // otherwise reuse the env this runtime was started with, so an
   // explicit restart never silently drops the resolved Clerk keys.
   // forceRestart bypasses the reuse-a-healthy-runtime optimization —
-  // an explicit restart always means a fresh dev server.
-  return startPreview({
+  // an explicit restart always means a fresh dev server. The start
+  // leg goes through the async accept (C3/C4): the stop phase above
+  // stays synchronous and bounded, and the fresh start's long phase
+  // completes in the background under the new "starting" runtime.
+  return startPreviewAccepted({
     workspaceId,
     userId: rt.userId,
     framework: rt.framework,

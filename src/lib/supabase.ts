@@ -23,7 +23,13 @@ export function getSupabase(): SupabaseClient | null {
     return null;
   }
   if (!_supabase) {
-    _supabase = createClient(supabaseUrl, supabaseKey);
+    try {
+      _supabase = createClient(supabaseUrl, supabaseKey);
+    } catch {
+      // A malformed env value (e.g. a bad NEXT_PUBLIC_SUPABASE_URL) must
+      // degrade to "no client" — never throw into a request path.
+      return null;
+    }
   }
   return _supabase;
 }
@@ -52,9 +58,15 @@ export function getSupabaseAdmin(): SupabaseClient | null {
     return null;
   }
   if (!_supabaseAdmin) {
-    _supabaseAdmin = createClient(supabaseUrl, serviceKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    try {
+      _supabaseAdmin = createClient(supabaseUrl, serviceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+    } catch {
+      // Same rule as getSupabase: bad env degrades to null, never a throw.
+      // Callers (rate limiter, admin proxy) already fall back safely.
+      return null;
+    }
   }
   return _supabaseAdmin;
 }
