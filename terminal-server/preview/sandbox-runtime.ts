@@ -17,6 +17,11 @@
  *   - Dependencies install inside the sandbox when node_modules is
  *     absent there, with the §4.4 env (no GitHub token, allowlisted
  *     base env, NODE_ENV=development).
+ *   - Serve mode (serve-mode.ts): a large Next.js project is built
+ *     for production after the install and served with `next start`
+ *     instead of running `next dev` — the dev server's compile/watch
+ *     load starves the 2 vCPU / 2048 MB sandbox on big trees. Small
+ *     projects keep the dev server and its hot reload.
  *   - The dev server starts DETACHED through execute (setsid/nohup,
  *     output to a log file, pid to a pid file, both under /tmp —
  *     outside the synced tree), so it survives a terminal restart.
@@ -67,6 +72,10 @@ import {
   type PreviewRuntime,
   type PreviewUpstream,
 } from "./PreviewManager";
+import {
+  SANDBOX_PREVIEW_BUILD_TIMEOUT_MS,
+  type PreviewServeMode,
+} from "./serve-mode";
 
 /** Fixed dev-server port inside the sandbox (one project per sandbox). */
 export const SANDBOX_PREVIEW_PORT = 3000;
@@ -108,6 +117,16 @@ export interface SandboxPreviewStartArgs {
   framework: string;
   command: string;
   packageManager: string;
+  /**
+   * Serve mode resolved by PreviewManager (serve-mode.ts).
+   * "production-build" runs `buildCommand` after the install and
+   * before the launch, and `command` is then the production serve
+   * command (`next start`). Absent = "dev": the command runs
+   * directly, exactly as before this mode existed.
+   */
+  serveMode?: PreviewServeMode;
+  /** The production build command for serveMode "production-build". */
+  buildCommand?: string | null;
   /** Project-secret subset that travels as per-command env (§3.4). */
   travelingEnv: Record<string, string>;
   /** Health probe override (tests). Defaults to a real upstream fetch. */
@@ -159,6 +178,14 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
   // Recorded so a round-16 (C2) recreation re-runs this start with
   // the same package manager the original start resolved.
   runtime.packageManager = args.packageManager;
+  // Same recording for the serve mode (serve-mode.ts): a recreation
+  // of a production-build preview must rebuild and re-serve in the
+  // same mode, not fall back to the dev server that starved the
+  // original sandbox.
+  const serveMode: PreviewServeMode = args.serveMode ?? "dev";
+  const buildCommand = args.buildCommand ?? null;
+  runtime.serveMode = serveMode;
+  runtime.buildCommand = buildCommand;
 
   const ensured = await executor.ensureSandboxForPreview(ws);
   if (!ensured) {
@@ -281,6 +308,86 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
     await writeSandboxInstallStamp(provider, sandboxId, installStamp);
   }
 
+  // Production-build serve mode (serve-mode.ts): for a large
+  // Next.js project, build BEFORE launching, and let the run script
+  // below serve the built output (`next start`, already resolved
+  // into args.command by PreviewManager). The build runs inline in
+  // the start — the same position the install occupies — so the
+  // async-start contract is unchanged: the start returns once the
+  // server is launched, and the health probe judges the server,
+  // never the build. A failed build is a failed start: the runtime
+  // records preview_build_failed with the build's own output tail
+  // as the diagnostic, and no server is launched — there is no
+  // state in which a stale or partial build gets served as ready.
+  if (serveMode === "production-build" && buildCommand) {
+    pushPreviewLog(
+      runtime,
+      `[preview] Building production bundle in sandbox (${buildCommand}) — ` +
+        `this can take several minutes on the sandbox's 2 vCPU`,
+    );
+    const build = await provider.execute(sandboxId, {
+      command: buildCommand,
+      cwd: SANDBOX_WORKSPACE_ROOT,
+      timeoutMs: SANDBOX_PREVIEW_BUILD_TIMEOUT_MS,
+      // The build's env mirrors the launch's composition — the
+      // project's traveling env first (Next inlines NEXT_PUBLIC_*
+      // values at build time, so the build needs the same project
+      // env the server would have been launched with), then the
+      // pins — with three production differences: NODE_ENV is
+      // production (the build's whole point), the HOME pin keeps
+      // caches out of the root-owned workspace root (the install's
+      // EACCES lesson), and the heap shaping is the LAUNCH bound
+      // (buildSandboxPreviewLaunchEnv, 1280 MB): compiling this
+      // tree is the same class of workload the launch bound was
+      // sized for, and the install's 768 MB resolve/link bound
+      // risks GC thrash mid-compile.
+      env: {
+        ...args.travelingEnv,
+        NODE_ENV: "production",
+        NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
+        HOME: SANDBOX_HOME_DIR,
+        ...buildSandboxPreviewLaunchEnv(),
+      },
+    });
+    // A bounded tail of the build's own output goes into the
+    // preview log either way: on success it is the only record of
+    // what was built; on failure it IS the diagnosis. [build]
+    // lines stay ring-only (pushPreviewLog mirrors only [preview]
+    // verdict lines to the service stdout).
+    const buildOutput = `${build.stdout}\n${build.stderr}`
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .filter((line) => line.length > 0);
+    for (const line of buildOutput.slice(-30)) {
+      pushPreviewLog(runtime, `[build] ${line}`);
+    }
+    if (build.exitCode !== 0) {
+      if (build.exitCode < 0) {
+        pushPreviewLog(
+          runtime,
+          `[preview] Build process was killed by a signal (exit ${build.exitCode}) — ` +
+            `at the sandbox's 2 vCPU / 2048 MB limits the in-sandbox OOM killer ` +
+            `is the leading cause`,
+        );
+      }
+      runtime.status = "failed";
+      runtime.errorCode = "preview_build_failed";
+      runtime.error = withPreviewLogDiagnostic(
+        `Production build failed in sandbox (exit ${build.exitCode}): ` +
+          `the project did not build, so there is nothing to serve. ` +
+          `Fix the build errors and restart preview.`,
+        boundedPreviewLogTail(runtime.logs),
+      );
+      pushPreviewLog(runtime, `[preview] Production build failed (exit ${build.exitCode})`);
+      throw new PreviewError("preview_build_failed", runtime.error, {
+        cwd: ws.root,
+        packageManager: args.packageManager,
+        exitCode: build.exitCode,
+      });
+    }
+    pushPreviewLog(runtime, `[preview] Production build complete — starting production server`);
+  }
+
   // The run script carries the command ONLY — no env, no secrets.
   // $PORT was already replaced by PreviewManager's dispatch with the
   // fixed sandbox port.
@@ -296,7 +403,10 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
     ...args.travelingEnv,
     PORT: String(SANDBOX_PREVIEW_PORT),
     HOSTNAME: "0.0.0.0",
-    NODE_ENV: "development",
+    // Production-build mode serves with `next start`, which must
+    // run as production (a development NODE_ENV points it at dev
+    // artifacts that do not exist). Dev mode is unchanged.
+    NODE_ENV: serveMode === "production-build" ? "production" : "development",
     NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
     // Same HOME pin as the install above: the detached dev server
     // (and any package-manager shim it invokes) inherits this env,
@@ -1137,6 +1247,8 @@ async function recreateSandboxPreview(args: {
         framework: runtime.framework,
         command: runtime.command,
         packageManager: runtime.packageManager ?? "pnpm",
+        serveMode: runtime.serveMode ?? "dev",
+        buildCommand: runtime.buildCommand ?? null,
         travelingEnv: buildSandboxTravelingEnv(runtime.clerkProjectEnv ?? {}),
         probe: args.probe,
       }),

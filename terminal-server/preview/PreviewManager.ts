@@ -43,6 +43,14 @@ import {
   type PreviewVerifySweeper,
   type PreviewVerifySweepSession,
 } from "./preview-verify-sweeper";
+import {
+  countProjectFiles,
+  nextProductionBuildCommand,
+  nextProductionStartCommand,
+  resolvePreviewServeMode,
+  PREVIEW_PROD_BUILD_FILE_THRESHOLD,
+  type PreviewServeMode,
+} from "./serve-mode";
 
 /**
  * Environment variables that may be inherited from the terminal server.
@@ -220,6 +228,25 @@ export interface PreviewRuntime {
    * same manager instead of re-deriving it.
    */
   packageManager?: string;
+  /**
+   * How the sandbox serves this project (serve-mode.ts): "dev"
+   * (the framework's dev server) or "production-build" (a
+   * production build served by `next start` — large Next.js
+   * projects whose dev server starves the sandbox). Resolved by
+   * the sandbox branch at start and recorded here so a recreation
+   * re-runs the start with the same serve mode instead of
+   * re-deriving it. Optional: runtimes created before this field
+   * existed read as undefined, which every consumer treats as
+   * "dev".
+   */
+  serveMode?: PreviewServeMode;
+  /**
+   * The production build command for serveMode
+   * "production-build" (`<pm> exec next build`), recorded with
+   * the serve mode so a recreation rebuilds before it re-serves.
+   * Null in dev mode.
+   */
+  buildCommand?: string | null;
 }
 
 interface PreviewStartInput {
@@ -259,6 +286,7 @@ export type PreviewErrorCode =
   | "preview_port_conflict"
   | "preview_no_dev_command"
   | "preview_dependency_install_failed"
+  | "preview_build_failed"
   | "preview_root_route_missing"
   | "preview_clerk_config_error"
   | "preview_auth_config_error";
@@ -1249,15 +1277,72 @@ async function startSandboxPreviewBranch(
   const { input, ws } = args;
   const workspaceId = input.workspaceId;
 
+  // Framework/command detection runs BEFORE the reuse check below:
+  // the serve-mode resolution (serve-mode.ts) depends on it, and
+  // reuse must not hand back a runtime serving in the wrong mode.
+  // Detection is read-only volume facts, so hoisting it changes no
+  // behavior for the paths that used to detect after the check.
+  // A caller-supplied framework+command is respected verbatim —
+  // the serve-mode rule only ever rewrites the command THIS
+  // detection produced.
+  const callerSuppliedCommand = Boolean(input.framework && input.command);
+  const detected =
+    input.framework && input.command
+      ? {
+          framework: input.framework,
+          command: input.command,
+          packageManager: input.packageManager ?? "pnpm",
+        }
+      : detectFramework(ws.root);
+
+  // Serve mode (serve-mode.ts): a large Next.js project is served
+  // from a production build (`next build` + `next start`) instead
+  // of `next dev`, whose compile/watch load starves the sandbox
+  // (live proof 2026-11-19: renders, then unreachable at +2–3 min
+  // while the dev process lives). The decision is logged into the
+  // runtime's preserved logs, where the user can see both the mode
+  // and its trade-off (edits need a preview restart to appear).
+  let serveMode: PreviewServeMode = "dev";
+  let buildCommand: string | null = null;
+  let serveDecisionLog: string | null = null;
+  if (!callerSuppliedCommand && detected.framework === "nextjs") {
+    const fileCount = countProjectFiles(ws.root);
+    serveMode = resolvePreviewServeMode(detected.framework, fileCount);
+    if (serveMode === "production-build") {
+      buildCommand = nextProductionBuildCommand(detected.packageManager);
+      detected.command = nextProductionStartCommand(
+        detected.packageManager,
+        previewBindHost(),
+      );
+      serveDecisionLog =
+        `[preview] Large Next.js project (${fileCount} files, threshold ` +
+        `${PREVIEW_PROD_BUILD_FILE_THRESHOLD}) — preview will run a production ` +
+        `build and serve it with next start instead of next dev; edits need a ` +
+        `preview restart to appear`;
+    }
+  }
+  const actualCommand = detected.command
+    ? detected.command.replace("$PORT", String(SANDBOX_PREVIEW_PORT))
+    : detected.command;
+
   // Reuse a healthy sandbox runtime whose resolved env is unchanged
   // (the host path's shouldReuseRuntime keys on a live child process;
   // a sandbox runtime's liveness is its ready status + upstream).
   const existing = runtimes.get(workspaceId);
   const preservedLogs = existing?.logs ?? [];
+  const branchLogs = serveDecisionLog
+    ? [...preservedLogs, serveDecisionLog]
+    : preservedLogs;
   const configMatches =
     !existing ||
     ((input.framework === undefined || input.framework === existing.framework) &&
       (input.command === undefined || input.command === existing.command));
+  // A runtime serving in a different mode than this start resolves
+  // is not reusable either: a project that crossed the size
+  // threshold since its dev-mode start must come back as a
+  // production build, not be handed its starving dev server again.
+  // Runtimes from before the field existed read as "dev".
+  const serveModeMatches = !existing || (existing.serveMode ?? "dev") === serveMode;
   // A `starting` runtime is reusable only while its start could
   // still legitimately be in flight: younger than the sandbox
   // health-probe window. An older `starting` runtime is wedged —
@@ -1276,6 +1361,7 @@ async function startSandboxPreviewBranch(
     !input.forceRestart &&
     existing &&
     configMatches &&
+    serveModeMatches &&
     existing.upstream?.kind === "sandbox" &&
     (existing.status === "ready" || startingIsFresh) &&
     existing.clerkEnvFingerprint === args.newFingerprint
@@ -1286,14 +1372,6 @@ async function startSandboxPreviewBranch(
     await stopPreviewAndWait(workspaceId);
   }
 
-  const detected = input.framework && input.command
-    ? {
-        framework: input.framework,
-        command: input.command,
-        packageManager: input.packageManager ?? "pnpm",
-      }
-    : detectFramework(ws.root);
-
   if (!detected.command) {
     throw new PreviewError(
       "preview_no_dev_command",
@@ -1301,7 +1379,6 @@ async function startSandboxPreviewBranch(
       { cwd: ws.root, packageManager: detected.packageManager },
     );
   }
-  const actualCommand = detected.command.replace("$PORT", String(SANDBOX_PREVIEW_PORT));
 
   // Clerk validation over the fully resolved env, as on the host
   // path — a broken project config surfaces truthfully here instead
@@ -1351,8 +1428,10 @@ async function startSandboxPreviewBranch(
       clerkProjectEnv: args.storedClerkEnv,
       error: err.message,
       errorCode: err.code,
+      serveMode,
+      buildCommand,
       logs: [
-        ...preservedLogs,
+        ...branchLogs,
         `[preview] Clerk configuration error: ${err.message}`,
       ],
     };
@@ -1375,7 +1454,9 @@ async function startSandboxPreviewBranch(
     clerkProjectEnv: args.storedClerkEnv,
     error: null,
     errorCode: null,
-    logs: [...preservedLogs],
+    serveMode,
+    buildCommand,
+    logs: [...branchLogs],
   };
   runtimes.set(workspaceId, runtime);
   notifyPreviewStartRegistered(workspaceId);
@@ -1388,6 +1469,8 @@ async function startSandboxPreviewBranch(
       framework: detected.framework,
       command: actualCommand,
       packageManager: detected.packageManager,
+      serveMode,
+      buildCommand,
       travelingEnv: buildSandboxTravelingEnv(input.projectEnv),
     });
   } catch (err) {
