@@ -303,7 +303,26 @@ export default function BoardPanel({
               color: tokens.text,
             }
       }
-      onPointerDown={() => onBringToFront(id)}
+      onPointerDown={(event) => {
+        onBringToFront(id);
+        // A body strip marked as a drag handle can also start a move
+        // (the Chat panel's tab bar: its chrome header sits under the
+        // board's pill toolbar, so the strip users actually grab must
+        // move the panel). Presses on anything interactive inside the
+        // strip keep their own behavior — tabs switch, buttons click,
+        // nothing drags. beginSession still applies the maximized /
+        // stacked gate, and captures on the section, which is the
+        // gesture's ancestor for the whole panel.
+        const target = event.target as HTMLElement;
+        if (!target.closest("[data-board-drag-handle]")) return;
+        if (
+          target.closest(
+            "button, a, input, select, textarea, [role='tab'], [contenteditable]",
+          )
+        )
+          return;
+        beginSession("move", event);
+      }}
     >
       <header
         data-testid={`board-panel-header-${id}`}

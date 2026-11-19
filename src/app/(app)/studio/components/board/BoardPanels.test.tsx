@@ -1,8 +1,21 @@
 import "@testing-library/jest-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// jsdom has no PointerEvent constructor; fireEvent falls back to a
+// generic Event that drops clientX/pointerId, which the drag sessions
+// read. A MouseEvent-based stub carries both (test scaffolding only).
+class PointerEventStub extends MouseEvent {
+  pointerId: number;
+  constructor(type: string, params: PointerEventInit & MouseEventInit = {}) {
+    super(type, params);
+    this.pointerId = params.pointerId ?? 0;
+  }
+}
+globalThis.PointerEvent = PointerEventStub as typeof PointerEvent;
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "@/context/ThemeContext";
 import BoardChatPanel from "./BoardChatPanel";
+import BoardPanel from "./BoardPanel";
 import BoardMediaPanel from "./BoardMediaPanel";
 
 // The Jobs tab mounts these three real feeds; stub them here so this
@@ -72,6 +85,46 @@ describe("BoardChatPanel (Command Center)", () => {
     expect(screen.getByTestId("composer-stub")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("board-chat-new-chat"));
     expect(chatProps.onNewChat).toHaveBeenCalled();
+  });
+
+  it("the tab bar's empty space drags the whole panel inside BoardPanel; tabs and New Chat still work", () => {
+    const onRectChange = vi.fn();
+    const onNewChat = vi.fn();
+    wrap(
+      <BoardPanel
+        id="chat"
+        title="Chat"
+        rect={{ x: 100, y: 80, width: 400, height: 300 }}
+        zIndex={3}
+        maximized={false}
+        onRectChange={onRectChange}
+        onBringToFront={vi.fn()}
+        onMinimize={vi.fn()}
+        onToggleMaximize={vi.fn()}
+        onClose={vi.fn()}
+      >
+        <BoardChatPanel {...chatProps} onNewChat={onNewChat} />
+      </BoardPanel>,
+    );
+    // The empty spacer between the tab list and + New Chat is the grab
+    // point users actually land on — it must move the whole panel.
+    const newChatButton = screen.getByTestId("board-chat-new-chat");
+    const spacer = newChatButton.previousElementSibling as HTMLElement;
+    expect(spacer).not.toBeNull();
+    fireEvent.pointerDown(spacer, { pointerId: 31, clientX: 300, clientY: 100 });
+    fireEvent.pointerMove(window, { pointerId: 31, clientX: 340, clientY: 130 });
+    expect(onRectChange).toHaveBeenCalledWith("chat", {
+      x: 140,
+      y: 110,
+      width: 400,
+      height: 300,
+    });
+    fireEvent.pointerUp(window, { pointerId: 31, clientX: 340, clientY: 130 });
+    // The tabs inside the same strip keep their own behavior.
+    fireEvent.click(screen.getByTestId("board-chat-tab-jobs"));
+    expect(screen.getByTestId("board-chat-jobs")).toBeInTheDocument();
+    fireEvent.click(newChatButton);
+    expect(onNewChat).toHaveBeenCalledTimes(1);
   });
 
   it("the Jobs tab holds the plan, work log and checks summary from real store state — the Chat tab stays conversation-only", () => {
