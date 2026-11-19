@@ -989,6 +989,37 @@ async function resolveInsertDirectory(
 }
 
 /**
+ * Sleep for a retry backoff, waking early when the caller's deadline
+ * fires. The backoff schedule itself is unchanged — but a caller that
+ * has already spent its budget (the enrichment run's overall signal,
+ * whose contract is that it "cuts the download short") must not be kept
+ * waiting by a sleep it has already cancelled. The single 500ms retry
+ * overshot a spent budget by at most 500ms; an uninterruptible 5s
+ * backoff sleep overshoots it by seconds per download, and stacked
+ * across an enrichment run's downloads it pushed approval-resume
+ * operations past their bounds (CI timeouts, 2026-11-19). With no
+ * caller signal — the registry's post-generation save — the full
+ * schedule runs exactly as before.
+ */
+function sleepUnlessAborted(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
  * Download an image URL and save it into the project workspace as a binary
  * file. Shared core behind the project.insert_asset tool AND the automatic
  * post-generation save in the tool registry: after image.generate succeeds
@@ -1065,7 +1096,10 @@ export async function insertAssetFromUrl(
       // single 500ms retry proved too thin live (2026-11-19 — two 402s
       // in a row killed the project save of a healthy generated image).
       // Once the schedule is exhausted the failure below stays honest:
-      // the caller still gets the real status or network error.
+      // the caller still gets the real status or network error. The
+      // sleeps honor the caller's deadline (sleepUnlessAborted): the
+      // schedule is for callers still waiting, not for budgets already
+      // spent.
       const RETRY_DELAYS_MS = [500, 2_000, 5_000];
       for (const delayMs of RETRY_DELAYS_MS) {
         if (
@@ -1080,7 +1114,7 @@ export async function insertAssetFromUrl(
         if (opts.signal?.aborted) {
           throw lastErr instanceof Error ? lastErr : new Error("Failed to download asset: aborted");
         }
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        await sleepUnlessAborted(delayMs, opts.signal);
         resp = await download();
       }
       if (resp === null) {
