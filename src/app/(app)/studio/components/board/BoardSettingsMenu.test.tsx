@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ThemeProvider } from "@/context/ThemeContext";
 import BoardSettingsMenu from "./BoardSettingsMenu";
@@ -79,6 +79,44 @@ describe("BoardSettingsMenu (Amendment 5)", () => {
     // Still anchored to its trigger, opening directly below it.
     expect(menu.className).toContain("right-0");
     expect(menu.className).toContain("top-[calc(100%+8px)]");
+  });
+
+  it("fits the menu to the measured space below its trigger (mockup port fix, 2026-11-18)", () => {
+    renderMenu();
+    openMenu();
+    const menu = screen.getByTestId("board-settings-menu");
+    // jsdom: the trigger rect is all zeros and innerHeight is 768, so
+    // the measured space below is 768 - 0 (bottom) - 8 (gap) - 12
+    // (margin) = 748px, applied as an inline max-height that overrides
+    // the static class cap.
+    expect(menu.dataset.placement).toBe("below");
+    expect(menu.style.maxHeight).toBe("748px");
+  });
+
+  it("flips above the trigger when the space below is too small — the Browser row and Reset can never be cut off", () => {
+    renderMenu();
+    const wrap = screen.getByTestId("board-settings-button").parentElement!;
+    // Trigger sitting low on a 768px-tall viewport: 28px below it,
+    // 680px above it.
+    vi.spyOn(wrap, "getBoundingClientRect").mockReturnValue({
+      top: 700,
+      bottom: 740,
+      left: 0,
+      right: 360,
+      width: 360,
+      height: 40,
+      x: 0,
+      y: 700,
+      toJSON: () => ({}),
+    } as DOMRect);
+    openMenu();
+    const menu = screen.getByTestId("board-settings-menu");
+    expect(menu.dataset.placement).toBe("above");
+    expect(menu.style.maxHeight).toBe("680px");
+    expect(menu.className).toContain("bottom-[calc(100%+8px)]");
+    // Every row is still reachable inside the flipped menu.
+    expect(screen.getByTestId("board-settings-toolbar-browser")).toBeInTheDocument();
+    expect(screen.getByTestId("board-settings-reset")).toBeInTheDocument();
   });
 
   it("writes every control through to the board settings store", () => {

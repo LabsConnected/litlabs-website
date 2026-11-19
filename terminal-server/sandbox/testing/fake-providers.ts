@@ -121,6 +121,13 @@ interface FakeSandboxRecord {
   previewPid: number | null;
   /** Phase 2: extendTimeout calls, in ms. */
   timeoutExtensions: number[];
+  /**
+   * Tracked real expiry (epoch ms): set at create from the session
+   * lifetime and re-armed by extendTimeout, mirroring the real
+   * provider's semantics so exposePort reports a truthful expiry
+   * instead of a synthetic offset.
+   */
+  expiresAtMs: number;
   /** Phase 2: monotonic clock for file mtimes. */
   clock: number;
 }
@@ -190,6 +197,7 @@ export class FakeSandboxProvider implements SandboxProvider {
       gitRepos: new Map(),
       previewPid: null,
       timeoutExtensions: [],
+      expiresAtMs: Date.now() + limits.maxSessionMinutes * 60_000,
       clock: 0,
     });
     return instance;
@@ -202,7 +210,11 @@ export class FakeSandboxProvider implements SandboxProvider {
 
   async start(sandboxId: string): Promise<void> {
     const record = this.sandboxes.get(sandboxId);
-    if (record) record.instance.state = "running";
+    if (record) {
+      record.instance.state = "running";
+      // Resume re-arms the session lifetime, like the real provider.
+      record.expiresAtMs = Date.now() + record.instance.limits.maxSessionMinutes * 60_000;
+    }
   }
 
   async stop(sandboxId: string): Promise<void> {
@@ -217,7 +229,10 @@ export class FakeSandboxProvider implements SandboxProvider {
 
   async extendTimeout(sandboxId: string, timeoutMs: number): Promise<void> {
     const record = this.sandboxes.get(sandboxId);
-    if (record) record.timeoutExtensions.push(timeoutMs);
+    if (record) {
+      record.timeoutExtensions.push(timeoutMs);
+      record.expiresAtMs = Date.now() + timeoutMs;
+    }
   }
 
   async destroy(sandboxId: string): Promise<void> {
@@ -252,7 +267,9 @@ export class FakeSandboxProvider implements SandboxProvider {
       url: `https://fake-preview-${sandboxId}-${port}.invalid`,
       state: "private",
       previewToken: `fake-traffic-${sandboxId}`,
-      expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+      // The tracked real expiry (create lifetime, re-armed by
+      // extendTimeout) — never a synthetic offset.
+      expiresAt: new Date(record.expiresAtMs).toISOString(),
     };
   }
 

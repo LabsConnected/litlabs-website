@@ -637,7 +637,10 @@ describe("CommandStudio — canvas-first 2-zone layout", () => {
     await settle();
 
     expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
-    expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "false");
+    // Mockup port (2026-11-18): the LiTT panel is Chat-only in the
+    // Regular layout — there is no Live pane in the panel anymore;
+    // the activity feed lives in the right rail's Activity tab.
+    expect(screen.queryByTestId("litt-live-panel")).toBeNull();
     expect(screen.queryByTestId("studio-completion")).toBeNull();
   });
 
@@ -680,12 +683,17 @@ describe("CommandStudio — approval gate convergence", () => {
     localStorage.setItem("litt:studio:layout-mode", "classic");
   });
 
-  it("returns the LiTT panel to Chat when an approval gate settles without a local click", async () => {
+  it("converges the gate when an approval settles without a local click", async () => {
     globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
     // A gate resolved outside this client — approved on another device, a
     // reload while the resumed run was executing, or the acceptance harness
     // approving through the server-authoritative endpoint — used to leave
-    // the surface stuck on Live with the composer hidden.
+    // the surface stuck on Live with the composer hidden. Mockup port
+    // (2026-11-18): the LiTT panel is Chat-only in the Regular layout, so
+    // the chat surface (composer included) can no longer be hidden behind
+    // a panel tab at all; the activity feed the user inspects lives in
+    // the right rail. The convergence contract under test is unchanged:
+    // the watcher fires, the store resolves, the transcript reloads.
     convState.selectedConversationId = "conv-1";
     execState.state.pendingApproval = {
       toolId: "project.deploy",
@@ -700,12 +708,12 @@ describe("CommandStudio — approval gate convergence", () => {
       expect.objectContaining({ conversationId: "conv-1", pausedRunId: "paused-1" }),
     );
 
-    // The user inspects the Live tab while the gate is pending (the
+    // The user inspects the Activity feed while the gate is pending (the
     // actionable card itself lives in Chat since the approve-in-chat fix).
-    await user.click(screen.getByTestId("litt-tab-live"));
+    await user.click(screen.getByTestId("studio-rail-tab-activity"));
     await settle();
-    expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "true");
-    expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "false");
+    expect(screen.getByTestId("studio-rail-pane-activity")).toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
 
     act(() => {
       approvalWatch.onSettled?.({
@@ -720,7 +728,6 @@ describe("CommandStudio — approval gate convergence", () => {
     expect(execState.state.resolveApproval).toHaveBeenCalledWith("approved");
     expect(convState.loadMessages).toHaveBeenCalledWith("conv-1");
     expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
-    expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "false");
   });
 
   it("surfaces the fresh gate IN CHAT when the resumed run pauses on a nested gate", async () => {
@@ -734,7 +741,8 @@ describe("CommandStudio — approval gate convergence", () => {
     const { user } = await renderCommandStudio();
     await settle();
 
-    await user.click(screen.getByTestId("litt-tab-live"));
+    // Watching the Activity feed (right rail) when the gate settles.
+    await user.click(screen.getByTestId("studio-rail-tab-activity"));
     await settle();
 
     act(() => {
@@ -766,7 +774,7 @@ describe("CommandStudio — approval gate convergence", () => {
       expect.objectContaining({ toolId: "files.delete", pausedRunId: "paused-2" }),
     );
     expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
-    expect(screen.getByTestId("litt-live-panel")).toHaveAttribute("data-active", "false");
+    expect(screen.queryByTestId("litt-live-panel")).toBeNull();
   });
 
   it("does NOT report 'could not be resumed' when the gate already settled before the click", async () => {
@@ -787,21 +795,20 @@ describe("CommandStudio — approval gate convergence", () => {
     const { user } = await renderCommandStudio();
     await settle();
 
-    // F1 workspace-first: the panel opens on the 64px rail — expand it to
-    // the floating overlay so the Live tab's approval controls are visible.
-    if (screen.getByTestId("litt-panel").getAttribute("data-collapsed") === "true") {
-      await user.click(screen.getByTestId("litt-hud-expand"));
-      await settle();
-    }
-
-    await user.click(screen.getByTestId("litt-tab-live"));
+    // Mockup port (2026-11-18): the activity feed — and its approval
+    // controls — live in the right rail's Activity tab in the Regular
+    // layout; the LiTT panel is Chat-only. Open the rail tab so the
+    // feed's own Approve control is the one under test.
+    await user.click(screen.getByTestId("studio-rail-tab-activity"));
     await settle();
 
     // Gate settles between render and click (mock store doesn't re-render,
     // so the card stays mounted — exactly the production race).
     execState.state.pendingApproval = null;
 
-    await user.click(screen.getByRole("button", { name: /^approve$/i }));
+    await user.click(
+      within(screen.getByTestId("studio-rail-pane-activity")).getByRole("button", { name: /^approve$/i }),
+    );
     await settle();
 
     const { submitApprovalAndPoll } = await import("../lib/approval-polling");
@@ -829,16 +836,15 @@ describe("CommandStudio — approval gate convergence", () => {
     const { user } = await renderCommandStudio();
     await settle();
 
-    // F1 workspace-first: the panel opens on the 64px rail — expand it to
-    // the floating overlay so the Live tab's approval controls are visible.
-    if (screen.getByTestId("litt-panel").getAttribute("data-collapsed") === "true") {
-      await user.click(screen.getByTestId("litt-hud-expand"));
-      await settle();
-    }
-
-    await user.click(screen.getByTestId("litt-tab-live"));
+    // Mockup port (2026-11-18): the activity feed — and its approval
+    // controls — live in the right rail's Activity tab in the Regular
+    // layout; the LiTT panel is Chat-only. Open the rail tab so the
+    // feed's own Approve control is the one under test.
+    await user.click(screen.getByTestId("studio-rail-tab-activity"));
     await settle();
-    await user.click(screen.getByRole("button", { name: /^approve$/i }));
+    await user.click(
+      within(screen.getByTestId("studio-rail-pane-activity")).getByRole("button", { name: /^approve$/i }),
+    );
     await settle();
 
     const { submitApprovalAndPoll } = await import("../lib/approval-polling");
@@ -863,16 +869,15 @@ describe("CommandStudio — approval gate convergence", () => {
     const { user } = await renderCommandStudio();
     await settle();
 
-    // F1 workspace-first: the panel opens on the 64px rail — expand it to
-    // the floating overlay so the Live tab's approval controls are visible.
-    if (screen.getByTestId("litt-panel").getAttribute("data-collapsed") === "true") {
-      await user.click(screen.getByTestId("litt-hud-expand"));
-      await settle();
-    }
-
-    await user.click(screen.getByTestId("litt-tab-live"));
+    // Mockup port (2026-11-18): the activity feed — and its approval
+    // controls — live in the right rail's Activity tab in the Regular
+    // layout; the LiTT panel is Chat-only. Open the rail tab so the
+    // feed's own Approve control is the one under test.
+    await user.click(screen.getByTestId("studio-rail-tab-activity"));
     await settle();
-    await user.click(screen.getByRole("button", { name: /^approve$/i }));
+    await user.click(
+      within(screen.getByTestId("studio-rail-pane-activity")).getByRole("button", { name: /^approve$/i }),
+    );
     await settle();
 
     const { submitApprovalAndPoll } = await import("../lib/approval-polling");
@@ -917,16 +922,15 @@ describe("CommandStudio — approval gate convergence", () => {
     const { user } = await renderCommandStudio();
     await settle();
 
-    // F1 workspace-first: the panel opens on the 64px rail — expand it to
-    // the floating overlay so the Live tab's approval controls are visible.
-    if (screen.getByTestId("litt-panel").getAttribute("data-collapsed") === "true") {
-      await user.click(screen.getByTestId("litt-hud-expand"));
-      await settle();
-    }
-
-    await user.click(screen.getByTestId("litt-tab-live"));
+    // Mockup port (2026-11-18): the activity feed — and its approval
+    // controls — live in the right rail's Activity tab in the Regular
+    // layout; the LiTT panel is Chat-only. Open the rail tab so the
+    // feed's own Approve control is the one under test.
+    await user.click(screen.getByTestId("studio-rail-tab-activity"));
     await settle();
-    await user.click(screen.getByRole("button", { name: /^approve$/i }));
+    await user.click(
+      within(screen.getByTestId("studio-rail-pane-activity")).getByRole("button", { name: /^approve$/i }),
+    );
     await settle();
 
     const { submitApprovalAndPoll } = await import("../lib/approval-polling");

@@ -135,7 +135,7 @@ export const BOARD_PANEL_INVENTORY: BoardPanelDefinition[] = [
   },
   {
     id: "preview",
-    title: "Preview",
+    title: "Static View",
     defaultRect: { x: 436, y: 72, width: 700, height: 532 },
     defaultOpenFor: ["website", "game"],
     bindingNote: "Binds to StudioPreviewPanel — the real active project, live.",

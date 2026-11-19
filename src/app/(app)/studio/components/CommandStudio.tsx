@@ -48,6 +48,8 @@ import {
 
 import CommandStudioHeader from "./CommandStudioHeader";
 import StudioDock, { type StudioDockTab } from "./StudioDock";
+import StudioHealthPanel from "./StudioHealthPanel";
+import StudioRightRail, { type StudioRailTab } from "./StudioRightRail";
 import { ApprovalCard } from "./ApprovalCard";
 import MissionCards from "./MissionCards";
 import PersistentMusicPlayer from "./PersistentMusicPlayer";
@@ -55,7 +57,6 @@ import { MobileCommandNav, type MobileStudioSurface } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
-import { ActionRunStatusPanel } from "./ActionRunStatusPanel";
 import RunChangesPanel from "./RunChangesPanel";
 import StudioBrowserStatusChip from "./StudioBrowserStatusChip";
 import { ChatBrowserLiveView } from "./ChatBrowserLiveView";
@@ -974,16 +975,32 @@ function CommandStudioContent() {
   // desktop rail, the mobile sheet, and header/activity actions.
   const [littActiveTab, setLittActiveTab] = useState<LiTTTab>("chat");
 
+  // Mockup port (2026-11-18): the Regular layout's right rail
+  // (Files · Activity · Checks · Approvals, from Larry's locked
+  // mockup) — its active tab. Desktop Regular only; the board has its
+  // own panels and mobile its sheet/drawer for the same surfaces.
+  const [railTab, setRailTab] = useState<StudioRailTab>("files");
+
   // Board mode (B3): the single Files instance relocates onto the board,
   // so the LiTT panel's Files/Components tab has no content while the
   // board is active. If that tab is selected when the board takes over
   // (or an open-files intent lands while it is active), fall back to
   // Chat — the panel must never sit on a tab with no pane behind it.
+  //
+  // Mockup port fix (2026-11-18): the guard keys on studioShellActive —
+  // the board body actually being on screen — NOT on boardActive.
+  // boardActive is true whenever a user and project are in scope, in
+  // EVERY layout, so the old condition fired in the Regular layout too
+  // and instantly reset the LiTT panel's Files tab back to Chat: the
+  // Regular Files tab was dead (clicking it never left Chat), exactly
+  // as the 2026-11-18 site walk found. In Regular the Files tab has
+  // real content behind it (the right rail / panel tab), so the guard
+  // must not fire there.
   useEffect(() => {
-    if (boardActive && (littActiveTab === "files" || littActiveTab === "components")) {
+    if (studioShellActive && (littActiveTab === "files" || littActiveTab === "components")) {
       setLittActiveTab("chat");
     }
-  }, [boardActive, littActiveTab]);
+  }, [studioShellActive, littActiveTab]);
 
   // Viewport tier (declared above with the canvas state) drives
   // desktop-rail vs mobile-sheet LiTT presentation — null until first
@@ -1226,20 +1243,27 @@ function CommandStudioContent() {
     handleOpenDockTab("activity");
   }, [handleOpenDockTab]);
 
-  // Files is an OPEN action onto the LiTT panel's top-row Files tab
-  // (Larry, 2026-11-13): the bottom dock's Files tab and the mobile
-  // bottom-nav Files entry are retired, so header / MissionCards /
-  // ActionPanel open-files actions all land here — the panel (desktop)
-  // or the LiTT sheet (mobile) opens on its Files tab.
+  // Files is an OPEN action (Larry, 2026-11-13): the bottom dock's
+  // Files tab and the mobile bottom-nav Files entry are retired, so
+  // header / MissionCards / ActionPanel open-files actions all land
+  // here. Where "here" is depends on the surface: the LiTT sheet
+  // (mobile) opens on its Files tab; in the Regular layout the files
+  // live in the right rail (mockup port, 2026-11-18), so the rail's
+  // Files tab is selected; anywhere else the LiTT panel opens on its
+  // Files tab as before.
   const handleOpenFilesPanel = useCallback(() => {
     if (isMobileLitt) {
       setMobileToolsOpen(false);
       setMobileLittOpen(true);
+      setLittActiveTab("files");
+    } else if (!studioShellActive) {
+      // The right rail is mounted in this same non-shell desktop body.
+      setRailTab("files");
     } else {
       setLittCollapsed(false);
+      setLittActiveTab("files");
     }
-    setLittActiveTab("files");
-  }, [isMobileLitt]);
+  }, [isMobileLitt, studioShellActive]);
 
   // Listen for "Ask LiTT" events from Canvas and other surfaces.
   // Opens LiTT, switches to Chat, and optionally pre-fills the composer
@@ -3456,7 +3480,9 @@ function CommandStudioContent() {
 
   // The project-files composition (header + StudioProjectFiles) —
   // ONE element definition mounted in exactly one home per layout:
-  // the LiTT panel's top-row Files tab (shell + classic), the mobile
+  // the Regular layout's right rail Files tab (desktop, mockup port
+  // 2026-11-18 — it previously lived in the LiTT panel's top-row
+  // Files tab), the board's own Files panel (shell), the mobile
   // LiTT sheet's Files tab, and the mobile ContextDrawer's Files tab.
   // The shell's standalone Files sidebar slot was retired 2026-11-14
   // (Larry: Files already lives in the chat tab) — it mounted this
@@ -4110,8 +4136,13 @@ function CommandStudioContent() {
               voiceConnected={liveSession.isLive}
               microphoneStatus={liveSession.indicators.microphone}
               chatContent={littChatContent}
-              liveContent={littLiveContent}
-              filesContent={projectFilesContent}
+              // Mockup port (2026-11-18): no liveContent / filesContent
+              // here anymore — in this non-shell desktop body the
+              // Activity feed and the Files surface live in the right
+              // rail (StudioRightRail, mounted beside <main> below),
+              // so this panel is Chat-only, matching the mockup's
+              // Regular layout (chat column = conversation + composer).
+              // The mobile sheet keeps its own tabs and contents.
               expandedWidth={littResize.width}
             />
           )}
@@ -4189,13 +4220,17 @@ function CommandStudioContent() {
 
             {/* Amendment 8 — the regular layout's right side works hand
                 in hand with chat: while a run is live, the workspace
-                shows the run as it happens — the Jobs live-steps feed
-                (ActionRunStatusPanel, the same action-run projection
-                the board chat's Jobs tab reads) plus the run's file
-                changes (RunChangesPanel, refreshed by the same
-                workspace revision the board passes its Jobs tab). It
-                mounts only while a run is active; the settled record
-                stays in the chat transcript and the dock Activity tab. */}
+                shows the run as it happens — the run's file changes
+                (RunChangesPanel, refreshed by the same workspace
+                revision the board passes its Jobs tab). It mounts only
+                while a run is active; the settled record stays in the
+                chat transcript and the dock Activity tab.
+                Mockup port (2026-11-18): the ActionRunStatusPanel strip
+                no longer renders here either — Larry ruled the runtime
+                strip lives ONLY in the Jobs tab (see StudioWorkSurface).
+                This region keeps the live header and the file changes,
+                which are the workspace's own hand-in-hand view, not the
+                strip. */}
             {conversation.selectedConversationId && (executionRunning || conversation.busy) && (
               <div
                 className="max-h-64 shrink-0 overflow-y-auto border-b"
@@ -4227,12 +4262,6 @@ function CommandStudioContent() {
                   >
                     Open activity
                   </button>
-                </div>
-                <div className="px-3 pb-2" data-testid="classic-live-run-steps">
-                  <ActionRunStatusPanel
-                    conversationId={conversation.selectedConversationId}
-                    busy={executionRunning || conversation.busy}
-                  />
                 </div>
                 {capabilities.projectId && (
                   <div className="px-3 pb-3" data-testid="classic-live-run-changes">
@@ -4420,6 +4449,41 @@ function CommandStudioContent() {
               mediaContent={<MediaUtilityDock />}
             />
           </main>
+
+          {/* Right rail — the Regular layout's third column (mockup
+              port, 2026-11-18): Files · Activity · Checks · Approvals
+              at 300px, from Larry's locked Studio mockup. It takes
+              over the Files and Activity contents the desktop LiTT
+              panel used to carry as tabs, so each of those surfaces
+              still exists exactly once in this body; Checks and
+              Approvals are the same StudioHealthPanel read models the
+              board and the inspector frame mount. Desktop-only (the
+              component hides below lg) and non-shell only — the board
+              has its own panels for all four. */}
+          {viewportTier !== null && !isMobileLitt && (
+            <StudioRightRail
+              activeTab={railTab}
+              onTabChange={setRailTab}
+              filesContent={projectFilesContent}
+              activityContent={littLiveContent}
+              checksContent={
+                <StudioHealthPanel
+                  mode="checks"
+                  projectId={capabilities.projectId}
+                  refreshKey={workspaceRevision}
+                  runTrigger={healthRunTrigger}
+                />
+              }
+              approvalsContent={
+                <StudioHealthPanel
+                  mode="approvals"
+                  projectId={capabilities.projectId}
+                  conversationId={conversation.selectedConversationId ?? null}
+                  refreshKey={workspaceRevision}
+                />
+              }
+            />
+          )}
 
           {/* Mobile Context Drawer — right-side fixed overlay (unchanged).
               On mobile, the ContextDrawer is NOT repositioned to the left;
@@ -4747,7 +4811,7 @@ function StudioUnavailableSurface({
             { label: "Chat", desc: "Talk to LiTT", dest: "studio" as const, mode: "work" as const },
             { label: "Create", desc: "Image, video, audio", dest: "create" as const, mode: "image" as const },
             { label: "Code", desc: "Edit project files", dest: "studio" as const, mode: "code" as const },
-            { label: "Preview", desc: "Live preview", dest: "studio" as const, mode: "preview" as const },
+            { label: "Static View", desc: "Live preview", dest: "studio" as const, mode: "preview" as const },
           ].map((tool) => (
             <a
               key={tool.label}
@@ -4912,7 +4976,13 @@ function StudioWorkSurface({
           {fallbackNotice}
         </div>
       )}
-      {conversationId && <ActionRunStatusPanel conversationId={conversationId} busy={busy} />}
+      {/* Jobs-only runtime strip (Larry, 2026-11-18): the run-status
+          block (RUNTIME line + stage chips) used to render here, at the
+          top of the chat surface, AND again in the Jobs tab — he ruled
+          it lives ONLY in the Jobs tab. The Chat surface is
+          conversation + composer only, so the strip no longer renders
+          here in either layout. Its one home is the Jobs tab of the
+          board chat panel (BoardChatPanel). */}
       {conversationId && <ChatBrowserLiveView conversationId={conversationId} />}
       {isEmpty ? (
         <div className="min-h-0 flex-1 overflow-y-auto">

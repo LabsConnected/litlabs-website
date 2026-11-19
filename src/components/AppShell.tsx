@@ -163,8 +163,9 @@ function IdentityDock({ T: TProp }: { T?: ResolvedColors }) {
         className="h-9 w-9 animate-pulse rounded-full"
         style={{ background: `${T.borderColor}20` }}
         role="status"
-        aria-label="Loading account"
-      />
+      >
+        <span className="sr-only">Loading account</span>
+      </div>
     );
   }
 
@@ -427,17 +428,17 @@ function TopBar() {
       }}
     >
       {/* Main bar row — Studio routes run one step denser (h-12), and
-          the wide brand mark sits on a dark chip there: the asset is
-          white artwork on black, so on the light Studio bar it washed
-          out to a smudge at small sizes. The chip keeps the artwork on
-          its native background at a legible size. */}
+          the wide brand mark sits on a light chip there: the asset is
+          dark lettering on white, so the chip keeps it reading as
+          deliberately placed — on the light Studio bar and on dark
+          bars alike — at a legible size. */}
       <div className={`flex ${isStudio ? "h-12" : "h-14"} items-center gap-2 px-3 md:gap-3 md:px-4`}>
         <BrandLogo
           href="/studio"
           size={isStudio ? 34 : 30}
           showText={false}
           variant="full"
-          className={isStudio ? "rounded-lg bg-[#050505] px-1.5 py-1 shadow-sm ring-1 ring-black/15" : ""}
+          className="rounded-lg bg-white px-1.5 py-1 shadow-sm ring-1 ring-black/15"
         />
 
         {/* Desktop nav — canonical main items, all visible (the More
@@ -492,7 +493,7 @@ function TopBar() {
               <span
                 className="inline-block h-3 w-14 animate-pulse rounded align-middle"
                 style={{ background: isStudio ? "rgba(14,60,26,0.08)" : "rgba(255,255,255,0.08)" }}
-                aria-label="Loading balance"
+                aria-hidden="true"
               />
             ) : walletError ? (
               <>-- <span style={{ color: T.accentColor }}>LiTTBits</span></>
