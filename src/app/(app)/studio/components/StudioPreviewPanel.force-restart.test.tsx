@@ -91,13 +91,13 @@ describe("StudioPreviewPanel — failed-state Restart takes the force path (roun
     vi.clearAllMocks();
   });
 
-  it("the pane CTA 'Restart preview' POSTs { restart: true }", async () => {
+  it("the pane CTA 'Restart Static View' POSTs { restart: true }", async () => {
     const posts: CapturedPost[] = [];
     mockFetch({ previewGet: FAILED_GET, previewPost: STARTING_POST, posts });
     renderPanel();
 
     const cta = await screen.findByTestId("preview-prepare");
-    expect(cta).toHaveTextContent("Restart preview");
+    expect(cta).toHaveTextContent("Restart Static View");
 
     fireEvent.click(cta);
     await waitFor(() => expect(posts).toHaveLength(1));

@@ -296,6 +296,27 @@ export const TerminalPanel = forwardRef<
     let serverDisconnects = 0;
     let wsUrl = "";
 
+    // Terminal bridge (spec §2.6): while the server ensures a sandbox
+    // for the shell — a first open can take longer than the 10-second
+    // connect clock (sandbox create + workspace mirror) — it emits
+    // terminal:status progress events. Each one is a sign of life:
+    // restart the connect clock, so the hard timeout applies only
+    // once the server actually goes silent. The progress line prints
+    // once per connection attempt, not on every heartbeat event.
+    let provisioningNoted = false;
+    const handleTerminalStatus = (status: { state?: string }) => {
+      if (disposed) return;
+      if (status?.state !== "provisioning") return;
+      if (!provisioningNoted) {
+        provisioningNoted = true;
+        term.writeln("\x1b[33m⏳ Starting your sandbox shell...\x1b[0m");
+        onLog?.("[WS] Terminal provisioning — sandbox starting");
+      }
+      if (useTerminalStore.getState().status !== "connected") {
+        startConnectTimeout();
+      }
+    };
+
     const connect = async () => {
       const authToken = await getToken?.();
       return getTerminalTokenResult(false, projectId, authToken || undefined);
@@ -422,6 +443,8 @@ export const TerminalPanel = forwardRef<
           onLog?.(`[SESSION] Ready ${sid.slice(0, 8)}... ws=${wsId ?? "none"} project=${sessProjectId ?? "none"} cwd=${cwd} shell=${shell}`);
         });
 
+        connectedSocket.on("terminal:status", handleTerminalStatus);
+
         connectedSocket.on("connect_error", (err: Error) => {
           const isUnauthorized = /unauthorized/i.test(err.message || "");
           if (isUnauthorized && !attemptedUnauthorizedRetry) {
@@ -469,6 +492,7 @@ export const TerminalPanel = forwardRef<
                 fitController.invalidateEmitted();
                 fitController.requestFit();
               });
+              retrySocket.on("terminal:status", handleTerminalStatus);
               retrySocket.on("connect", () => {
                 terminalStore.setStatus("connecting");
                 term.writeln("\x1b[32m✅ Socket connected — waiting for PTY session...\x1b[0m");
@@ -610,6 +634,8 @@ export const TerminalPanel = forwardRef<
                       onLog?.(`[SESSION] Ready ${readyData.sessionId.slice(0, 8)}... cwd=${readyData.cwd}`);
                     });
 
+                    retrySocket.on("terminal:status", handleTerminalStatus);
+
                     retrySocket.on("connect_error", (nextErr: Error) => {
                       const isAuth = /unauthorized|forbidden|auth/i.test(nextErr.message || "");
                       const isIsolation = isIsolationRefusal(nextErr.message);
@@ -636,6 +662,11 @@ export const TerminalPanel = forwardRef<
                     });
 
                     retrySocket.on("terminal:output", (data: string) => {
+                      // Same session-ended classification as the primary
+                      // socket: any "[Session ended …]" line — including
+                      // the sandbox 1-hour-limit notice — clears the
+                      // stored resume id so the next connect opens fresh.
+                      if (data.includes("[Session ended")) clearResumeSessionId(projectId);
                       term.write(data);
                       outputBufferRef.current += data;
                       if (outputBufferRef.current.length > 4000) {

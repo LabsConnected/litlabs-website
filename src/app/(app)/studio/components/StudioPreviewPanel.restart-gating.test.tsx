@@ -104,7 +104,7 @@ describe("StudioPreviewPanel — restart gating once the refusal is known", () =
     await screen.findAllByText("Preview runtime unreachable");
     expect(screen.queryByTestId("preview-restart")).toBeNull();
     expect(screen.queryByTestId("preview-prepare")).toBeNull();
-    expect(screen.queryByRole("button", { name: /restart preview/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /restart static view/i })).toBeNull();
   });
 
   it("refusal via workspace-state + unreachable settle → no Restart, no prepare CTA", async () => {
@@ -122,7 +122,7 @@ describe("StudioPreviewPanel — restart gating once the refusal is known", () =
     await screen.findAllByText("Preview runtime unreachable");
     expect(screen.queryByTestId("preview-restart")).toBeNull();
     expect(screen.queryByTestId("preview-prepare")).toBeNull();
-    expect(screen.queryByRole("button", { name: /restart preview/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /restart static view/i })).toBeNull();
   });
 
   it("refusal via preview payload only (not_started) → auto-start never fires the doomed POST", async () => {
@@ -183,7 +183,7 @@ describe("StudioPreviewPanel — restart gating once the refusal is known", () =
     );
 
     const cta = await screen.findByTestId("preview-prepare");
-    expect(cta).toHaveTextContent("Restart preview");
+    expect(cta).toHaveTextContent("Restart Static View");
     expect(screen.getByTestId("preview-restart")).toBeInTheDocument();
 
     fireEvent.click(cta);

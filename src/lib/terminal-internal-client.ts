@@ -10,7 +10,7 @@
  */
 
 import { createPreviewToken } from "@/lib/projects/preview-token";
-import { resolveTerminalInternalUrl } from "@/lib/terminal-url";
+import { getTerminalServerUrl, resolveTerminalInternalUrl } from "@/lib/terminal-url";
 
 const INTERNAL_KEY = () => process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "";
 const TERMINAL_BASE = () => resolveTerminalInternalUrl().url;
@@ -493,7 +493,16 @@ export interface PreviewProxyScope {
  * the terminal accepts both channels during the transition.
  */
 export function buildPreviewProxyUrl(workspaceId: string, scope?: PreviewProxyScope): string {
-  const base = TERMINAL_BASE().replace(/\/+$/, "");
+  // This URL is handed to the BROWSER (the panel iframe loads it, the panel
+  // probes it, "Open preview in new tab" opens it), so it must be built on
+  // the PUBLIC terminal base from getTerminalServerUrl() — never on
+  // TERMINAL_BASE(), which is the server-to-server internal base: on the
+  // web service that is a *.railway.internal host no browser can resolve,
+  // so the panel could never render even a perfectly healthy sandbox.
+  // Fall back to TERMINAL_BASE() only when no public terminal URL is
+  // configured (e.g. the shell service, whose internal var holds the
+  // public address, and local dev).
+  const base = (getTerminalServerUrl() || TERMINAL_BASE()).replace(/\/+$/, "");
   let token = process.env.PREVIEW_ACCESS_TOKEN ?? "";
   if (scope) {
     try {

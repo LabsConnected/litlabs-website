@@ -163,7 +163,7 @@ describe("StudioPreviewPanel", () => {
     render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch={null} workspaceStatus="ready" />);
 
     await waitFor(() => {
-      expect(screen.getByText("Preview runtime unreachable")).toBeTruthy();
+      expect(screen.getByText("Static View runtime unreachable")).toBeTruthy();
     });
     // The truthful error reason must be visible
     await waitFor(() => {
@@ -221,7 +221,7 @@ describe("StudioPreviewPanel", () => {
     mockFetch(() => jsonResponse({ runtimeStatus: "unreachable", previewUrl: null, runtimeError: null }));
     render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch={null} workspaceStatus="ready" />);
 
-    await screen.findByText("Preview runtime unreachable");
+    await screen.findByText("Static View runtime unreachable");
     expect(screen.queryByTestId("preview-stop")).toBeNull();
   });
 
@@ -283,7 +283,7 @@ describe("StudioPreviewPanel", () => {
       expect(screen.getByText("Authentication configuration error")).toBeTruthy();
     });
     // Must NOT show the generic label
-    expect(screen.queryByText("Preview failed to start")).toBeNull();
+    expect(screen.queryByText("Static View failed to start")).toBeNull();
     // Must show the truthful error reason
     await waitFor(() => {
       expect(screen.getByText(/Clerk secret key or publishable key is invalid/)).toBeTruthy();
@@ -303,7 +303,7 @@ describe("StudioPreviewPanel", () => {
     await waitFor(() => {
       expect(screen.getByText("Authentication configuration error")).toBeTruthy();
     });
-    expect(screen.queryByText("Preview failed to start")).toBeNull();
+    expect(screen.queryByText("Static View failed to start")).toBeNull();
     await waitFor(() => {
       expect(screen.getByText(/publishable key/)).toBeTruthy();
     });
@@ -383,7 +383,7 @@ describe("StudioPreviewPanel", () => {
       // Workspace truth has NOT resolved. The preview GET says not_started,
       // which is the auto-start trigger — so a POST here is the race.
       await waitFor(() => {
-        expect(screen.getByText("Preview not started")).toBeTruthy();
+        expect(screen.getByText("Static View not started")).toBeTruthy();
       });
       await new Promise((r) => setTimeout(r, 150));
       expect(postCount).toBe(0);
@@ -402,7 +402,7 @@ describe("StudioPreviewPanel", () => {
       render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch={null} workspaceStatus="not_prepared" />);
 
       await waitFor(() => {
-        expect(screen.getByText("No preview yet")).toBeTruthy();
+        expect(screen.getByText("No Static View yet")).toBeTruthy();
       });
       await new Promise((r) => setTimeout(r, 150));
       expect(postCount).toBe(0);
@@ -439,7 +439,7 @@ describe("StudioPreviewPanel", () => {
 
       const { rerender } = render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch={null} workspaceStatus="not_prepared" />);
 
-      await waitFor(() => expect(screen.getByText("Preview not started")).toBeTruthy());
+      await waitFor(() => expect(screen.getByText("Static View not started")).toBeTruthy());
       expect(postCount).toBe(0);
 
       // Content truth lands AFTER the not_started status is already on screen.
@@ -467,7 +467,7 @@ describe("StudioPreviewPanel", () => {
       render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch={null} workspaceStatus="not_prepared" />);
 
       await waitFor(() => {
-        expect(screen.getByText("No preview yet")).toBeTruthy();
+        expect(screen.getByText("No Static View yet")).toBeTruthy();
       });
       await new Promise((r) => setTimeout(r, 150));
       expect(postCount).toBe(0);

@@ -79,7 +79,7 @@ const STATUS_DOT_COLOR: Record<PreviewState, string> = {
  * "Health check" is never marked current: nothing in the status payload
  * distinguishes it, so it stays upcoming until the preview is ready.
  * null means the stage cannot be distinguished — the panel then renders the
- * single honest "Preparing preview…" state instead of inventing stages.
+ * single honest "Preparing Static View…" state instead of inventing stages.
  */
 type StartPhase = "provision" | "devserver" | null;
 
@@ -1288,7 +1288,12 @@ export default function StudioPreviewPanel({
   const frameFailed = iframeFailed || frameCheck === "failed";
   // Raw serialized server payloads never render — see humanizePreviewError.
   const humanError = humanizePreviewError(error);
-  const label = !projectId ? "Select a project" : state === "loading" ? "Checking preview status…" : state === "starting" ? "Preparing preview…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (frameFailed ? "Preview failed to load" : stylingFailed ? "Preview styling failed to apply" : frameCheck === "ok" ? "Preview ready" : "Loading preview…") : state === "stale" ? "Preview may be stale" : state === "not_started" ? (hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_LABEL : awaitingFirstContent ? "No preview yet" : "Preview not started") : state === "unreachable" ? "Preview runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_LABEL : "Preview failed to start") : "Preview runtime unreachable";
+  // This panel's own status copy names the panel "Static View"
+  // (Larry, 2026-11-18) — the surface's name, in both layouts. The
+  // detail/body strings below keep "preview" for the dev-server
+  // session and its content, which is the machinery sense, and the
+  // Code panel's own preview concept is untouched.
+  const label = !projectId ? "Select a project" : state === "loading" ? "Checking Static View status…" : state === "starting" ? "Preparing Static View…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (frameFailed ? "Static View failed to load" : stylingFailed ? "Static View styling failed to apply" : frameCheck === "ok" ? "Static View ready" : "Loading Static View…") : state === "stale" ? "Static View may be stale" : state === "not_started" ? (hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_LABEL : awaitingFirstContent ? "No Static View yet" : "Static View not started") : state === "unreachable" ? "Static View runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_LABEL : "Static View failed to start") : "Static View runtime unreachable";
   const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "ready" && frameFailed ? (frameError ?? "The preview address did not load. Retry to check it again.") : state === "not_started" ? (hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : awaitingFirstContent ? "Build something in this project and the preview will start automatically. Already have files? Start it manually." : "Preparing your preview automatically…") : state === "unreachable" ? (humanError ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (humanError ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : humanError ?? "The preview failed to start. Try restarting it.") : humanError ?? "The preview surface reports only real project runtime state.";
   const dotColor = stylingFailed ? STATUS_DOT_COLOR.stale : STATUS_DOT_COLOR[state];
   const isLive = state === "ready" || state === "stale";
@@ -1362,10 +1367,10 @@ export default function StudioPreviewPanel({
     const status: BoardPanelStatus =
       state === "ready"
         ? frameFailed
-          ? { tone: "error", label: "Preview failed to load" }
+          ? { tone: "error", label: "Static View failed to load" }
           : stylingFailed
-            ? { tone: "working", label: "Preview styling failed to apply" }
-            : { tone: "ready", label: "Preview ready" }
+            ? { tone: "working", label: "Static View styling failed to apply" }
+            : { tone: "ready", label: "Static View ready" }
         : state === "starting"
           ? {
               tone: "working",
@@ -1374,20 +1379,20 @@ export default function StudioPreviewPanel({
                   ? "Provisioning workspace"
                   : startPhase === "devserver"
                     ? "Starting dev server"
-                    : "Preparing preview…",
+                    : "Preparing Static View…",
               pulse: true,
             }
           : state === "restarting"
             ? { tone: "working", label: "Restarting dev server", pulse: true }
             : state === "loading"
-              ? { tone: "working", label: "Checking preview status…", pulse: true }
+              ? { tone: "working", label: "Checking Static View status…", pulse: true }
               : state === "stale"
-                ? { tone: "working", label: "Preview may be stale" }
+                ? { tone: "working", label: "Static View may be stale" }
                 : state === "failed"
-                  ? { tone: "error", label: "Preview failed to start" }
+                  ? { tone: "error", label: "Static View failed to start" }
                   : state === "unreachable"
-                    ? { tone: "error", label: "Preview runtime unreachable" }
-                    : { tone: "idle", label: "Preview not started" };
+                    ? { tone: "error", label: "Static View runtime unreachable" }
+                    : { tone: "idle", label: "Static View not started" };
     setPanelStatus("preview", status);
   }, [state, startPhase, frameFailed, stylingFailed, setPanelStatus]);
   useEffect(() => () => setPanelStatus("preview", null), [setPanelStatus]);
@@ -1456,7 +1461,7 @@ export default function StudioPreviewPanel({
     setIframeFailed(false);
     setFrameKey((value) => value + 1);
     autoStartedForRef.current = projectId;
-    // Round 13: in the failed state this button IS "Restart preview"
+    // Round 13: in the failed state this button IS "Restart Static View"
     // — an explicit user restart takes the force path, not a plain
     // start that can adopt the wedged runtime. Other states keep
     // the plain start.
@@ -1509,7 +1514,7 @@ export default function StudioPreviewPanel({
         />
         <div className="min-w-[96px] flex-1">
           <div className="flex items-center gap-1">
-            <span className="truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }} title={projectId ? `${projectName ?? "Project"} · ${projectId}` : undefined}>{projectName ?? "Project preview"}</span>
+            <span className="truncate text-[10px] font-bold" style={{ color: "var(--text-primary)" }} title={projectId ? `${projectName ?? "Project"} · ${projectId}` : undefined}>{projectName ?? "Static View"}</span>
             {/*
               `framework` is the RUNTIME technology (static, nextjs, vite,
               expo) — never source ownership. Titled so that "STATIC"
@@ -1594,8 +1599,8 @@ export default function StudioPreviewPanel({
           onClick={handleHardRefresh}
           disabled={state === "loading" || state === "starting" || state === "restarting"}
           className="grid h-8 w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5 disabled:opacity-40"
-          aria-label="Refresh preview"
-          title="Refresh preview (Ctrl+R)"
+          aria-label="Refresh Static View"
+          title="Refresh Static View (Ctrl+R)"
           data-testid="preview-refresh"
         >
           <RefreshCw size={12} className={`pointer-events-none ${state === "stale" ? "animate-spin" : ""}`} />
@@ -1610,7 +1615,7 @@ export default function StudioPreviewPanel({
             type="button"
             onClick={() => void preparePreview(state === "failed" ? { forceRestart: true } : undefined)}
             className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5"
-            aria-label="Restart preview"
+            aria-label="Restart Static View"
             title="Restart preview runtime"
             data-testid="preview-restart"
           >
@@ -1623,7 +1628,7 @@ export default function StudioPreviewPanel({
             type="button"
             onClick={() => void stopPreview()}
             className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5"
-            aria-label="Stop preview"
+            aria-label="Stop Static View"
             title="Stop preview runtime"
             data-testid="preview-stop"
           >
@@ -1636,8 +1641,8 @@ export default function StudioPreviewPanel({
             type="button"
             onClick={() => void handleCopyUrl()}
             className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5"
-            aria-label="Copy preview URL"
-            title="Copy preview URL"
+            aria-label="Copy Static View URL"
+            title="Copy Static View URL"
             data-testid="preview-copy-url"
           >
             {urlCopied ? <Check size={12} className="pointer-events-none" style={{ color: "#48EE38" }} /> : <Copy size={12} className="pointer-events-none" />}
@@ -1885,13 +1890,13 @@ export default function StudioPreviewPanel({
                 starts (Kimi wiring item 1 presentation over the SAME
                 derived stages). Segments render ONLY when startPhase
                 distinguishes a stage from real signals; when it cannot,
-                no segments appear — the single "Preparing preview…"
+                no segments appear — the single "Preparing Static View…"
                 label above and the elapsed timer below are all that is
                 claimed. The timer measures this panel's actual wait. */}
             {(state === "starting" || state === "restarting") && (
               <div className="flex flex-col items-center gap-2">
                 {startPhase && (
-                  <div className="flex items-center gap-2" data-testid="preview-start-stages" aria-label="Preview startup progress">
+                  <div className="flex items-center gap-2" data-testid="preview-start-stages" aria-label="Static View startup progress">
                     {START_STAGES.map((stageName) => {
                       const stageKey = stageName === "Provision" ? "provision" : "devserver";
                       const isCurrent = startPhase === stageKey || (startPhase === "devserver" && stageKey === "provision");
@@ -1950,7 +1955,7 @@ export default function StudioPreviewPanel({
                   data-testid="preview-prepare"
                 >
                   <RotateCcw size={12} className="pointer-events-none" />
-                  {state === "not_started" ? "Start preview" : state === "failed" ? "Restart preview" : "Retry"}
+                  {state === "not_started" ? "Start Static View" : state === "failed" ? "Restart Static View" : "Retry"}
                 </button>
                 {/* Auth-config failure → the fix is the project's Clerk keys.
                     This button now opens the real secrets editor (shipped
@@ -2023,7 +2028,7 @@ export default function StudioPreviewPanel({
               onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")}
               className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold transition hover:bg-black/5"
               style={{ color: "var(--text-secondary)" }}
-              aria-label="Open preview in new tab"
+              aria-label="Open Static View in new tab"
               data-testid="preview-open-external"
             >
               <ExternalLink size={10} className="pointer-events-none" />

@@ -87,9 +87,11 @@ import { useExecutionStore, type MutationSummary } from "../stores/useExecutionS
 import { submitApprovalAndPoll, watchApprovalResolution, type ApprovalRunResult } from "../lib/approval-polling";
 import { createApprovalOutcomeGuard } from "../lib/approval-outcome-guard";
 import { StudioActivityPanel, StudioInspector, type StudioInspectorData } from "./StudioWorkspaceFrame";
+import StudioEntrySkeleton, { StudioEntryClassicSkeleton } from "./StudioEntrySkeleton";
 import StudioBoard from "./board/StudioBoard";
 import BoardPanelBindings from "./board/BoardPanelBindings";
 import BoardChatPanel from "./board/BoardChatPanel";
+import ChatJobsView from "./ChatJobsView";
 import { useBoardProjectType } from "./board/useBoardProjectType";
 import { boardScopeKey, type BoardPanelId } from "./board/board-types";
 import { useBoardLayoutStore } from "../stores/useBoardLayoutStore";
@@ -3376,6 +3378,21 @@ function CommandStudioContent() {
     </>
   );
 
+  // The Regular layout's Jobs tab body: the SAME shared ChatJobsView
+  // the board chat panel's Jobs tab renders (Larry's decided chat
+  // structure, 2026-11-18 — Chat | Jobs in both layouts, the run-status
+  // strip mounted only inside Jobs). Its Checks summon opens the right
+  // rail's Checks tab, the Regular layout's one Checks home.
+  const littJobsContent = (
+    <ChatJobsView
+      projectId={capabilities.projectId}
+      conversationId={conversation.selectedConversationId}
+      jobsBusy={conversation.busy}
+      jobsRefreshKey={workspaceRevision}
+      onOpenChecks={() => setRailTab("checks")}
+    />
+  );
+
   // The Command Center chat panel's content (board-only rebuild): the
   // SAME transcript + composer elements the left dock carried, now
   // inside the movable board chat panel. New Chat lives in this panel
@@ -4055,7 +4072,20 @@ function CommandStudioContent() {
             Mobile behavior is unchanged: ContextDrawer is a right-side fixed
             overlay, LiTTPanel is a mobile sheet, Preview is a workspace tab. */}
         <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden" data-studio-body>
-        {studioShellActive ? (
+        {viewportTier === null && destination === "studio" ? (
+          // First paint before the viewport tier resolves (Studio
+          // entry fix, Larry 2026-11-18): render the CHOSEN layout's
+          // skeleton in place — board-shaped by default, classic when
+          // Regular is the persisted choice — instead of falling
+          // through to the classic body (whose chat column is gated
+          // on a resolved tier, which is what produced the brief
+          // centered-chat flash before the real layout took over).
+          classicOverride ? (
+            <StudioEntryClassicSkeleton />
+          ) : (
+            <StudioEntrySkeleton />
+          )
+        ) : studioShellActive ? (
           // Board-only shell (rebuild 2026-11-14): no stage rail, no
           // second nav rail, no bottom Developer bar, no rounded pale
           // container, no expansion step — the board fills ALL the
@@ -4075,17 +4105,18 @@ function CommandStudioContent() {
                 renderPanel={renderBoardPanel}
               />
             ) : (
-              // No project in scope yet: the conversation is the landing
-              // surface (its empty state carries the honest status
-              // notice and the primary action). Once a project binds,
-              // the board takes over with this same chat as a panel.
-              <div
-                className="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col border-x"
-                style={{ borderColor: "var(--studio-border)" }}
-                data-testid="studio-board-shell-noproject"
-              >
-                {boardChatContent}
-              </div>
+              // No project bound yet (auth / capabilities still
+              // resolving): the board skeleton occupies the board's
+              // geometry with panel placeholders at the default
+              // panels' positions, and the real conversation already
+              // lives inside the Chat panel's normal board slot —
+              // anchored top-center at its seeded rect. When the
+              // project binds, StudioBoard swaps in panel for panel;
+              // nothing is a lone centered column and nothing
+              // disappears (Studio entry fix, Larry 2026-11-18 —
+              // this replaces the retired centered-chat landing
+              // surface).
+              <StudioEntrySkeleton chatContent={boardChatContent} />
             )}
           </div>
         ) : (
@@ -4121,13 +4152,15 @@ function CommandStudioContent() {
               voiceConnected={liveSession.isLive}
               microphoneStatus={liveSession.indicators.microphone}
               chatContent={littChatContent}
+              jobsContent={littJobsContent}
               // Mockup port (2026-11-18): no liveContent / filesContent
               // here anymore — in this non-shell desktop body the
               // Activity feed and the Files surface live in the right
               // rail (StudioRightRail, mounted beside <main> below),
-              // so this panel is Chat-only, matching the mockup's
-              // Regular layout (chat column = conversation + composer).
-              // The mobile sheet keeps its own tabs and contents.
+              // so this panel carries Chat + Jobs only, matching the
+              // mockup's Regular layout (chat column = conversation +
+              // composer, Jobs tab = the run's settlement home). The
+              // mobile sheet keeps its own tabs and contents.
               expandedWidth={littResize.width}
             />
           )}

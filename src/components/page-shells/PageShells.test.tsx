@@ -58,7 +58,12 @@ function expectNoFakeContent() {
     "Example Post",
     "My Project",
   ]) {
-    expect(screen.queryByText(new RegExp(s))).toBeNull();
+    // sr-only text is assistive-only live-region content (e.g. the
+    // StudioShell role="status" announcement), not rendered fake
+    // content — exclude it from the visible-copy scan.
+    expect(
+      screen.queryByText(new RegExp(s), { selector: ":not(.sr-only)" }),
+    ).toBeNull();
   }
   expect(html).not.toMatch(/john|example@|lorem/i);
   // No off-brand hardcoded accent drift.
@@ -85,17 +90,55 @@ describe("DiscoverShell", () => {
 });
 
 describe("StudioShell", () => {
-  it("renders the canvas-first 2-zone Studio chrome", () => {
+  it("renders the board-shaped Studio entry skeleton by default", () => {
     render(<StudioShell />);
-    expect(screen.getByTestId("studio-shell")).toHaveAttribute(
-      "aria-label",
+    // Corrected contract (axe aria-prohibited-attr): the root div's
+    // implicit generic role cannot be named, so it must not carry an
+    // aria-label at all. The conforming pattern is role="status" whose
+    // accessible text is its content — a visually-hidden "Loading
+    // Studio" span inside the status element. This test previously
+    // asserted the aria-label, which enshrined the very violation the
+    // /voice site audit guards against.
+    const shell = screen.getByTestId("studio-shell");
+    expect(shell).toHaveAttribute("role", "status");
+    expect(shell).not.toHaveAttribute("aria-label");
+    expect(shell.querySelector(".sr-only")).toHaveTextContent(
       "Loading Studio",
     );
+    expect(screen.getByTestId("studio-shell")).toHaveAttribute(
+      "data-layout",
+      "board",
+    );
     expect(screen.getByTestId("studio-shell-header")).toBeInTheDocument();
-    expect(screen.getByTestId("studio-shell-chat")).toBeInTheDocument();
+    // The board area holds floating panel placeholders; the chat
+    // placeholder is one panel among them (its top-center board
+    // slot), never a lone centered column, and the retired 2-zone
+    // chrome (bottom dock / mobile nav) is gone.
+    const board = screen.getByTestId("studio-shell-board");
+    expect(board).toBeInTheDocument();
+    expect(board.contains(screen.getByTestId("studio-shell-chat"))).toBe(true);
+    expect(screen.getByTestId("studio-shell-panel-preview")).toBeInTheDocument();
+    expect(screen.getByTestId("studio-shell-panel-files")).toBeInTheDocument();
+    expect(screen.getByTestId("studio-shell-panel-media")).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-shell-dock")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("studio-shell-mobile-nav")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("studio-shell-classic")).not.toBeInTheDocument();
+    expectNoFakeContent();
+  });
+
+  it("renders the classic (Regular) entry skeleton when chosen", () => {
+    render(<StudioShell layout="classic" />);
+    expect(screen.getByTestId("studio-shell")).toHaveAttribute(
+      "data-layout",
+      "classic",
+    );
+    expect(screen.getByTestId("studio-shell-header")).toBeInTheDocument();
+    // Chat placeholder in its real in-flow left column, workspace
+    // main beside it.
+    const classic = screen.getByTestId("studio-shell-classic");
+    expect(classic.contains(screen.getByTestId("studio-shell-chat"))).toBe(true);
     expect(screen.getByTestId("studio-shell-workspace")).toBeInTheDocument();
-    expect(screen.getByTestId("studio-shell-dock")).toBeInTheDocument();
-    expect(screen.getByTestId("studio-shell-mobile-nav")).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-shell-board")).not.toBeInTheDocument();
     expectNoFakeContent();
   });
 });

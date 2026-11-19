@@ -568,6 +568,45 @@ describe("Board-only shell — the full-window board", () => {
   });
 });
 
+describe("Board entry — no project bound yet (Studio entry fix, Larry 2026-11-18)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sendMock.mockResolvedValue({ accepted: true });
+    capState.projectId = null;
+    capState.projectName = null;
+    window.localStorage.removeItem("litt-studio-board-layout-v1");
+    window.localStorage.removeItem("litt-studio-layout");
+    useBoardLayoutStore.setState({ enabledByUser: {}, scopes: {} });
+    globalThis.__TEST_VIEWPORT_WIDTH__ = DESKTOP_WIDTH;
+    window.innerWidth = DESKTOP_WIDTH;
+    window.innerHeight = DESKTOP_HEIGHT;
+  });
+
+  afterEach(() => {
+    useBoardLayoutStore.setState({ enabledByUser: {}, scopes: {} });
+  });
+
+  it("renders the board skeleton with chat in its panel slot — never the centered standalone chat", async () => {
+    await renderStudioShell();
+    // The binding-state board occupies the board geometry…
+    expect(screen.getByTestId("studio-board-shell-binding")).toBeTruthy();
+    expect(screen.getByTestId("studio-entry-panel-preview")).toBeTruthy();
+    // …the retired centered max-w-xl chat-only column is gone…
+    expect(screen.queryByTestId("studio-board-shell-noproject")).toBeNull();
+    // …the real StudioBoard has not mounted (no project yet)…
+    expect(screen.queryByTestId("studio-board")).toBeNull();
+    // …and the one real composer already lives inside the chat
+    // panel's normal board slot, so it does not move or disappear
+    // when the project binds.
+    const chatPanel = screen.getByTestId("studio-entry-chat-panel");
+    expect(screen.getAllByTestId("studio-command-composer")).toHaveLength(1);
+    expect(
+      chatPanel.contains(screen.getByTestId("studio-command-composer")),
+    ).toBe(true);
+    expect(chatPanel.className).not.toContain("max-w-xl");
+  });
+});
+
 describe("MissionCards — classic desktop dock", () => {
   beforeEach(() => {
     // Force the classic desktop layout (the only layout that renders the

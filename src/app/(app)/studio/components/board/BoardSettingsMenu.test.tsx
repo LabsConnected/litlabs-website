@@ -119,6 +119,138 @@ describe("BoardSettingsMenu (Amendment 5)", () => {
     expect(screen.getByTestId("board-settings-reset")).toBeInTheDocument();
   });
 
+  it("caps the height to the space from the menu's own rendered position — the live 1919x998 failure (follow-up, 2026-11-18)", () => {
+    // Live geometry, reduced to jsdom's 768px viewport: the trigger
+    // measured near the top of the board (its rect bottom at 176px),
+    // but by the time the menu painted, the board's layout had
+    // settled lower — the menu's rendered top sat at 300px with the
+    // static-cap height of 902px, putting its bottom at 1202px, far
+    // past the fold. The old fit trusted the anchor measurement
+    // alone (768 - 176 - 8 - 12 = 572px) and the painted menu
+    // overflowed. The hardened fit reads the menu's own rendered box
+    // and caps to the space from its rendered top to the viewport
+    // edge: 768 - 12 (margin) - 300 (rendered top) = 456px, so the
+    // menu's bottom lands exactly at 756px — fully on screen, every
+    // row reachable by its internal scroll.
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.dataset?.testid === "board-settings-menu") {
+          return {
+            top: 300,
+            bottom: 1202,
+            left: 0,
+            right: 360,
+            width: 360,
+            height: 902,
+            x: 0,
+            y: 300,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return originalRect.call(this);
+      });
+    try {
+      renderMenu();
+      const wrap = screen.getByTestId("board-settings-button").parentElement!;
+      vi.spyOn(wrap, "getBoundingClientRect").mockReturnValue({
+        top: 140,
+        bottom: 176,
+        left: 0,
+        right: 360,
+        width: 360,
+        height: 36,
+        x: 0,
+        y: 140,
+        toJSON: () => ({}),
+      } as DOMRect);
+      openMenu();
+      const menu = screen.getByTestId("board-settings-menu");
+      expect(menu.dataset.placement).toBe("below");
+      expect(menu.style.maxHeight).toBe("456px");
+      // The rows the live proof could not reach are inside the cap.
+      expect(screen.getByTestId("board-settings-toolbar-browser")).toBeInTheDocument();
+      expect(screen.getByTestId("board-settings-reset")).toBeInTheDocument();
+    } finally {
+      rectSpy.mockRestore();
+    }
+  });
+
+  it("flips above the trigger when the menu's actual content height exceeds the space below (follow-up, 2026-11-18)", () => {
+    // The old flip test used a fixed 360px threshold: with 382px
+    // below the trigger it kept the menu below, even though this
+    // menu's content is ~950px tall — most of it forced into a short
+    // scroll box while 528px sat empty above. The hardened fit
+    // judges "insufficient" against the menu's real content height
+    // (scrollHeight) and flips when above is roomier.
+    const originalInnerHeight = window.innerHeight;
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      writable: true,
+      value: 998,
+    });
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.dataset?.testid === "board-settings-menu") {
+          // The flipped render: bottom anchored 8px above the
+          // trigger's top (560 - 8 = 552).
+          return {
+            top: -350,
+            bottom: 552,
+            left: 0,
+            right: 360,
+            width: 360,
+            height: 902,
+            x: 0,
+            y: -350,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return originalRect.call(this);
+      });
+    const heightSpy = vi
+      .spyOn(Element.prototype, "scrollHeight", "get")
+      .mockImplementation(function (this: Element) {
+        return this instanceof HTMLElement && this.dataset.testid === "board-settings-menu"
+          ? 950
+          : 0;
+      });
+    try {
+      renderMenu();
+      const wrap = screen.getByTestId("board-settings-button").parentElement!;
+      vi.spyOn(wrap, "getBoundingClientRect").mockReturnValue({
+        top: 560,
+        bottom: 596,
+        left: 0,
+        right: 360,
+        width: 360,
+        height: 36,
+        x: 0,
+        y: 560,
+        toJSON: () => ({}),
+      } as DOMRect);
+      openMenu();
+      const menu = screen.getByTestId("board-settings-menu");
+      // below = 998 - 596 - 8 - 12 = 382 < 950 (content); above =
+      // 560 - 8 - 12 = 540, and the rendered-box allowance agrees
+      // (flipped bottom 552 - 12 margin = 540), so the cap is 540px.
+      expect(menu.dataset.placement).toBe("above");
+      expect(menu.style.maxHeight).toBe("540px");
+      expect(menu.className).toContain("bottom-[calc(100%+8px)]");
+    } finally {
+      rectSpy.mockRestore();
+      heightSpy.mockRestore();
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        writable: true,
+        value: originalInnerHeight,
+      });
+    }
+  });
+
   it("writes every control through to the board settings store", () => {
     renderMenu();
     openMenu();

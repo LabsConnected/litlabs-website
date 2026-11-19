@@ -91,12 +91,12 @@ describe("StudioPreviewPanel — host-exec truth via the workspace-state path", 
     const notice = await screen.findByTestId("preview-host-exec-notice");
     expect(notice).toHaveTextContent(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
     expect(screen.getByText(HOST_EXECUTION_UNAVAILABLE_LABEL)).toBeInTheDocument();
-    expect(screen.queryByText("Preview failed to start")).toBeNull();
+    expect(screen.queryByText("Static View failed to start")).toBeNull();
 
     // No futile affordances on either surface, and no start was attempted.
     expect(screen.queryByTestId("preview-prepare")).toBeNull();
     expect(screen.queryByTestId("preview-restart")).toBeNull();
-    expect(screen.queryByRole("button", { name: /restart preview/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /restart static view/i })).toBeNull();
     expect(previewPosts).toEqual([]);
 
     // The source line stops claiming a generic "Source error".
@@ -120,10 +120,10 @@ describe("StudioPreviewPanel — host-exec truth via the workspace-state path", 
     const notice = await screen.findByTestId("preview-host-exec-notice");
     expect(notice).toHaveTextContent(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
     expect(screen.getByText(HOST_EXECUTION_UNAVAILABLE_LABEL)).toBeInTheDocument();
-    expect(screen.queryByText("Preview not started")).toBeNull();
+    expect(screen.queryByText("Static View not started")).toBeNull();
 
     expect(screen.queryByTestId("preview-prepare")).toBeNull();
-    expect(screen.queryByRole("button", { name: /start preview/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /start static view/i })).toBeNull();
     expect(previewPosts).toEqual([]);
   });
 
@@ -153,10 +153,10 @@ describe("StudioPreviewPanel — host-exec truth via the workspace-state path", 
     renderPanel("failed");
 
     await waitFor(() => {
-      expect(screen.getByText("Preview failed to start")).toBeInTheDocument();
+      expect(screen.getByText("Static View failed to start")).toBeInTheDocument();
     });
     expect(screen.queryByTestId("preview-host-exec-notice")).toBeNull();
-    expect(screen.getByTestId("preview-prepare")).toHaveTextContent("Restart preview");
+    expect(screen.getByTestId("preview-prepare")).toHaveTextContent("Restart Static View");
     expect(screen.getByTestId("preview-restart")).toBeInTheDocument();
   });
 });
