@@ -43,10 +43,11 @@ export default function StudioShell({
     <div
       className="flex h-full min-h-[calc(100dvh-64px)] w-full flex-col overflow-hidden"
       style={{ backgroundColor: "var(--bg-main, #05060a)", color: "var(--text-main, #f5f5f7)" }}
-      aria-label="Loading Studio"
+      role="status"
       data-testid="studio-shell"
       data-layout={layout}
     >
+      <span className="sr-only">Loading Studio</span>
       {/* Command header — 52px */}
       <header
         className="flex h-[52px] shrink-0 items-center gap-1.5 overflow-hidden whitespace-nowrap border-b px-3 sm:gap-2 sm:px-4"

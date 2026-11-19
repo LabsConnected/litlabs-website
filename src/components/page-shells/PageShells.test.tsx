@@ -58,7 +58,12 @@ function expectNoFakeContent() {
     "Example Post",
     "My Project",
   ]) {
-    expect(screen.queryByText(new RegExp(s))).toBeNull();
+    // sr-only text is assistive-only live-region content (e.g. the
+    // StudioShell role="status" announcement), not rendered fake
+    // content — exclude it from the visible-copy scan.
+    expect(
+      screen.queryByText(new RegExp(s), { selector: ":not(.sr-only)" }),
+    ).toBeNull();
   }
   expect(html).not.toMatch(/john|example@|lorem/i);
   // No off-brand hardcoded accent drift.
@@ -87,8 +92,17 @@ describe("DiscoverShell", () => {
 describe("StudioShell", () => {
   it("renders the board-shaped Studio entry skeleton by default", () => {
     render(<StudioShell />);
-    expect(screen.getByTestId("studio-shell")).toHaveAttribute(
-      "aria-label",
+    // Corrected contract (axe aria-prohibited-attr): the root div's
+    // implicit generic role cannot be named, so it must not carry an
+    // aria-label at all. The conforming pattern is role="status" whose
+    // accessible text is its content — a visually-hidden "Loading
+    // Studio" span inside the status element. This test previously
+    // asserted the aria-label, which enshrined the very violation the
+    // /voice site audit guards against.
+    const shell = screen.getByTestId("studio-shell");
+    expect(shell).toHaveAttribute("role", "status");
+    expect(shell).not.toHaveAttribute("aria-label");
+    expect(shell.querySelector(".sr-only")).toHaveTextContent(
       "Loading Studio",
     );
     expect(screen.getByTestId("studio-shell")).toHaveAttribute(
