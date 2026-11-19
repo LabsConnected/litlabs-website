@@ -46,7 +46,7 @@ export const STAGE_SURFACE_META: Record<
 > = {
   plan:     { label: "Plan",     icon: ClipboardList,  hint: "Mission plan & overview" },
   design:   { label: "Design",   icon: PenTool,        hint: "Editable structured canvas" },
-  preview:  { label: "Preview",  icon: Eye,            hint: "Live dev-server preview" },
+  preview:  { label: "Static View",  icon: Eye,            hint: "Live dev-server preview" },
   browser:  { label: "Browser",  icon: Globe,          hint: "Remote browser session" },
   code:     { label: "Code",     icon: Code2,          hint: "Code workspace" },
   files:    { label: "Files",    icon: FolderOpen,     hint: "Project file tree" },
@@ -74,7 +74,7 @@ export const DIRECTIVE_STAGE_META: Record<
   plan:          { label: "Plan",            labelLines: ["Plan"],               icon: ClipboardList, hint: "Mission plan & overview" },
   "canvas-design": { label: "Canvas & Design", labelLines: ["Canvas &", "Design"], icon: Component,    hint: "Build structure · Design styling — one workspace" },
   code:          { label: "Code",            labelLines: ["Code"],               icon: Code2,         hint: "Code workspace" },
-  preview:       { label: "Preview",         labelLines: ["Preview"],            icon: Eye,           hint: "Live project preview" },
+  preview:       { label: "Static View",         labelLines: ["Static", "View"],            icon: Eye,           hint: "Live project preview" },
   media:         { label: "Media",           labelLines: ["Media"],              icon: Clapperboard,  hint: "Images, video, music & audio" },
 };
 

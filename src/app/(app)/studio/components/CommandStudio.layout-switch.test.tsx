@@ -635,7 +635,7 @@ describe("CommandStudio — regular layout's smarter right side (Amendment 8)", 
     expect(previewPanels()[0].getAttribute("data-refresh-key")).toBe("0");
   });
 
-  it("shows the live Jobs feed + run changes on the right side while a run is active — and only then", async () => {
+  it("shows the run changes on the right side while a run is active — and only then; the runtime strip stays Jobs-only", async () => {
     convState.selectedConversationId = "conv-1";
     const { rerender } = await renderCommandStudio();
     await settle();
@@ -647,12 +647,12 @@ describe("CommandStudio — regular layout's smarter right side (Amendment 8)", 
     await settle();
     const region = screen.getByTestId("classic-live-run");
     expect(region).toBeTruthy();
-    // The live-steps feed is wired to the open conversation, the
-    // changes panel to the open project — the same props the board
-    // chat's Jobs tab receives.
-    expect(
-      region.querySelector("[data-testid='action-run-status-panel']")?.getAttribute("data-conversation-id"),
-    ).toBe("conv-1");
+    // The changes panel is wired to the open project. The runtime
+    // strip (action-run-status-panel) does NOT render here — Larry
+    // ruled 2026-11-18 that it lives ONLY in the Jobs tab, so the
+    // live region carries the header + file changes and nothing else
+    // from the strip.
+    expect(region.querySelector("[data-testid='action-run-status-panel']")).toBeNull();
     expect(
       region.querySelector("[data-testid='run-changes-panel']")?.getAttribute("data-project-id"),
     ).toBe("project-1");
