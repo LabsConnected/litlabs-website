@@ -478,18 +478,18 @@ export default function CommandStudioHeader({
         </div>
       )}
 
-      {/* Preview quick action — only when the runtime is actually verified. */}
+      {/* Static View quick action — only when the runtime is actually verified. */}
       {mutationActionsAllowed && runtimeReady && (
         <button
           type="button"
           onClick={onPreviewAction}
           className="hidden min-h-8 shrink-0 items-center gap-1.5 rounded-lg bg-accent px-2 py-1 text-[11px] font-bold text-on-accent shadow-accent-glow transition-all hover:bg-accent-strong active:scale-95 sm:flex lg:min-h-7"
           title="Open the live preview"
-          aria-label="Preview"
+          aria-label="Static View"
           data-testid="preview-quick-action"
         >
           <Eye size={12} className="pointer-events-none" />
-          <span className="pointer-events-none">Preview</span>
+          <span className="pointer-events-none">Static View</span>
         </button>
       )}
 

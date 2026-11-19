@@ -215,3 +215,85 @@ describe("LiTTPanel — F1 overlay mode (slice B)", () => {
     expect(onCollapse).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("LiTTPanel Jobs tab (Regular layout Chat | Jobs, 2026-11-18)", () => {
+  function renderJobsPanel(overrides: Partial<Parameters<typeof LiTTPanel>[0]> = {}) {
+    const onTabChange = vi.fn();
+    const props = {
+      chatContent: <div data-testid="chat-slot">Chat content</div>,
+      jobsContent: <div data-testid="jobs-slot">Jobs content</div>,
+      activeTab: "chat" as const,
+      onTabChange,
+      collapsed: false,
+      onCollapse: vi.fn(),
+      onExpand: vi.fn(),
+      ...overrides,
+    };
+    render(<LiTTPanel {...props} />);
+    return { onTabChange };
+  }
+
+  it("shows no Jobs tab when jobsContent is not provided", () => {
+    render(
+      <LiTTPanel
+        chatContent={<div data-testid="chat-slot">Chat content</div>}
+        activeTab="chat"
+        onTabChange={vi.fn()}
+        collapsed={false}
+        onCollapse={vi.fn()}
+        onExpand={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("litt-tab-jobs")).toBeNull();
+    expect(screen.queryByTestId("litt-jobs-panel")).toBeNull();
+  });
+
+  it("renders the Jobs tab directly beside Chat and switches through the controlled tab state", () => {
+    const { onTabChange } = renderJobsPanel();
+    const chatTab = screen.getByTestId("litt-tab-chat");
+    const jobsTab = screen.getByTestId("litt-tab-jobs");
+    expect(jobsTab).toHaveTextContent("Jobs");
+    // Directly beside Chat: Jobs follows Chat in the tab row.
+    expect(
+      chatTab.compareDocumentPosition(jobsTab) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(jobsTab).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(jobsTab);
+    expect(onTabChange).toHaveBeenCalledWith("jobs");
+  });
+
+  it("keeps the Jobs pane mounted but hidden while Chat is active, and shows it under Jobs", () => {
+    const { rerender } = render(
+      <LiTTPanel
+        chatContent={<div data-testid="chat-slot">Chat content</div>}
+        jobsContent={<div data-testid="jobs-slot">Jobs content</div>}
+        activeTab="chat"
+        onTabChange={vi.fn()}
+        collapsed={false}
+        onCollapse={vi.fn()}
+        onExpand={vi.fn()}
+      />,
+    );
+    // Mounted (state survives tab switches) but not visible under Chat.
+    expect(screen.getByTestId("jobs-slot")).toBeInTheDocument();
+    expect(screen.getByTestId("litt-jobs-panel")).toHaveAttribute("data-active", "false");
+    expect(screen.getByTestId("litt-jobs-panel")).toHaveStyle({ visibility: "hidden" });
+    expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
+
+    rerender(
+      <LiTTPanel
+        chatContent={<div data-testid="chat-slot">Chat content</div>}
+        jobsContent={<div data-testid="jobs-slot">Jobs content</div>}
+        activeTab="jobs"
+        onTabChange={vi.fn()}
+        collapsed={false}
+        onCollapse={vi.fn()}
+        onExpand={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("litt-jobs-panel")).toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("litt-jobs-panel")).toHaveStyle({ visibility: "visible" });
+    expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "false");
+    expect(screen.getByTestId("litt-tab-jobs")).toHaveAttribute("aria-pressed", "true");
+  });
+});

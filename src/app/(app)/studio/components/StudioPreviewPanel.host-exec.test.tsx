@@ -67,13 +67,13 @@ describe("StudioPreviewPanel — host-execution truth (wave-4)", () => {
     const notice = await screen.findByTestId("preview-host-exec-notice");
     expect(notice).toHaveTextContent(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
     expect(screen.getByText(HOST_EXECUTION_UNAVAILABLE_LABEL)).toBeInTheDocument();
-    expect(screen.queryByText("Preview failed to start")).toBeNull();
+    expect(screen.queryByText("Static View failed to start")).toBeNull();
     expect(screen.queryByText("Workspace preparation failed")).toBeNull();
 
     // No false affordances: neither the body action nor the toolbar icon.
     expect(screen.queryByTestId("preview-prepare")).toBeNull();
     expect(screen.queryByTestId("preview-restart")).toBeNull();
-    expect(screen.queryByRole("button", { name: /restart preview/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /restart static view/i })).toBeNull();
 
     // The source line stops claiming a generic "Source error".
     expect(screen.getByTestId("preview-source-summary")).not.toHaveTextContent("Source error");
@@ -94,11 +94,11 @@ describe("StudioPreviewPanel — host-execution truth (wave-4)", () => {
     renderPanel();
 
     await waitFor(() => {
-      expect(screen.getByText("Preview failed to start")).toBeInTheDocument();
+      expect(screen.getByText("Static View failed to start")).toBeInTheDocument();
     });
     expect(screen.queryByTestId("preview-host-exec-notice")).toBeNull();
     const action = screen.getByTestId("preview-prepare");
-    expect(action).toHaveTextContent("Restart preview");
+    expect(action).toHaveTextContent("Restart Static View");
     expect(screen.getByTestId("preview-restart")).toBeInTheDocument();
     expect(screen.getByTestId("preview-source-summary")).toHaveTextContent("Source error");
     // Not gated: the Project secrets editor stays available — the gate
@@ -208,14 +208,14 @@ describe("StudioPreviewPanel — host-execution truth on the prepare path (POST 
     const notice = await screen.findByTestId("preview-host-exec-notice");
     expect(notice).toHaveTextContent(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
     expect(screen.getByText(HOST_EXECUTION_UNAVAILABLE_LABEL)).toBeInTheDocument();
-    expect(screen.queryByText("Preview failed to start")).toBeNull();
+    expect(screen.queryByText("Static View failed to start")).toBeNull();
     // The raw serialized server error must never render verbatim.
     expect(document.body.textContent).not.toContain("Workspace prepare failed (503)");
     expect(document.body.textContent).not.toContain('"code"');
     // No futile affordances on either surface.
     expect(screen.queryByTestId("preview-prepare")).toBeNull();
     expect(screen.queryByTestId("preview-restart")).toBeNull();
-    expect(screen.queryByRole("button", { name: /restart preview/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /restart static view/i })).toBeNull();
   });
 
   it("recovers the code from the message when the 500 body omits runtimeErrorCode", async () => {
@@ -232,7 +232,7 @@ describe("StudioPreviewPanel — host-execution truth on the prepare path (POST 
 
     const notice = await screen.findByTestId("preview-host-exec-notice");
     expect(notice).toHaveTextContent(HOST_EXECUTION_UNAVAILABLE_MESSAGE);
-    expect(screen.queryByText("Preview failed to start")).toBeNull();
+    expect(screen.queryByText("Static View failed to start")).toBeNull();
     expect(document.body.textContent).not.toContain("Workspace prepare failed (503)");
     expect(screen.queryByTestId("preview-prepare")).toBeNull();
     expect(screen.queryByTestId("preview-restart")).toBeNull();
@@ -252,12 +252,12 @@ describe("StudioPreviewPanel — host-execution truth on the prepare path (POST 
     renderPanel();
 
     await waitFor(() => {
-      expect(screen.getByText("Preview failed to start")).toBeInTheDocument();
+      expect(screen.getByText("Static View failed to start")).toBeInTheDocument();
     });
     expect(screen.getByText("Workspace preparation failed")).toBeInTheDocument();
     expect(screen.queryByTestId("preview-host-exec-notice")).toBeNull();
     const action = screen.getByTestId("preview-prepare");
-    expect(action).toHaveTextContent("Restart preview");
+    expect(action).toHaveTextContent("Restart Static View");
     expect(screen.getByTestId("preview-restart")).toBeInTheDocument();
   });
 
@@ -273,16 +273,16 @@ describe("StudioPreviewPanel — host-execution truth on the prepare path (POST 
     renderPanel();
 
     await waitFor(() => {
-      expect(screen.getByText("Preview failed to start")).toBeInTheDocument();
+      expect(screen.getByText("Static View failed to start")).toBeInTheDocument();
     });
     // Raw machine payload is mapped to the human fallback sentence…
-    expect(screen.getByText("The preview failed to start. Try restarting it.")).toBeInTheDocument();
+    expect(screen.getByText("The dev server failed to start. Try restarting it.")).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("Kaboom inside the sandbox");
     expect(document.body.textContent).not.toContain("Workspace prepare failed (503)");
     expect(document.body.textContent).not.toContain('"code"');
     // …and the failure stays a generic one: Restart remains available.
     expect(screen.queryByTestId("preview-host-exec-notice")).toBeNull();
-    expect(screen.getByTestId("preview-prepare")).toHaveTextContent("Restart preview");
+    expect(screen.getByTestId("preview-prepare")).toHaveTextContent("Restart Static View");
     expect(screen.getByTestId("preview-restart")).toBeInTheDocument();
   });
 });

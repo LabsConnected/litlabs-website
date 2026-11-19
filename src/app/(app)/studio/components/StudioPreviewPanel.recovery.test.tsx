@@ -63,7 +63,7 @@ describe("StudioPreviewPanel recovery", () => {
     mockFetch((url) => (isPreviewApi(url) ? json(NOT_STARTED) : undefined));
     render(panel("project-a"));
 
-    await waitFor(() => expect(screen.getByText("Preview failed to start")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Static View failed to start")).toBeInTheDocument());
     expect(screen.queryByText("Preparing your preview automatically…")).toBeNull();
     expect(screen.getByTestId("preview-prepare")).toBeEnabled();
   });
@@ -84,7 +84,7 @@ describe("StudioPreviewPanel recovery", () => {
     await waitFor(() => expect(screen.getByText("terminal server refused")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("preview-prepare"));
 
-    await waitFor(() => expect(screen.getByText("Preview ready")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Static View ready")).toBeInTheDocument());
     expect(screen.getByTitle("My new project preview")).toBeInTheDocument();
     expect(countPosts(spy)).toBe(2);
   });
@@ -94,10 +94,10 @@ describe("StudioPreviewPanel recovery", () => {
     mockFetch((url) => (isPreviewApi(url) ? json(NOT_STARTED) : undefined), new Promise<Response>(() => undefined));
     render(panel("project-a", { startGraceMs: 300 }));
 
-    await waitFor(() => expect(screen.getByText("Preview not started")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Static View not started")).toBeInTheDocument());
 
     await waitFor(() => expect(screen.getByText("The preview did not start in time. Retry to start it again.")).toBeInTheDocument());
-    expect(screen.getByText("Preview failed to start")).toBeInTheDocument();
+    expect(screen.getByText("Static View failed to start")).toBeInTheDocument();
     expect(screen.getByTestId("preview-prepare")).toBeEnabled();
   });
 
@@ -108,11 +108,11 @@ describe("StudioPreviewPanel recovery", () => {
     );
     render(panel("project-a"));
 
-    await waitFor(() => expect(screen.getByText("No preview yet")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("No Static View yet")).toBeInTheDocument());
     expect(countPosts(spy)).toBe(0);
-    fireEvent.click(screen.getByRole("button", { name: /start preview/i }));
+    fireEvent.click(screen.getByRole("button", { name: /start static view/i }));
 
-    await waitFor(() => expect(screen.getByText("Preview ready")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Static View ready")).toBeInTheDocument());
     expect(countPosts(spy)).toBe(1); // the manual click is what started it
   });
 
@@ -132,11 +132,11 @@ describe("StudioPreviewPanel recovery", () => {
 
     view.rerender(panel("project-a", { refreshKey: 1 }));
 
-    await waitFor(() => expect(screen.getByText("Preview ready")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Static View ready")).toBeInTheDocument());
     expect(countPosts(spy)).toBe(2);
   });
 
-  it("never says 'Preview ready' when the preview address returns 404, and Retry re-checks it", async () => {
+  it("never says 'Static View ready' when the preview address returns 404, and Retry re-checks it", async () => {
     let served = false;
     mockFetch((url) => {
       if (url.includes("/index.html")) return served ? new Response("<h1>hi</h1>") : new Response("missing", { status: 404 });
@@ -144,14 +144,14 @@ describe("StudioPreviewPanel recovery", () => {
     });
     render(panel("project-a"));
 
-    await waitFor(() => expect(screen.getAllByText("Preview failed to load").length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText("Static View failed to load").length).toBeGreaterThan(0));
     expect(screen.getByText(/returned 404/)).toBeInTheDocument();
-    expect(screen.queryByText("Preview ready")).toBeNull();
+    expect(screen.queryByText("Static View ready")).toBeNull();
     expect(screen.queryByTestId("preview-iframe")).toBeNull();
 
     served = true;
     fireEvent.click(screen.getByTestId("preview-prepare"));
-    await waitFor(() => expect(screen.getByText("Preview ready")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Static View ready")).toBeInTheDocument());
     expect(screen.getByTestId("preview-iframe")).toBeInTheDocument();
   });
 
@@ -162,7 +162,7 @@ describe("StudioPreviewPanel recovery", () => {
       return isPreviewApi(url) ? json(readyFor("project-a")) : undefined;
     });
     const view = render(panel("project-a"));
-    await waitFor(() => expect(screen.getByText("Preview ready")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Static View ready")).toBeInTheDocument());
     expect(screen.getByTestId("preview-iframe").getAttribute("src")).toContain("/api/preview/project-a/");
 
     view.rerender(panel("project-b"));
@@ -182,14 +182,14 @@ describe("StudioPreviewPanel recovery", () => {
       return isPreviewApi(url) ? json(readyFor("project-b")) : undefined;
     });
     const view = render(panel("project-a"));
-    await waitFor(() => expect(screen.getByText("Preparing preview…")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Preparing Static View…")).toBeInTheDocument());
 
     view.rerender(panel("project-b"));
-    await waitFor(() => expect(screen.getByText("Preview ready")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Static View ready")).toBeInTheDocument());
 
     await act(async () => { releaseA(json({ runtimeError: "late failure for A" }, 500)); });
 
-    expect(screen.getByText("Preview ready")).toBeInTheDocument();
+    expect(screen.getByText("Static View ready")).toBeInTheDocument();
     expect(screen.queryByText("late failure for A")).toBeNull();
   });
 
@@ -197,7 +197,7 @@ describe("StudioPreviewPanel recovery", () => {
     const spy = mockFetch((url) => (url.includes("/index.html") ? new Response("ok") : isPreviewApi(url) ? json(readyFor("e7db6424")) : undefined));
     render(panel("e7db6424", { name: "My new project" }));
 
-    await waitFor(() => expect(screen.getByText("Preview ready")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Static View ready")).toBeInTheDocument());
     const urls = spy.mock.calls.map(([url]) => String(url));
     expect(urls.some((url) => url.includes("/api/studio-projects/e7db6424/preview"))).toBe(true);
     expect(urls.some((url) => /My%20new%20project|My new project/.test(url))).toBe(false);
@@ -208,7 +208,7 @@ describe("StudioPreviewPanel recovery", () => {
     const spy = mockFetch((url) => (url.includes("/index.html") ? new Response("ok") : isPreviewApi(url) ? json(readyFor("project-a")) : undefined));
     render(panel("project-a"));
 
-    await waitFor(() => expect(screen.getByText("Preview ready")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Static View ready")).toBeInTheDocument());
     expect(spy.mock.calls.some(([url]) => /terminal/i.test(String(url)))).toBe(false);
     expect(screen.queryByText(/terminal error/i)).toBeNull();
   });
@@ -221,14 +221,14 @@ describe("StudioPreviewPanel recovery", () => {
       return isPreviewApi(url) ? slow : undefined;
     });
     render(panel("project-a"));
-    await waitFor(() => expect(screen.getAllByText("Checking preview status…").length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText("Checking Static View status…").length).toBeGreaterThan(0));
 
     await new Promise((resolve) => setTimeout(resolve, 3500)); // longer than one poll interval
     const statusGets = spy.mock.calls.filter(([url, init]) => isPreviewApi(String(url)) && !isPost(init as RequestInit)).length;
     expect(statusGets).toBe(1);
 
     await act(async () => { release(json({ ...STATIC_NOT_STARTED, runtimeStatus: "ready", previewUrl: "/api/preview/project-a/index.html" })); });
-    await waitFor(() => expect(screen.getByText("Preview ready")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Static View ready")).toBeInTheDocument());
   });
   describe("static projects (server rejects POST /preview by design)", () => {
     it("start verifies index.html is served and never POSTs", async () => {
@@ -238,7 +238,7 @@ describe("StudioPreviewPanel recovery", () => {
       });
       render(panel("project-a"));
 
-      await waitFor(() => expect(screen.getByText("Preview ready")).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText("Static View ready")).toBeInTheDocument());
       expect(countPosts(spy)).toBe(0);
       expect(screen.getByTestId("preview-iframe").getAttribute("src")).toContain("/api/preview/project-a/index.html");
     });
@@ -252,11 +252,11 @@ describe("StudioPreviewPanel recovery", () => {
       render(panel("project-a"));
 
       await waitFor(() => expect(screen.getByText("index.html is not being served for this project (HTTP 404).")).toBeInTheDocument());
-      expect(screen.queryByText("Preview ready")).toBeNull();
+      expect(screen.queryByText("Static View ready")).toBeNull();
 
       served = true;
       fireEvent.click(screen.getByTestId("preview-prepare"));
-      await waitFor(() => expect(screen.getByText("Preview ready")).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText("Static View ready")).toBeInTheDocument());
       expect(countPosts(spy)).toBe(0);
     });
   });

@@ -75,42 +75,42 @@ describe("StudioPreviewPanel — style probe honesty", () => {
     await act(async () => {
       renderReadyPreview();
     });
-    await screen.findByText("Preview ready");
+    await screen.findByText("Static View ready");
     postStyleProbe({ tailwindDetected: true, styled: false });
-    await screen.findByText("Preview styling failed to apply");
-    expect(screen.queryByText("Preview ready")).toBeNull();
+    await screen.findByText("Static View styling failed to apply");
+    expect(screen.queryByText("Static View ready")).toBeNull();
   });
 
-  it("keeps 'Preview ready' when Tailwind applied", async () => {
+  it("keeps 'Static View ready' when Tailwind applied", async () => {
     await act(async () => {
       renderReadyPreview();
     });
-    await screen.findByText("Preview ready");
+    await screen.findByText("Static View ready");
     postStyleProbe({ tailwindDetected: true, styled: true });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    expect(screen.getByText("Preview ready")).toBeInTheDocument();
-    expect(screen.queryByText("Preview styling failed to apply")).toBeNull();
+    expect(screen.getByText("Static View ready")).toBeInTheDocument();
+    expect(screen.queryByText("Static View styling failed to apply")).toBeNull();
   });
 
-  it("keeps 'Preview ready' for pages without Tailwind intent", async () => {
+  it("keeps 'Static View ready' for pages without Tailwind intent", async () => {
     await act(async () => {
       renderReadyPreview();
     });
-    await screen.findByText("Preview ready");
+    await screen.findByText("Static View ready");
     postStyleProbe({ tailwindDetected: false, styled: true });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    expect(screen.getByText("Preview ready")).toBeInTheDocument();
+    expect(screen.getByText("Static View ready")).toBeInTheDocument();
   });
 
   it("ignores style-probe messages from other origins", async () => {
     await act(async () => {
       renderReadyPreview();
     });
-    await screen.findByText("Preview ready");
+    await screen.findByText("Static View ready");
     act(() => {
       window.dispatchEvent(
         new MessageEvent("message", {
@@ -122,7 +122,7 @@ describe("StudioPreviewPanel — style probe honesty", () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    expect(screen.getByText("Preview ready")).toBeInTheDocument();
-    expect(screen.queryByText("Preview styling failed to apply")).toBeNull();
+    expect(screen.getByText("Static View ready")).toBeInTheDocument();
+    expect(screen.queryByText("Static View styling failed to apply")).toBeNull();
   });
 });

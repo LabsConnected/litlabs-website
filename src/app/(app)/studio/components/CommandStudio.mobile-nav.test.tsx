@@ -455,7 +455,7 @@ describe("MobileCommandNav — shared work surfaces", () => {
   it("renders work surfaces instead of desktop destinations", async () => {
     await renderMobileCommandStudio();
     const nav = within(mobileNav());
-    for (const label of ["Chat", "Preview", "Files", "More"]) {
+    for (const label of ["Chat", "Static View", "Files", "More"]) {
       expect(nav.getByLabelText(label), `${label} surface should be present`).toBeTruthy();
     }
     // Activity is not a bottom-nav entry — it lives inside More (the
@@ -474,7 +474,7 @@ describe("MobileCommandNav — shared work surfaces", () => {
 
   it("marks the active work surface with aria-current", async () => {
     const { user } = await renderMobileCommandStudio();
-    const preview = within(mobileNav()).getByLabelText("Preview");
+    const preview = within(mobileNav()).getByLabelText("Static View");
     expect(preview.getAttribute("aria-current")).toBe("page");
     await user.click(within(mobileNav()).getByLabelText("Files"));
     await waitFor(() => {

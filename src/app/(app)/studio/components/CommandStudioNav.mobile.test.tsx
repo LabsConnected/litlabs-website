@@ -7,7 +7,7 @@ vi.mock("@/context/WalletContext", () => ({
 }));
 
 describe("MobileCommandNav shared work surfaces", () => {
-  it("exposes Chat, Preview, Files, and More as one controlled dock (Studio Finish Spec, Larry 2026-11-14)", () => {
+  it("exposes Chat, Static View, Files, and More as one controlled dock (Studio Finish Spec, Larry 2026-11-14)", () => {
     const onSelectSurface = vi.fn();
     render(
       <MobileCommandNav
@@ -19,12 +19,12 @@ describe("MobileCommandNav shared work surfaces", () => {
     );
 
     expect(screen.getByRole("button", { name: "Chat" }).getAttribute("aria-current")).toBe("page");
-    for (const label of ["Preview", "Files", "More"]) {
+    for (const label of ["Static View", "Files", "More"]) {
       expect(screen.getByRole("button", { name: label })).toBeTruthy();
     }
     expect(screen.queryByRole("button", { name: "Activity" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Static View" }));
     expect(onSelectSurface).toHaveBeenCalledWith("preview");
     fireEvent.click(screen.getByRole("button", { name: "Files" }));
     expect(onSelectSurface).toHaveBeenCalledWith("files");
