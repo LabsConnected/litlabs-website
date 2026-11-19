@@ -26,21 +26,21 @@ describe("buildPreviewProxyUrl", () => {
   });
 
   it("builds default terminal URL with workspace path", () => {
-    process.env.TERMINAL_SERVER_URL = "https://terminal.example.com";
+    process.env.TERMINAL_PUBLIC_URL = "https://terminal.example.com";
     delete process.env.PREVIEW_ACCESS_TOKEN;
     const url = buildPreviewProxyUrl("ws-123");
     expect(url).toBe("https://terminal.example.com/preview/ws-123");
   });
 
   it("appends auth token when PREVIEW_ACCESS_TOKEN is set", () => {
-    process.env.TERMINAL_SERVER_URL = "https://terminal.example.com";
+    process.env.TERMINAL_PUBLIC_URL = "https://terminal.example.com";
     process.env.PREVIEW_ACCESS_TOKEN = "secret-token";
     const url = buildPreviewProxyUrl("ws-123");
     expect(url).toBe("https://terminal.example.com/preview/ws-123?token=secret-token");
   });
 
   it("encodes the workspace ID", () => {
-    process.env.TERMINAL_SERVER_URL = "https://terminal.example.com";
+    process.env.TERMINAL_PUBLIC_URL = "https://terminal.example.com";
     delete process.env.PREVIEW_ACCESS_TOKEN;
     const url = buildPreviewProxyUrl("ws/with/slashes");
     expect(url).toBe("https://terminal.example.com/preview/ws%2Fwith%2Fslashes");
@@ -66,7 +66,14 @@ describe("buildPreviewProxyUrl", () => {
   });
 
   it("uses TERMINAL_SERVER_INTERNAL_URL when TERMINAL_SERVER_URL is absent", () => {
+    // The internal base is the fallback for when NO public terminal URL
+    // is configured; the public resolver returns "" only in production,
+    // so pin the production environment for this scenario.
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
     delete process.env.TERMINAL_SERVER_URL;
+    delete process.env.TERMINAL_PUBLIC_URL;
+    delete process.env.NEXT_PUBLIC_TERMINAL_WS_URL;
+    delete process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL;
     process.env.TERMINAL_SERVER_INTERNAL_URL = "https://internal.terminal.example.com";
     delete process.env.PREVIEW_ACCESS_TOKEN;
     const url = buildPreviewProxyUrl("ws-456");
@@ -88,7 +95,7 @@ describe("buildPreviewProxyUrl", () => {
     // the bare origin root. The preview URL must always carry the
     // /preview/:workspaceId path; a bare-root URL can never be a valid
     // preview target.
-    process.env.TERMINAL_SERVER_URL = "https://terminal.example.com";
+    process.env.TERMINAL_PUBLIC_URL = "https://terminal.example.com";
     delete process.env.PREVIEW_ACCESS_TOKEN;
     for (const workspaceId of ["ws-123", "ws-3648d2ea-b9c5004a", ""]) {
       const url = buildPreviewProxyUrl(workspaceId);
@@ -100,7 +107,7 @@ describe("buildPreviewProxyUrl", () => {
   });
 
   it("uses PREVIEW_PROXY_HOST with the full preview path and token", () => {
-    process.env.TERMINAL_SERVER_URL = "https://terminal.example.com";
+    process.env.TERMINAL_PUBLIC_URL = "https://terminal.example.com";
     process.env.PREVIEW_PROXY_HOST = "preview-proxy.example.com";
     process.env.PREVIEW_ACCESS_TOKEN = "secret-token";
     const url = buildPreviewProxyUrl("ws-123");
@@ -110,8 +117,44 @@ describe("buildPreviewProxyUrl", () => {
     expect(parsed.searchParams.get("token")).toBe("secret-token");
   });
 
+  it("builds on the PUBLIC terminal host when the internal URL is a private host", () => {
+    // Regression (2026-11-19): buildPreviewProxyUrl built the
+    // browser-facing URL on TERMINAL_SERVER_INTERNAL_URL. On the web
+    // service that value is a *.railway.internal host, which no browser
+    // can resolve — the Studio preview panel could never render a
+    // sandbox preview from app.litlabs.net, however healthy the sandbox.
+    // Production chain (verified on web + shell): TERMINAL_PUBLIC_URL is
+    // unset; the public host arrives via NEXT_PUBLIC_TERMINAL_HTTP_URL /
+    // NEXT_PUBLIC_TERMINAL_WS_URL, which getTerminalServerUrl() resolves.
+    process.env.TERMINAL_SERVER_INTERNAL_URL = "https://terminal.railway.internal";
+    delete process.env.TERMINAL_PUBLIC_URL;
+    process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL = "https://terminal.example.com";
+    delete process.env.NEXT_PUBLIC_TERMINAL_WS_URL;
+    delete process.env.PREVIEW_PROXY_HOST;
+    delete process.env.PREVIEW_ACCESS_TOKEN;
+    const url = buildPreviewProxyUrl("ws-123");
+    expect(url).toBe("https://terminal.example.com/preview/ws-123");
+    expect(url).not.toContain("railway.internal");
+  });
+
+  it("falls back to the internal base when no public terminal URL is configured", () => {
+    // Shell/local behavior: with no public terminal URL configured, the
+    // builder keeps using the internal base exactly as before (on the
+    // shell service the internal var holds the public terminal address).
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+    delete process.env.TERMINAL_PUBLIC_URL;
+    delete process.env.NEXT_PUBLIC_TERMINAL_WS_URL;
+    delete process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL;
+    delete process.env.TERMINAL_SERVER_URL;
+    process.env.TERMINAL_SERVER_INTERNAL_URL = "https://terminal.example.com";
+    delete process.env.PREVIEW_PROXY_HOST;
+    delete process.env.PREVIEW_ACCESS_TOKEN;
+    const url = buildPreviewProxyUrl("ws-123");
+    expect(url).toBe("https://terminal.example.com/preview/ws-123");
+  });
+
   it("keeps the token when the base URL has a trailing slash", () => {
-    process.env.TERMINAL_SERVER_URL = "https://terminal.example.com/";
+    process.env.TERMINAL_PUBLIC_URL = "https://terminal.example.com/";
     process.env.PREVIEW_ACCESS_TOKEN = "secret-token";
     delete process.env.PREVIEW_PROXY_HOST;
     const url = buildPreviewProxyUrl("ws-123");
