@@ -1026,9 +1026,9 @@ export async function insertAssetFromUrl(
       buffer = decoded.buffer;
       contentType = decoded.contentType;
     } else {
-      // One retry on transient upstream failures (network blips, 429, 5xx)
-      // — a single free-host hiccup must not strand an otherwise healthy
-      // image the way a definitive 4xx correctly does.
+      // Bounded retries on transient upstream failures (network blips,
+      // 402, 429, 5xx) — a free-host hiccup must not strand an otherwise
+      // healthy image the way a definitive 4xx correctly does.
       let lastErr: unknown = null;
       const download = async (): Promise<Response | null> => {
         try {
@@ -1060,11 +1060,27 @@ export async function insertAssetFromUrl(
       // 402 joins the retryable set: pollinations intermittently answers
       // Payment Required for identical requests (observed 2026-11-10) —
       // one blip must not dead-end an otherwise healthy image lane.
-      if (resp === null || resp.status === 402 || resp.status === 408 || resp.status === 429 || resp.status >= 500) {
+      // The retry window is a bounded backoff (0.5s / 2s / 5s): a
+      // payment/quota gate can stay up for seconds at a time, and the
+      // single 500ms retry proved too thin live (2026-11-19 — two 402s
+      // in a row killed the project save of a healthy generated image).
+      // Once the schedule is exhausted the failure below stays honest:
+      // the caller still gets the real status or network error.
+      const RETRY_DELAYS_MS = [500, 2_000, 5_000];
+      for (const delayMs of RETRY_DELAYS_MS) {
+        if (
+          resp !== null &&
+          resp.status !== 402 &&
+          resp.status !== 408 &&
+          resp.status !== 429 &&
+          resp.status < 500
+        ) {
+          break;
+        }
         if (opts.signal?.aborted) {
           throw lastErr instanceof Error ? lastErr : new Error("Failed to download asset: aborted");
         }
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
         resp = await download();
       }
       if (resp === null) {

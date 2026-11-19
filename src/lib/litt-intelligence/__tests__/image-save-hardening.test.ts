@@ -146,6 +146,9 @@ describe("insertAssetFromUrl — step-tagged failures", () => {
     expect(result.saveStep).toBe("decode");
   });
 
+  // Explicit timeout: the always-throwing fetch rides the full
+  // bounded-backoff schedule (0.5s / 2s / 5s of real timers) before
+  // the failure surfaces — over the 5s default.
   it("tags a failed download as the decode step", async () => {
     globalThis.fetch = vi.fn(async () => {
       throw new Error("boom");
@@ -155,7 +158,7 @@ describe("insertAssetFromUrl — step-tagged failures", () => {
     expect(result.success).toBe(false);
     expect(result.error).toBe("boom");
     expect(result.saveStep).toBe("decode");
-  });
+  }, 20_000);
 
   it("tags an empty download as the decode step", async () => {
     globalThis.fetch = vi.fn(async () =>

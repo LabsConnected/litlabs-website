@@ -1583,13 +1583,25 @@ export async function generateImage(
   }
 
   // ── 6. Persist to durable storage ──────────────────────────────
+  // pollinations and together belong on this list even though their
+  // handlers can return a bare provider https URL: for pollinations
+  // that URL is the pay-gated generation endpoint itself (the lazy-URL
+  // fallback in handlePollinationsImage), and every later consumer —
+  // the job row, Media, the registry's project save — would inherit a
+  // URL that intermittently answers HTTP 402 (live failure
+  // 2026-11-19: generation completed and landed in Media, but the
+  // project save died re-downloading the endpoint). Persisting copies
+  // the bytes into own storage up front; on any failure persistImage
+  // returns the original URL, so including them cannot regress.
   let durableUrl = result.downloadUrl;
   if (
     usedProviderId === "gemini" ||
     usedProviderId === "alibaba" ||
     usedProviderId === "fal" ||
     usedProviderId === "openai" ||
-    usedProviderId === "recraft"
+    usedProviderId === "recraft" ||
+    usedProviderId === "pollinations" ||
+    usedProviderId === "together"
   ) {
     durableUrl = await deps.persistImage(userId, result.downloadUrl, usedProviderId, prompt);
   }

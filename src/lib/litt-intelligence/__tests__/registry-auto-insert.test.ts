@@ -130,6 +130,9 @@ describe("maybeAutoInsertGeneratedImage", () => {
     expect(out).toBe(result);
   });
 
+  // Explicit timeout: the always-throwing fetch rides the full
+  // bounded-backoff schedule (0.5s / 2s / 5s of real timers) before
+  // the failure surfaces — over the 5s default.
   it("reports a failed save loudly instead of swallowing it", async () => {
     globalThis.fetch = vi.fn(async () => {
       throw new Error("download failed");
@@ -151,7 +154,7 @@ describe("maybeAutoInsertGeneratedImage", () => {
     expect(out.recovery).toContain("could not be saved");
     // The chat URL still works even when the project save failed.
     expect(out.downloadUrl).toBe("https://cdn.example.com/gen-abc.png");
-  });
+  }, 20_000);
 
   it("propagates a transport write failure as a loud saveError", async () => {
     const out = (await maybeAutoInsertGeneratedImage(
@@ -168,4 +171,76 @@ describe("maybeAutoInsertGeneratedImage", () => {
     expect(out.insertHint).toBeUndefined();
     expect(out.recovery).toContain("terminal 413");
   });
+
+  // Explicit timeouts on the two 402 tests below: they drive the real
+  // bounded-backoff schedule (0.5s / 2s / 5s) with real timers.
+  it("saves through a transient 402 window (402, 402, then 200)", async () => {
+    // Regression for the live 2026-11-19 failure: the pollinations
+    // generation endpoint answered 402 twice inside the old single
+    // 500ms retry window and the project save died at decode. The
+    // bounded backoff rides out a gate that stays up for seconds.
+    const statuses = [402, 402, 200];
+    globalThis.fetch = vi.fn(async () => {
+      const status = statuses.shift() ?? 200;
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        headers: {
+          get: (name: string) =>
+            name.toLowerCase() === "content-type" ? "image/png" : null,
+        },
+        arrayBuffer: async () =>
+          PNG_BYTES.buffer.slice(
+            PNG_BYTES.byteOffset,
+            PNG_BYTES.byteOffset + PNG_BYTES.byteLength,
+          ),
+      };
+    }) as unknown as typeof fetch;
+    const writeBinaryFile = vi.fn(async () => ({ saved: true }));
+    const out = (await maybeAutoInsertGeneratedImage(
+      "image.generate",
+      {
+        success: true,
+        downloadUrl:
+          "https://image.pollinations.ai/prompt/a%20bike?width=1024&height=1024&seed=3&nologo=true&enhance=false&model=flux",
+        title: "bike",
+      },
+      projectTransport(writeBinaryFile),
+    )) as Record<string, unknown>;
+
+    expect(out.savedToProject).toBe(true);
+    expect(out.sitePath).toMatch(/^\/assets\/images\/bike-[a-z0-9]+\.png$/);
+    expect(writeBinaryFile).toHaveBeenCalledTimes(1);
+    const [writtenPath] = writeBinaryFile.mock.calls[0];
+    expect(writtenPath).toMatch(/^public\/assets\/images\/bike-[a-z0-9]+\.png$/);
+  }, 20_000);
+
+  it("still fails honestly when every download attempt answers 402", async () => {
+    // The honest-failure contract survives the wider retry window:
+    // when the gate never lifts, the save reports the real 402 with
+    // its decode step instead of swallowing or fabricating success.
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 402,
+      headers: { get: () => null },
+      arrayBuffer: async () => new ArrayBuffer(0),
+    })) as unknown as typeof fetch;
+    const writeBinaryFile = vi.fn(async () => ({ saved: true }));
+    const out = (await maybeAutoInsertGeneratedImage(
+      "image.generate",
+      {
+        success: true,
+        downloadUrl:
+          "https://image.pollinations.ai/prompt/a%20bike?width=1024&height=1024&seed=3&nologo=true&enhance=false&model=flux",
+        title: "bike",
+      },
+      projectTransport(writeBinaryFile),
+    )) as Record<string, unknown>;
+
+    expect(out.savedToProject).toBe(false);
+    expect(out.saveError).toBe("[decode] Failed to download asset: HTTP 402");
+    expect(out.saveStep).toBe("decode");
+    expect(out.sitePath).toBeUndefined();
+    expect(writeBinaryFile).not.toHaveBeenCalled();
+  }, 20_000);
 });
