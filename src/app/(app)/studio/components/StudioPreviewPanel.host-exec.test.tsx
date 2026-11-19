@@ -276,7 +276,7 @@ describe("StudioPreviewPanel — host-execution truth on the prepare path (POST 
       expect(screen.getByText("Preview failed to start")).toBeInTheDocument();
     });
     // Raw machine payload is mapped to the human fallback sentence…
-    expect(screen.getByText("The dev server failed to start. Try restarting it.")).toBeInTheDocument();
+    expect(screen.getByText("The preview failed to start. Try restarting it.")).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("Kaboom inside the sandbox");
     expect(document.body.textContent).not.toContain("Workspace prepare failed (503)");
     expect(document.body.textContent).not.toContain('"code"');

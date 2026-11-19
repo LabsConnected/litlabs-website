@@ -71,6 +71,15 @@ export interface WorkspaceGetResponse {
  * the terminal kept working. The panel aborting its own POST first is
  * safe (it polls status instead); this client giving up first was not,
  * because it converted a live start into a hard failure.
+ *
+ * C3/C4 addendum (2026-11-18): the terminal's start/restart routes
+ * are now an ACCEPT — they answer as soon as the "starting" runtime
+ * is registered and finish provisioning/install in the background,
+ * so these calls normally return in seconds and the status poll
+ * carries the verdict. The 330s values stay as a hang-guard against
+ * a wedged terminal, not as an expected duration; shrinking them is
+ * deliberately NOT part of this change, so a slow-but-healthy accept
+ * can never be converted back into a hard failure by this client.
  */
 export const TERMINAL_TIMEOUTS = {
   prepareWorkspace: 180_000,

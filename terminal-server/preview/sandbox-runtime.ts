@@ -346,6 +346,18 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
   executor.notePreviewPort(ws, SANDBOX_PREVIEW_PORT);
   if (provider.extendTimeout) {
     await provider.extendTimeout(sandboxId, PREVIEW_SESSION_EXTENSION_MS).catch(() => {});
+    // The extension re-arms the sandbox's real expiry, so the expiry
+    // recorded on the upstream above (minted BEFORE the extension)
+    // is already stale. Re-expose — the origin and token are
+    // deterministic for (sandbox, port) — and record the
+    // post-extension truth, so the verify's lapse judgements run on
+    // the clock the sandbox actually dies by.
+    const refreshed = await provider
+      .exposePort(sandboxId, SANDBOX_PREVIEW_PORT)
+      .catch(() => null);
+    if (refreshed && runtime.upstream?.kind === "sandbox") {
+      runtime.upstream.expiresAt = parseEndpointExpiry(refreshed.expiresAt);
+    }
   }
 
   pushPreviewLog(
@@ -396,13 +408,46 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
       );
       pushPreviewLog(runtime, `[preview] Auth config error (HTTP ${result.status})`);
     } else {
-      runtime.status = "failed";
-      runtime.errorCode = "preview_port_never_ready";
-      runtime.error = withPreviewLogDiagnostic(
-        `Dev server did not become healthy within ${HEALTH_PROBE_TIMEOUT_MS / 1000}s`,
-        boundedPreviewLogTail(runtime.logs),
-      );
-      pushPreviewLog(runtime, `[preview] Health check failed — timeout`);
+      // Verdict honesty (C3/C4): a start probe that never answers
+      // through the upstream has TWO possible causes — the dev
+      // server never came up, or the server is up inside the guest
+      // and the preview ADDRESS (ingress path) is what is dead.
+      // The dead-ingress incident ran for days under the
+      // "dev server did not become healthy" verdict while the guest
+      // served happily on localhost. Discriminate with the in-guest
+      // ground truth before convicting the server: a guest answering
+      // locally convicts the address, never the server.
+      const groundTruth = await checkSandboxPreviewGroundTruth(
+        support,
+        sandboxId,
+      ).catch(() => null);
+      if (runtime.status !== "starting") return;
+      if (groundTruth?.answering === true) {
+        runtime.status = "failed";
+        runtime.errorCode = "preview_address_unreachable";
+        runtime.error = withPreviewLogDiagnostic(
+          "The dev server is running inside the sandbox, but its preview " +
+            "address did not answer from outside within " +
+            `${HEALTH_PROBE_TIMEOUT_MS / 1000}s. This is a preview ` +
+            "connection problem, not a dev server failure — the server " +
+            "itself is up.",
+          boundedPreviewLogTail(runtime.logs),
+        );
+        pushPreviewLog(
+          runtime,
+          `[preview] Health check failed — preview address unreachable ` +
+            `(guest answering locally, HTTP ${groundTruth.status ?? "?"}); ` +
+            `the dev server is NOT the failure`,
+        );
+      } else {
+        runtime.status = "failed";
+        runtime.errorCode = "preview_port_never_ready";
+        runtime.error = withPreviewLogDiagnostic(
+          `Dev server did not become healthy within ${HEALTH_PROBE_TIMEOUT_MS / 1000}s`,
+          boundedPreviewLogTail(runtime.logs),
+        );
+        pushPreviewLog(runtime, `[preview] Health check failed — timeout`);
+      }
     }
   })();
 
