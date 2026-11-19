@@ -30,6 +30,15 @@ export interface TerminalHealthInput {
   /** Terminal server /health result. null = not checked yet. */
   serverReachable: boolean | null;
   error?: string | null;
+  /**
+   * Which route the live session took ("sandbox" | "host"), when the
+   * producer knows it (terminal bridge, TERMINAL-BRIDGE-SPEC-2026-11-17
+   * §4). When absent, a verified cwd of exactly "/workspace" identifies
+   * a sandbox session — that literal is the sandbox session:ready
+   * payload's cwd contract (§2.5); host sessions always report a
+   * resolved host filesystem path, never the bare sandbox root.
+   */
+  route?: string | null;
 }
 
 /**
@@ -58,10 +67,16 @@ const UNAVAILABLE_STATES: ReadonlySet<TerminalStatus> = new Set([
 ]);
 
 export function deriveTerminalHealth(input: TerminalHealthInput): TerminalHealth {
-  const { storeStatus, cwd, serverReachable, error } = input;
+  const { storeStatus, cwd, serverReachable, error, route } = input;
 
   if (storeStatus === "connected" && cwd) {
-    return { state: "live", level: "green", label: "Terminal live", detail: `Shell attached · ${cwd}` };
+    const sandbox = route === "sandbox" || (route == null && cwd === "/workspace");
+    return {
+      state: "live",
+      level: "green",
+      label: "Terminal live",
+      detail: sandbox ? `Shell attached · ${cwd} (sandbox)` : `Shell attached · ${cwd}`,
+    };
   }
   if (storeStatus === "connecting" || (storeStatus === "connected" && !cwd)) {
     return {
@@ -135,6 +150,7 @@ export function terminalHealthOf(caps: {
   terminalCwd?: string | null;
   terminalServerReachable?: boolean;
   terminalError?: string | null;
+  terminalRoute?: string | null;
 }): TerminalHealth {
   return (
     caps.terminalHealth ??
@@ -143,6 +159,7 @@ export function terminalHealthOf(caps: {
       cwd: caps.terminalCwd ?? null,
       serverReachable: caps.terminalServerReachable ?? null,
       error: caps.terminalError ?? null,
+      route: caps.terminalRoute ?? null,
     })
   );
 }

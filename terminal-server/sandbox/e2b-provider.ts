@@ -24,9 +24,13 @@
  * env enforcement, result mapping) is what CI verifies; the live
  * canary against the real account is the staging proof step.
  *
- * Phase 1 scope: workspace.exec is the only routed surface.
- * connectTerminal therefore refuses explicitly (PTY attach is a later
- * phase) instead of faking a transport.
+ * Terminal bridge (TERMINAL-BRIDGE-SPEC-2026-11-17): connectTerminal
+ * is implemented on the SDK's PTY API — the interactive shell the
+ * Studio Terminal panel attaches to. Every PTY stream the SDK opens
+ * (create, connect, and the input stream) carries an explicit
+ * timeout pinned to the sandbox's session lifetime: the SDK defaults
+ * each of them to 60 seconds, which would kill a shell one minute
+ * after it opens. See {@link E2bSandboxProvider.connectTerminal}.
  */
 
 import { randomBytes } from "crypto";
@@ -50,6 +54,21 @@ import {
   composeSandboxEnv,
   guardPerCommandProjectEnv,
 } from "./env";
+import { MAX_COLS as MAX_PTY_COLS, MAX_ROWS as MAX_PTY_ROWS } from "../pty-session-manager";
+
+/**
+ * Output buffered between a PTY's creation and the caller's first
+ * onOutput registration (the shell prints its prompt immediately).
+ * Bounded so a chatty shell with no listener cannot grow memory;
+ * excess is dropped, never queued forever.
+ */
+export const PTY_PRE_REGISTRATION_BUFFER_BYTES = 256 * 1024;
+
+/** Clamp one PTY dimension to the host manager's bounds [1, max]. */
+function clampPtyDimension(value: number, max: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(max, Math.max(1, Math.floor(value)));
+}
 
 /** Default E2B template: built and published from ../sandbox.Dockerfile. */
 export const DEFAULT_E2B_TEMPLATE_ID = "litt-sandbox-v1";
@@ -99,6 +118,55 @@ export interface E2bCommandResult {
   stderr: string;
 }
 
+// ─── PTY adapter (terminal bridge) ──────────────────────────────────
+//
+// The SDK's PTY surface, narrowed the same way commands/files are.
+// One trap shapes everything below: in the pinned SDK (e2b@2.63.0)
+// the `timeoutMs` on pty.create / pty.connect is the connect-rpc
+// deadline for the PTY's ENTIRE output event stream, and the input
+// stream from pty.streamInput has its own identical deadline — all
+// three default to 60,000 ms when omitted. A shell opened without an
+// explicit timeout therefore dies at 60 seconds even though the
+// sandbox lives on. The provider pins every one of them to the
+// sandbox's clamped session lifetime (see connectTerminal), and the
+// adapter takes the value as a required option so no call site can
+// forget it.
+
+export interface E2bPtyCreateOptions {
+  cols: number;
+  rows: number;
+  onData: (data: Uint8Array) => void | Promise<void>;
+  /** Stream deadline — REQUIRED, never the SDK's 60 s default. */
+  timeoutMs: number;
+  envs: Record<string, string>;
+  cwd: string;
+}
+
+export interface E2bPtyConnectOptions {
+  onData: (data: Uint8Array) => void | Promise<void>;
+  /** Stream deadline — REQUIRED, never the SDK's 60 s default. */
+  timeoutMs: number;
+}
+
+export interface E2bPtyHandle {
+  readonly pid: number;
+  /**
+   * Settles when the PTY process ends: resolves with its exit code
+   * (a non-zero exit is a normal shell exit, NOT an error). Rejects
+   * only when the event stream died without a result — a transport
+   * failure or the sandbox going away mid-session.
+   */
+  wait(): Promise<{ exitCode: number }>;
+  /** Stop receiving events WITHOUT killing the process (reattach path). */
+  disconnect(): Promise<void>;
+}
+
+export interface E2bPtyInputStream {
+  /** Queue input for ordered transmission (the SDK keeps order + keepalive). */
+  send(data: string): Promise<void>;
+  close(): Promise<void>;
+}
+
 /** One filesystem entry as the SDK's files API reports it. */
 export interface E2bFileEntry {
   name: string;
@@ -143,6 +211,12 @@ export interface E2bSandboxHandle {
   pause(): Promise<boolean>;
   kill(): Promise<boolean>;
   isRunning(): Promise<boolean>;
+  // ─── PTY API (terminal bridge) ───────────────────────────────────
+  createPty(opts: E2bPtyCreateOptions): Promise<E2bPtyHandle>;
+  connectPty(pid: number, opts: E2bPtyConnectOptions): Promise<E2bPtyHandle>;
+  streamPtyInput(pid: number, opts: { timeoutMs: number }): E2bPtyInputStream;
+  resizePty(pid: number, size: { cols: number; rows: number }): Promise<void>;
+  killPty(pid: number): Promise<boolean>;
   // ─── Files API (Phase 2 lifecycle file transfer) ─────────────────
   readFileBytes(path: string): Promise<Uint8Array>;
   writeFileBytes(path: string, data: Uint8Array): Promise<void>;
@@ -192,6 +266,19 @@ interface E2bSdkEntryLike {
   symlinkTarget?: string;
 }
 
+/** The SDK's CommandHandle, narrowed to what the PTY wrap uses. */
+interface E2bSdkPtyHandleLike {
+  pid: number;
+  wait(): Promise<{ exitCode: number }>;
+  disconnect(): Promise<void>;
+}
+
+/** The SDK's CommandInputHandle, narrowed to what the PTY wrap uses. */
+interface E2bSdkPtyInputLike {
+  send(data: string | Uint8Array): Promise<void>;
+  close(): Promise<void>;
+}
+
 interface E2bSdkSandboxLike {
   sandboxId: string;
   trafficAccessToken?: string;
@@ -200,6 +287,29 @@ interface E2bSdkSandboxLike {
       cmd: string,
       opts?: Record<string, unknown>,
     ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  };
+  pty: {
+    create(opts: {
+      cols: number;
+      rows: number;
+      onData: (data: Uint8Array) => void | Promise<void>;
+      timeoutMs: number;
+      envs: Record<string, string>;
+      cwd: string;
+    }): Promise<E2bSdkPtyHandleLike>;
+    connect(
+      pid: number,
+      opts: {
+        onData: (data: Uint8Array) => void | Promise<void>;
+        timeoutMs: number;
+      },
+    ): Promise<E2bSdkPtyHandleLike>;
+    streamInput(
+      pid: number,
+      opts: { timeoutMs: number },
+    ): E2bSdkPtyInputLike;
+    resize(pid: number, size: { cols: number; rows: number }): Promise<void>;
+    kill(pid: number): Promise<boolean>;
   };
   files: {
     read(
@@ -232,6 +342,30 @@ function mapSdkEntry(entry: E2bSdkEntryLike): E2bFileEntry {
     mode: entry.mode ?? 0,
     mtimeMs: entry.modifiedTime ? entry.modifiedTime.getTime() : 0,
     ...(entry.symlinkTarget ? { linkTarget: entry.symlinkTarget } : {}),
+  };
+}
+
+function wrapSdkPtyHandle(handle: E2bSdkPtyHandleLike): E2bPtyHandle {
+  return {
+    pid: handle.pid,
+    async wait() {
+      try {
+        const result = await handle.wait();
+        return { exitCode: result.exitCode };
+      } catch (err) {
+        // The SDK throws CommandExitError for a non-zero exit; the
+        // error itself carries the exit code, and a shell exiting
+        // non-zero is a normal end, not a transport failure. Anything
+        // else (stream died without a result, deadline, transport)
+        // is a real failure and propagates as a rejection.
+        const e = err as { exitCode?: unknown };
+        if (typeof e?.exitCode === "number") {
+          return { exitCode: e.exitCode };
+        }
+        throw err;
+      }
+    },
+    disconnect: () => handle.disconnect(),
   };
 }
 
@@ -304,6 +438,33 @@ function wrapSdkSandbox(sbx: E2bSdkSandboxLike): E2bSandboxHandle {
     pause: () => sbx.pause(),
     kill: () => sbx.kill(),
     isRunning: () => sbx.isRunning(),
+    async createPty(opts) {
+      const handle = await sbx.pty.create({
+        cols: opts.cols,
+        rows: opts.rows,
+        onData: opts.onData,
+        timeoutMs: opts.timeoutMs,
+        envs: opts.envs,
+        cwd: opts.cwd,
+      });
+      return wrapSdkPtyHandle(handle);
+    },
+    async connectPty(pid, opts) {
+      const handle = await sbx.pty.connect(pid, {
+        onData: opts.onData,
+        timeoutMs: opts.timeoutMs,
+      });
+      return wrapSdkPtyHandle(handle);
+    },
+    streamPtyInput: (pid, opts) => {
+      const input = sbx.pty.streamInput(pid, { timeoutMs: opts.timeoutMs });
+      return {
+        send: (data) => input.send(data),
+        close: () => input.close(),
+      };
+    },
+    resizePty: (pid, size) => sbx.pty.resize(pid, size),
+    killPty: (pid) => sbx.pty.kill(pid),
   };
 }
 
@@ -376,11 +537,17 @@ interface RegistryEntry {
   expiresAtMs: number | null;
 }
 
+/**
+ * Kept for any future provider that cannot attach a terminal (the
+ * E2B provider implements connectTerminal since the terminal bridge;
+ * providers without a PTY surface throw this instead of faking a
+ * transport).
+ */
 export class E2bTerminalUnsupportedError extends Error {
   readonly code = "SANDBOX_TERMINAL_UNSUPPORTED" as const;
   constructor() {
     super(
-      "E2B provider Phase 1 routes workspace.exec only; interactive terminal attach is not supported yet.",
+      "This sandbox provider does not support interactive terminal attach.",
     );
     this.name = "E2bTerminalUnsupportedError";
   }
@@ -594,11 +761,233 @@ export class E2bSandboxProvider implements SandboxProvider {
     await entry.handle.kill();
   }
 
+  /**
+   * Attach an interactive shell to a sandbox (terminal bridge,
+   * TERMINAL-BRIDGE-SPEC-2026-11-17 §2.3/§2.4).
+   *
+   * The shell is the SDK's PTY: /bin/bash -i -l as the template's
+   * default non-root user (no `user` is ever passed — lifecycle
+   * repairs that need root stay on the exec path), cwd /workspace,
+   * env = the sandbox's stored composed env, re-checked with
+   * assertNoPlatformSecrets before the SDK call exactly like
+   * create(). Caller env (options.env) layers over it through the
+   * per-command value guard, exactly like execute().
+   *
+   * THE 60-SECOND TRAP (§2.4): the SDK defaults the timeoutMs of
+   * pty.create, pty.connect AND pty.streamInput to 60,000 ms, and
+   * each is the deadline for that call's whole event/input stream —
+   * a shell opened without an explicit value dies at 60 seconds.
+   * All three are pinned here to the sandbox's clamped session
+   * lifetime (maxSessionMinutes, itself clamped to the Hobby 1-hour
+   * cap), so a PTY stream can never outlive its sandbox and never
+   * dies early. 0 is never used: its connect-rpc deadline semantics
+   * are not the documented disable value on the create/connect path.
+   */
   async connectTerminal(
-    _sandboxId: string,
-    _options: TerminalConnectOptions,
+    sandboxId: string,
+    options: TerminalConnectOptions,
   ): Promise<TerminalTransport> {
-    throw new E2bTerminalUnsupportedError();
+    const entry = this.entry(sandboxId);
+    if (entry.instance.state === "stopped") {
+      await this.start(sandboxId);
+    }
+    const attach = this.preparePtyAttach(entry, options);
+    // Re-arm the sandbox clock before the shell opens, copying
+    // execute()'s pattern: an actively used sandbox never reaches
+    // its kill bound mid-session. Best effort — a truly dead sandbox
+    // fails the create below with the SDK's own error.
+    await entry.handle
+      .setTimeout(clampSandboxTimeoutMs(entry.instance.limits.maxSessionMinutes * 60_000))
+      .catch(() => {});
+    const pty = await entry.handle.createPty({
+      cols: attach.cols,
+      rows: attach.rows,
+      onData: attach.onData,
+      timeoutMs: attach.timeoutMs,
+      envs: attach.envs,
+      cwd: "/workspace",
+    });
+    return attach.finish(pty);
+  }
+
+  /**
+   * Re-attach to a still-running PTY (terminal bridge §2.3): the
+   * transport sessionId (`${sandboxId}:${pid}`) names the pid, and
+   * pty.connect(pid) opens a fresh event stream onto the same shell.
+   * Additive to the SandboxProvider contract — the session manager
+   * consumes it through a structural optional interface, and a
+   * provider without it simply misses reattach (a fresh PTY opens in
+   * the same sandbox instead). Throws when the sessionId does not
+   * name a pid of THIS sandbox, or when the pid is gone.
+   */
+  async reattachTerminal(
+    sandboxId: string,
+    sessionId: string,
+    options: TerminalConnectOptions,
+  ): Promise<TerminalTransport> {
+    const entry = this.entry(sandboxId);
+    if (entry.instance.state === "stopped") {
+      await this.start(sandboxId);
+    }
+    const prefix = `${sandboxId}:`;
+    const pid = sessionId.startsWith(prefix)
+      ? Number(sessionId.slice(prefix.length))
+      : NaN;
+    if (!Number.isInteger(pid) || pid <= 0) {
+      throw new Error(
+        `Invalid sandbox terminal session id for sandbox ${sandboxId}`,
+      );
+    }
+    const attach = this.preparePtyAttach(entry, options);
+    await entry.handle
+      .setTimeout(clampSandboxTimeoutMs(entry.instance.limits.maxSessionMinutes * 60_000))
+      .catch(() => {});
+    const pty = await entry.handle.connectPty(pid, {
+      onData: attach.onData,
+      timeoutMs: attach.timeoutMs,
+    });
+    return attach.finish(pty);
+  }
+
+  /**
+   * Shared PTY attach preparation: clamped dimensions, the pinned
+   * stream timeout, the env discipline, and the output/exit plumbing
+   * every transport (create or reconnect) is built from. `onData`
+   * must exist before the SDK call (it is a create/connect option),
+   * while the transport exists only after — so output is decoded and
+   * fanned out through this closure, and anything printed before the
+   * caller registers onOutput is buffered (bounded) and replayed to
+   * the first registrant, mirroring the host manager's parked-output
+   * replay.
+   */
+  private preparePtyAttach(
+    entry: RegistryEntry,
+    options: TerminalConnectOptions,
+  ): {
+    cols: number;
+    rows: number;
+    timeoutMs: number;
+    envs: Record<string, string>;
+    onData: (data: Uint8Array) => void;
+    finish: (pty: E2bPtyHandle) => TerminalTransport & { disconnect: () => void };
+  } {
+    // Env discipline, identical to create()/execute(): the stored
+    // composed env is re-checked by NAME before any SDK call; caller
+    // env layers over it guarded BY VALUE against the terminal's own
+    // platform secrets (identity vars in it are dropped — identity
+    // always wins).
+    assertNoPlatformSecrets(entry.env);
+    const envs = options.env
+      ? {
+          ...entry.env,
+          ...guardPerCommandProjectEnv(
+            options.env,
+            collectPlatformSecretValues(process.env),
+          ),
+        }
+      : entry.env;
+
+    const cols = clampPtyDimension(options.cols, MAX_PTY_COLS);
+    const rows = clampPtyDimension(options.rows, MAX_PTY_ROWS);
+    // The one pinned timeout for every stream this attach opens
+    // (create/connect + the input stream in finish()).
+    const timeoutMs = clampSandboxTimeoutMs(
+      entry.instance.limits.maxSessionMinutes * 60_000,
+    );
+
+    const decoder = new TextDecoder();
+    const outputCallbacks = new Set<(data: string) => void>();
+    const exitCallbacks = new Set<
+      (info: { exitCode: number; signal?: string }) => void
+    >();
+    let exitInfo: { exitCode: number; signal?: string } | null = null;
+    let buffered: string[] = [];
+    let bufferedBytes = 0;
+
+    const onData = (data: Uint8Array): void => {
+      const text = decoder.decode(data, { stream: true });
+      if (!text) return;
+      if (outputCallbacks.size === 0) {
+        const bytes = Buffer.byteLength(text, "utf8");
+        if (bufferedBytes + bytes <= PTY_PRE_REGISTRATION_BUFFER_BYTES) {
+          buffered.push(text);
+          bufferedBytes += bytes;
+        }
+        return;
+      }
+      for (const cb of outputCallbacks) cb(text);
+    };
+
+    const finish = (
+      pty: E2bPtyHandle,
+    ): TerminalTransport & { disconnect: () => void } => {
+      const input = entry.handle.streamPtyInput(pty.pid, { timeoutMs });
+      let closed = false;
+      const settleExit = (info: { exitCode: number }): void => {
+        if (exitInfo) return;
+        exitInfo = info;
+        for (const cb of exitCallbacks) cb(info);
+        exitCallbacks.clear();
+      };
+      pty.wait().then(
+        ({ exitCode }) => settleExit({ exitCode }),
+        // The stream died without a result (sandbox gone, transport
+        // failure): the shell is over either way; -1 marks the
+        // abnormal end, and the session manager separately probes
+        // sandbox liveness for the honest user-facing state.
+        () => settleExit({ exitCode: -1 }),
+      );
+      const transport: TerminalTransport & { disconnect: () => void } = {
+        sessionId: `${entry.instance.sandboxId}:${pty.pid}`,
+        write: (data) => {
+          if (closed) return;
+          // streamInput queues in call order (the SDK's ordered,
+          // keepalive input stream) — ordering matters for a shell.
+          // A failed send means the stream is gone; the exit path
+          // reports the session's end, so the write itself stays
+          // fire-and-forget exactly like the host PTY's write.
+          void input.send(data).catch(() => {});
+        },
+        resize: (nextCols, nextRows) => {
+          void entry.handle
+            .resizePty(pty.pid, {
+              cols: clampPtyDimension(nextCols, MAX_PTY_COLS),
+              rows: clampPtyDimension(nextRows, MAX_PTY_ROWS),
+            })
+            .catch(() => {});
+        },
+        onOutput: (cb) => {
+          outputCallbacks.add(cb);
+          if (buffered.length > 0) {
+            const pending = buffered;
+            buffered = [];
+            bufferedBytes = 0;
+            for (const chunk of pending) cb(chunk);
+          }
+        },
+        onExit: (cb) => {
+          if (exitInfo) cb(exitInfo);
+          else exitCallbacks.add(cb);
+        },
+        kill: () => {
+          closed = true;
+          void input.close().catch(() => {});
+          void entry.handle.killPty(pty.pid).catch(() => {});
+        },
+        // Beyond the contract, additive: stop this attach's event
+        // stream WITHOUT killing the shell, so a reattach can hand
+        // the pid to a fresh stream (pty.connect) with no duplicate
+        // delivery. The session manager feature-detects it.
+        disconnect: () => {
+          closed = true;
+          void input.close().catch(() => {});
+          void pty.disconnect().catch(() => {});
+        },
+      };
+      return transport;
+    };
+
+    return { cols, rows, timeoutMs, envs, onData, finish };
   }
 
   async execute(
