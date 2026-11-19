@@ -1021,7 +1021,7 @@ export default function StudioBoard({
             {(
               [
                 ["chat", "Chat", MessageSquare],
-                ["preview", "Preview", Monitor],
+                ["preview", "Static View", Monitor],
                 ["files", "Files", FolderOpen],
               ] as [BoardPanelId, string, LucideIcon][]
             ).map(([id, label, Icon]) => {

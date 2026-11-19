@@ -19,14 +19,24 @@
  * he reversed). The surface is sized to its content: 360px wide
  * (clamped to the viewport on small windows, the same
  * w-[min(360px,calc(100vw-24px))] pattern as StudioShell's floating
- * inspector) with a max-height of calc(100vh - 96px), so under normal
- * desktop conditions every section shows at once. overflow-y-auto
- * remains ONLY as the fallback for viewports too short to fit the
- * content — it must not go back to a small fixed cap (the old
- * w-64 / max-h-[70vh] box forced scrolling to find anything).
+ * inspector). overflow-y-auto remains ONLY as the fallback for
+ * viewports too short to fit the content — it must not go back to a
+ * small fixed cap (the old w-64 / max-h-[70vh] box forced scrolling
+ * to find anything).
+ *
+ * Viewport fit (mockup port fix, 2026-11-18): the height cap used to
+ * be a static calc(100vh - 96px), which assumed the trigger sits
+ * within the top 96px of the viewport. The pill toolbar sits lower
+ * than that, so the menu's bottom ran past the viewport edge and its
+ * last rows (the Browser toolbar checkbox, Reset) were cut off with
+ * no way to reach them — the board itself never scrolls. On open the
+ * menu now measures its trigger: it takes exactly the space below
+ * the trigger (12px viewport margin), and flips to open ABOVE the
+ * trigger when the space below is tight and above is roomier. The
+ * static class cap stays as the pre-measure fallback only.
  */
 
-import { useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { SlidersHorizontal } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import {
@@ -95,9 +105,33 @@ export default function BoardSettingsMenu() {
   const [open, setOpen] = useState(false);
   const settings = useBoardSettingsStore();
   const { layoutMode, setLayoutMode } = useStudioLayoutMode();
+  const wrapRef = useRef<HTMLDivElement>(null);
+  // Measured viewport fit for the open menu (see the header note):
+  // maxHeight is the exact space in the chosen direction; flipped
+  // renders the menu above its trigger instead of below it.
+  const [menuFit, setMenuFit] = useState<{ maxHeight: number; flipped: boolean } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      const el = wrapRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const gap = 8; // the menu's 8px offset from the trigger
+      const margin = 12; // breathing room at the viewport edge
+      const below = window.innerHeight - rect.bottom - gap - margin;
+      const above = rect.top - gap - margin;
+      const flipped = below < 360 && above > below;
+      const space = flipped ? above : below;
+      setMenuFit({ flipped, maxHeight: Math.max(200, Math.floor(space)) });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [open ]);
 
   return (
-    <div className="relative shrink-0">
+    <div className="relative shrink-0" ref={wrapRef}>
       {/* pointer-events-auto on the trigger and the menu: this
           component renders inside StudioBoard's pill toolbar, whose
           container is pointer-events-none (click-through, so panel
@@ -117,8 +151,13 @@ export default function BoardSettingsMenu() {
       {open && (
         <div
           data-testid="board-settings-menu"
-          className="pointer-events-auto absolute right-0 top-[calc(100%+8px)] max-h-[calc(100vh-96px)] w-[min(360px,calc(100vw-24px))] overflow-y-auto rounded-xl border p-1.5 shadow-lg"
-          style={{ backgroundColor: tokens.surface, borderColor: tokens.border }}
+          data-placement={menuFit?.flipped ? "above" : "below"}
+          className={`pointer-events-auto absolute right-0 ${menuFit?.flipped ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]"} max-h-[calc(100vh-96px)] w-[min(360px,calc(100vw-24px))] overflow-y-auto rounded-xl border p-1.5 shadow-lg`}
+          style={{
+            backgroundColor: tokens.surface,
+            borderColor: tokens.border,
+            ...(menuFit ? { maxHeight: menuFit.maxHeight } : {}),
+          }}
         >
           <Section title="Studio layout">
             {STUDIO_LAYOUT_MODE_OPTIONS.map((option) => (
