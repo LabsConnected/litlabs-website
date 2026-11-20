@@ -47,7 +47,7 @@ async function measureOpenSheet(page: Page) {
   const composer = await visibleRect(page.getByTestId("studio-command-composer"), "chat composer");
   const input = await visibleRect(page.getByTestId("studio-command-input"), "message textarea");
   const action = await visibleRect(page.getByTestId("studio-send-button"), "Send/Cancel control");
-  const nav = await visibleRect(page.locator('nav[aria-label="Studio navigation"]:visible'), "mobile bottom navigation");
+  const topbar = await visibleRect(page.getByTestId("mobile-studio-topbar"), "mobile studio top bar");
   const viewport = await page.evaluate(() => ({
     x: 0,
     y: 0,
@@ -61,13 +61,19 @@ async function measureOpenSheet(page: Page) {
   expectWithinViewport(composer, viewport, "chat composer");
   expectWithinViewport(input, viewport, "message textarea");
   expectWithinViewport(action, viewport, "Send/Cancel control");
+  expectWithinViewport(topbar, viewport, "mobile studio top bar");
   expect(viewport.documentScrollWidth, "page should have no horizontal overflow").toBeLessThanOrEqual(
     viewport.documentClientWidth + 1,
   );
-  expect(bottom(sheet), "sheet should end above the mobile bottom navigation").toBeLessThanOrEqual(nav.y + 1);
-  expect(nav.y, "mobile bottom navigation should not overlap the sheet").toBeGreaterThanOrEqual(bottom(sheet) - 1);
+  // Chat-first layout (2026-11-19 card): the sheet is the home surface —
+  // it starts at the top bar's bottom edge and fills the visual viewport.
+  // No bottom navigation dock exists anymore.
+  expect(sheet.y, "sheet should sit directly below the slim top bar").toBeGreaterThanOrEqual(topbar.y);
+  expect(bottom(sheet), "sheet should reach the bottom of the visual viewport").toBeGreaterThanOrEqual(
+    viewport.height - 2,
+  );
 
-  return { viewport, sheet, composer, input, action, nav };
+  return { viewport, sheet, composer, input, action, topbar };
 }
 
 test.describe("LiTT Studio mobile acceptance", () => {
@@ -97,13 +103,13 @@ test.describe("LiTT Studio mobile acceptance", () => {
     }
 
     await expect(page.locator(".studio-shell")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("studio-preview-panel")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("litt-mobile-trigger")).toBeVisible({ timeout: 30_000 });
+    // Chat-first layout: the chat sheet IS the home surface — it is open
+    // on entry, no trigger/FAB/bottom-nav to discover first.
+    await expect(page.getByTestId("litt-mobile-sheet")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("mobile-studio-topbar")).toBeVisible();
     await expect(page.getByTestId("studio-loading")).not.toBeVisible();
     await screenshot(page, testInfo, "A-initial-authenticated-studio-390x844");
 
-    const trigger = page.getByRole("button", { name: "Ask LiTT to build" });
-    const triggerRect = await visibleRect(trigger, "Ask LiTT to build");
     const initialPosition = await page.evaluate(() => ({
       scrollX: window.scrollX,
       scrollY: window.scrollY,
@@ -112,25 +118,18 @@ test.describe("LiTT Studio mobile acceptance", () => {
       scrollWidth: document.documentElement.scrollWidth,
       clientWidth: document.documentElement.clientWidth,
     }));
-    expect(initialPosition.scrollX, "trigger should be reachable without horizontal scrolling").toBe(0);
-    expect(initialPosition.scrollY, "trigger should be reachable without vertical scrolling").toBe(0);
-    expectWithinViewport(triggerRect, { x: 0, y: 0, width: initialPosition.width, height: initialPosition.height }, "Ask LiTT to build");
+    expect(initialPosition.scrollX, "chat should be reachable without horizontal scrolling").toBe(0);
+    expect(initialPosition.scrollY, "chat should be reachable without vertical scrolling").toBe(0);
     expect(initialPosition.scrollWidth, "initial Studio should have no horizontal overflow").toBeLessThanOrEqual(
       initialPosition.clientWidth + 1,
     );
-    await screenshot(page, testInfo, "B-ask-litt-visible-without-scrolling");
+    await screenshot(page, testInfo, "B-chat-home-visible-without-scrolling");
 
-    await trigger.click();
-    await expect(page.getByTestId("litt-mobile-sheet")).toBeVisible();
-    await expect(page.getByTestId("litt-mobile-tab-chat")).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("litt-mobile-chat-panel")).toHaveAttribute("data-active", "true");
     // Mobile density redesign: the composer context line moved into the slim
     // sheet header row; the old persistent context line is hidden on mobile.
     await expect(page.getByTestId("studio-workspace-context")).toBeHidden();
-    if (await page.getByTestId("litt-mobile-context").count() > 0) {
-      await expect(page.getByTestId("litt-mobile-context")).toBeVisible();
-      await expect(page.getByTestId("litt-mobile-context")).not.toBeEmpty();
-    }
+    await expect(page.getByTestId("litt-mobile-project-name")).toBeVisible();
     await expect(page.getByTestId("studio-command-input")).toBeVisible();
     await expect(page.getByTestId("studio-send-button")).toHaveAttribute("aria-label", /^(Send message|Cancel response)$/);
     const initialGeometry = await measureOpenSheet(page);
@@ -162,32 +161,37 @@ test.describe("LiTT Studio mobile acceptance", () => {
     await page.setViewportSize(PRIMARY_VIEWPORT);
     await expect(input).toBeFocused();
     await expect(input).toHaveValue(TYPED_TEXT);
-    await page.getByTestId("litt-mobile-sheet-close").click();
-    await expect(page.getByTestId("litt-mobile-sheet")).toBeHidden();
 
-    // The developer drawer intentionally takes ownership of the mobile
-    // surface while open, so the LiTT trigger is hidden until the user closes
-    // it. Keep this explicit user sequence covered instead of weakening the
-    // product's progressive-disclosure behavior.
+    // Chat-first layout: a tool surface takes the phone via the top-bar
+    // menu, and Back to chat returns — the sheet stays mounted (hidden)
+    // in between so drafts and streams survive.
+    await page.getByTestId("mobile-studio-menu").click();
+    await expect(page.getByTestId("mobile-tools-dialog")).toBeVisible();
+    await page.getByTestId("mobile-tool-preview").click();
+    await expect(page.getByTestId("litt-mobile-sheet")).toBeHidden();
+    await expect(page.getByTestId("mobile-back-to-chat")).toBeVisible();
+    await screenshot(page, testInfo, "F-tool-surface-back-to-chat");
+    await page.getByTestId("mobile-back-to-chat").click();
+    await expect(page.getByTestId("litt-mobile-sheet")).toBeVisible();
+    await expect(page.getByTestId("studio-command-input")).toHaveValue(TYPED_TEXT);
+
+    // The developer drawer is now a full-screen mobile surface; it must
+    // not cover chat while closed, and Back to chat must release it.
     const collapsedDeveloperTools = page.getByTestId("dock-collapsed-toggle");
     if (await collapsedDeveloperTools.count() > 0 && await collapsedDeveloperTools.isVisible()) {
-      await collapsedDeveloperTools.click();
-      await expect(page.getByTestId("dock-close")).toBeVisible();
-      await expect(page.getByTestId("litt-mobile-trigger")).toBeHidden();
-      await page.getByTestId("dock-close").click();
-      await expect(page.getByTestId("litt-mobile-trigger")).toBeVisible();
-      await page.getByTestId("litt-mobile-trigger").click();
+      await page.getByTestId("mobile-studio-menu").click();
+      await page.getByTestId("mobile-tool-terminal").click();
+      await expect(page.getByTestId("mobile-dock-overlay")).toBeVisible();
+      await page.getByTestId("mobile-back-to-chat").click();
+      await expect(page.getByTestId("mobile-dock-overlay")).toHaveCount(0);
       await expect(page.getByTestId("litt-mobile-sheet")).toBeVisible();
-      await page.getByTestId("litt-mobile-sheet-close").click();
-      await expect(page.getByTestId("litt-mobile-sheet")).toBeHidden();
     }
 
-    const mobileNav = page.locator('nav[aria-label="Studio navigation"]:visible');
-    await expect(mobileNav).toBeVisible();
-    const assetsButton = mobileNav.getByRole("button", { name: "Assets" });
-    await assetsButton.click();
-    await expect(assetsButton).toHaveAttribute("aria-current", "page");
-    await screenshot(page, testInfo, "F-sheet-closed-bottom-nav-usable");
+    // Everything else stays behind the one menu button — no bottom nav,
+    // no floating switcher, no FAB.
+    await expect(page.locator('nav[aria-label="Studio navigation"]')).toHaveCount(0);
+    await expect(page.getByTestId("mobile-surface-switcher")).toHaveCount(0);
+    await screenshot(page, testInfo, "G-chat-home-final");
   });
 });
 
@@ -200,12 +204,9 @@ test.describe("LiTT Studio mobile density redesign", () => {
       expect(response?.status(), "authenticated Studio navigation should return 200").toBe(200);
       await expect(page).toHaveURL(/\/studio(?:[/?#]|$)/);
       await expect(page.locator(".studio-shell")).toBeVisible({ timeout: 30_000 });
-      await expect(page.getByTestId("litt-mobile-trigger")).toBeVisible({ timeout: 30_000 });
+      // Chat is the home surface — already open on entry.
+      await expect(page.getByTestId("litt-mobile-sheet")).toBeVisible({ timeout: 30_000 });
       await expect(page.getByTestId("studio-loading")).not.toBeVisible();
-
-      await page.getByRole("button", { name: "Ask LiTT to build" }).click();
-      await expect(page.getByTestId("litt-mobile-sheet")).toBeVisible();
-      await page.getByTestId("litt-mobile-tab-chat").click();
       await expect(page.getByTestId("litt-mobile-chat-panel")).toHaveAttribute("data-active", "true");
 
       // 1. Mission / Checkpoints / Next Actions cards must NOT dominate the
