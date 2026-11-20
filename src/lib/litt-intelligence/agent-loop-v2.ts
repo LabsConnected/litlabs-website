@@ -2306,12 +2306,12 @@ async function runAgentLoopV2Inner(
       });
       modelFailed = errMsg.slice(0, 200);
       finalText = completedDeployment
-        ? describeProviderFailureAfterDeployment(completedDeployment, errMsg)
+        ? describeProviderFailureAfterDeployment(completedDeployment)
         : err instanceof AllRoutesFailedError
           ? err.userMessage
           : err instanceof AgentBudgetExhaustedError
             ? "I ran out of time before finishing this request. Your project and any completed work are preserved — try again."
-            : `I encountered an error while reasoning: ${errMsg}`;
+            : `I hit an unexpected error while reasoning and could not continue this step. Your project and completed work are preserved — please try again.`;
       modelFailureText =
         err instanceof AllRoutesFailedError || err instanceof AgentBudgetExhaustedError
           ? finalText
@@ -3413,12 +3413,12 @@ function appendChatImagesToFinalText(finalText: string, images: ChatImageOutcome
 /** Closing text when the provider failed but a deployment had succeeded. */
 function describeProviderFailureAfterDeployment(
   deployment: CompletedDeployment,
-  errMsg: string,
 ): string {
   return (
     `Your site is live at ${deployment.publicUrl}. `
     + "The deployment completed and the URL was verified, so it does not need to be run again. "
-    + `I then hit a provider error while writing the summary: ${errMsg}`
+    + "I then hit a provider error while writing the summary, so this run ends without a written "
+    + "summary — the deployment itself is unaffected."
   );
 }
 
@@ -4457,12 +4457,12 @@ async function resumeAgentLoopV2Inner(
       });
       modelFailed = errMsg.slice(0, 200);
       finalText = completedDeployment
-        ? describeProviderFailureAfterDeployment(completedDeployment, errMsg)
+        ? describeProviderFailureAfterDeployment(completedDeployment)
         : err instanceof AllRoutesFailedError
           ? err.userMessage
           : err instanceof AgentBudgetExhaustedError
             ? "I ran out of time before finishing this request. Your project and any completed work are preserved — try again."
-            : `I encountered an error while reasoning: ${errMsg}`;
+            : `I hit an unexpected error while reasoning and could not continue this step. Your project and completed work are preserved — please try again.`;
       modelFailureText =
         err instanceof AllRoutesFailedError || err instanceof AgentBudgetExhaustedError
           ? finalText
