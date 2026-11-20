@@ -19,6 +19,7 @@
 
 import "server-only";
 
+import { createHash } from "node:crypto";
 import {
   generateImage,
   type ImageGenerationInput,
@@ -37,9 +38,11 @@ import type { MediaProviderId } from "@/lib/media";
  * that can be rendered inline in chat.
  *
  * Stable operation identity: when the transport carries the approved
- * operation's identity (operationId), it becomes the service requestId, so
- * retries of the same approved operation replay instead of generating
- * and debiting twice.
+ * operation's identity (operationId), it becomes the service requestId
+ * scoped by a hash of the prompt, so retries of the same approved
+ * operation with the same prompt replay instead of generating and
+ * debiting twice — while a different prompt in the same run is a
+ * different request and generates fresh.
  */
 export async function handleImageGenerate(
   inputs: Record<string, unknown>,
@@ -93,7 +96,15 @@ export async function handleImageGenerate(
             : undefined,
         requestId:
           typeof t?.operationId === "string" && t.operationId
-            ? `approval:${t.operationId}`
+            ? // Scope the operation identity by the prompt: the
+              // operationId is per approved RUN, not per generation,
+              // so two different image asks inside one run used to
+              // share one requestId and the second replayed the
+              // first's completed image (2026-11-20: "Make a pic of
+              // bike" returned an earlier portrait). Same operation +
+              // same prompt (a genuine retry) keeps the same key and
+              // still replays without a second debit.
+              `approval:${t.operationId}:${createHash("sha256").update(prompt.trim()).digest("hex").slice(0, 12)}`
             : undefined,
       },
       input,

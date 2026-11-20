@@ -134,8 +134,9 @@ describe("resumeAgentLoopV2 — round-11 proof pattern settlement", () => {
     expect(result.runObservability?.outcome).toBe("completed");
     expect(result.completedWithWarning).toBeDefined();
     expect(result.finalText).toBe(result.completedWithWarning);
-    expect(result.finalText).toMatch(/requested work is complete/i);
-    expect(result.finalText).toMatch(/closing summary/i);
+    expect(result.finalText).toMatch(/request is complete/i);
+    expect(result.finalText).not.toMatch(/closing summary/i);
+    expect(result.finalText).not.toMatch(/quality gate/i);
     expect(result.finalText).not.toMatch(/couldn't complete this request/i);
     expect(result.failedHonestly).toBeUndefined();
     expect(result.cancelled).toBe(false);

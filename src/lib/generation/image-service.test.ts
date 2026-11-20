@@ -273,6 +273,60 @@ describe("generateImage", () => {
     expect(calls.debit).toHaveLength(0);
   });
 
+  it("does NOT replay a completed job for a DIFFERENT prompt under the same requestId (2026-11-20 live defect)", async () => {
+    const { deps, calls, jobs } = makeDeps();
+    // An earlier, different generation completed under the same
+    // operation-derived requestId (the agent path keyed solely on the
+    // approved run's identity).
+    jobs.set(
+      "op_1",
+      makeJob({
+        status: "completed",
+        prompt: "a portrait of a woman on a city street",
+        metadata: { durableUrl: "https://r2/woman.png", chargedBits: 50 },
+      }),
+    );
+
+    const result = await generateImage(
+      { userId: "user_abc", requestId: "op_1" },
+      { prompt: "a bike", providerId: "gemini" },
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      // Fresh generation for THIS prompt — not the old portrait.
+      expect(result.replayed).toBeUndefined();
+      expect(result.downloadUrl).toBe("https://provider/x.png");
+      expect(result.requestId.startsWith("op_1~")).toBe(true);
+    }
+    expect(calls.dispatch).toBe(1);
+  });
+
+  it("a retry of the re-scoped prompt replays its OWN job — still no double generation or debit", async () => {
+    const { deps, calls, jobs } = makeDeps();
+    jobs.set(
+      "op_1",
+      makeJob({
+        status: "completed",
+        prompt: "a portrait of a woman on a city street",
+        metadata: { durableUrl: "https://r2/woman.png", chargedBits: 50 },
+      }),
+    );
+    const bikeInput = { prompt: "a bike", providerId: "gemini" as const };
+
+    const first = await generateImage({ userId: "user_abc", requestId: "op_1" }, bikeInput, deps);
+    expect(first.success).toBe(true);
+    expect(calls.dispatch).toBe(1);
+    const debitsAfterFirst = calls.debit.length;
+
+    const second = await generateImage({ userId: "user_abc", requestId: "op_1" }, bikeInput, deps);
+    expect(second.success).toBe(true);
+    if (second.success) expect(second.replayed).toBe(true);
+    expect(calls.dispatch).toBe(1);
+    expect(calls.debit).toHaveLength(debitsAfterFirst);
+  });
+
   it("collapses a duplicate in-flight claim — no second generation, no debit", async () => {
     const { deps, calls, jobs } = makeDeps();
     jobs.set("op_1", makeJob({ status: "processing" }));
