@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { toSupermemoryMetadata } from "@/lib/studio/memory-service";
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
@@ -89,15 +90,14 @@ async function postHandler(req: NextRequest) {
     let supermemoryId: string | null = null;
     if (hasSupermemory()) {
       try {
-        supermemoryResult = await getSupermemory().add({
+        supermemoryResult = await getSupermemory().add(containerTag, {
           content,
-          containerTag,
-          metadata: {
+          metadata: toSupermemoryMetadata({
             ...metadata,
             ownerId: userId,
             scope: normalizedScope,
             supabaseMemoryId: record.id,
-          },
+          }),
         });
         supermemoryId = extractSupermemoryId(supermemoryResult);
       } catch (_indexError) {
@@ -186,9 +186,9 @@ async function getHandler(req: NextRequest) {
     let source = hasSupermemory() ? "supermemory+supabase" : "supabase";
     if (hasSupermemory()) {
       try {
-        supermemoryResults = (await getSupermemory().search.memories({
-          q: query,
-          containerTag,
+        supermemoryResults = (await getSupermemory().search(containerTag, {
+          query,
+          searchMode: "memories",
           limit,
         })) as { memories?: unknown[]; results?: unknown[] };
       } catch (err) {
@@ -292,10 +292,8 @@ async function deleteHandler(req: NextRequest) {
     // Best-effort delete from Supermemory.
     if (hasSupermemory() && record.supermemory_id) {
       try {
-        await getSupermemory().memories.forget({
-          containerTag,
-          id: record.supermemory_id,
-          content: record.content,
+        await getSupermemory().documents.delete(containerTag, {
+          ids: [record.supermemory_id],
         });
       } catch (_err) {
       }
@@ -342,11 +340,8 @@ async function patchHandler(req: NextRequest) {
     // Best-effort update in Supermemory.
     if (hasSupermemory() && record.supermemory_id) {
       try {
-        await getSupermemory().memories.updateMemory({
-          containerTag,
-          id: record.supermemory_id,
-          content: record.content,
-          newContent,
+        await getSupermemory().documents.update(containerTag, record.supermemory_id, {
+          content: newContent,
         });
       } catch (_err) {
       }

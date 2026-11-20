@@ -59,6 +59,20 @@ async function getSupermemory() {
   return new Supermemory({ apiKey: key });
 }
 
+// Supermemory v5 metadata values must be flat scalars or string arrays.
+export function toSupermemoryMetadata(
+  metadata: Record<string, unknown> | undefined,
+): Record<string, string | number | boolean | string[]> {
+  const out: Record<string, string | number | boolean | string[]> = {};
+  for (const [k, v] of Object.entries(metadata ?? {})) {
+    if (v == null) continue;
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[k] = v;
+    else if (Array.isArray(v) && v.every((i) => typeof i === "string")) out[k] = v as string[];
+    else out[k] = JSON.stringify(v);
+  }
+  return out;
+}
+
 /**
  * Recall memories scoped by owner_id, project_id, and optionally agent_slug.
  *
@@ -136,9 +150,9 @@ export async function recallMemories(
     try {
       const sm = await getSupermemory();
       const containerTag = `user:${ownerId}:project:${projectId}`;
-      const results = await sm.search.memories({
-        q: query,
-        containerTag,
+      const results = await sm.search(containerTag, {
+        query,
+        searchMode: "memories",
         limit,
       });
       const hits = (results.results || []) as Array<{ metadata?: { supabaseMemoryId?: string }; memory?: string; chunk?: string }>;
@@ -336,15 +350,14 @@ async function syncToSupermemory(
   try {
     const sm = await getSupermemory();
     const containerTag = `user:${ownerId}:project:${projectId}`;
-    await sm.add({
+    await sm.add(containerTag, {
       content,
-      containerTag,
-      metadata: {
+      metadata: toSupermemoryMetadata({
         ...metadata,
         supabaseMemoryId: memoryId,
         ownerId,
         projectId,
-      },
+      }),
     });
 
     // Update sync status

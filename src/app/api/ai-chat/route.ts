@@ -1,4 +1,5 @@
 import { Supermemory } from "supermemory";
+import { toSupermemoryMetadata } from "@/lib/studio/memory-service";
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
@@ -43,9 +44,9 @@ async function handler(req: NextRequest) {
     const sm = getSupermemory();
     if (sm) {
       try {
-        const memoryResults = await sm.search.memories({
-          q: lastMessage,
-          containerTag: uid,
+        const memoryResults = await sm.search(uid, {
+          query: lastMessage,
+          searchMode: "memories",
           limit: 8,
         });
         memoryContext = (memoryResults.results || [])
@@ -124,10 +125,9 @@ Output the code files immediately.`;
 
     // Async save to memory
     if (sm) {
-      sm.add({
+      sm.add(uid, {
         content: `User: ${lastMessage}\nAssistant: ${result.text}`,
-        containerTag: uid,
-        metadata: { type: "canvas-build", model },
+        metadata: toSupermemoryMetadata({ type: "canvas-build", model }),
       }).catch(() => { });
     }
 
