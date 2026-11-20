@@ -1415,7 +1415,7 @@ describe("Webhook event processing — state mutations", () => {
     });
 
     it("invoice lookup failure → 500 so Stripe retries instead of dropping the refund", async () => {
-      const { sb, inserts } = buildTrackingSupabase();
+      const { sb, inserts, updates } = buildTrackingSupabase();
       vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
       vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
       // InvoicePayment carries the invoice as an id (not expanded) → the
@@ -1431,7 +1431,15 @@ describe("Webhook event processing — state mutations", () => {
       const res = await webhookPOST(makeWebhookRequest("body", "sig"));
 
       expect(res.status).toBe(500);
-      expect(inserts.filter((i) => i.table === "stripe_events")).toHaveLength(0);
+      // The atomic claim inserts the event as "processing" up front; a
+      // failed delivery marks it "failed" — never "processed", which
+      // would make Stripe's redelivery a no-op.
+      expect(
+        inserts.filter((i) => i.table === "stripe_events" && i.row.result === "processed"),
+      ).toHaveLength(0);
+      expect(
+        updates.filter((u) => u.table === "stripe_events" && u.patch.result === "failed").length,
+      ).toBeGreaterThan(0);
     });
   });
 
@@ -1499,39 +1507,54 @@ describe("Webhook event processing — state mutations", () => {
       });
 
     it("credit pack: grant_credits error → 500, event NOT marked processed", async () => {
-      const { inserts, rpcCalls } = withGrantFaults(["error"]);
+      const { inserts, updates, rpcCalls } = withGrantFaults(["error"]);
       mockConstructEvent.mockReturnValue(creditPackEvent("evt_cp_fault_err"));
 
       const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
       const res = await webhookPOST(makeWebhookRequest("body", "sig"));
 
       expect(res.status).toBe(500);
-      expect(inserts.filter((i) => i.table === "stripe_events")).toHaveLength(0);
+      expect(
+        inserts.filter((i) => i.table === "stripe_events" && i.row.result === "processed"),
+      ).toHaveLength(0);
+      expect(
+        updates.filter((u) => u.table === "stripe_events" && u.patch.result === "failed").length,
+      ).toBeGreaterThan(0);
       const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
       expect(grants).toHaveLength(1);
       expect(grants[0].params.p_idempotency_key).toBe("creditpack_cs_creditpack_fault");
     });
 
     it("credit pack: grant_credits throw → 500, event NOT marked processed", async () => {
-      const { inserts } = withGrantFaults(["throw"]);
+      const { inserts, updates } = withGrantFaults(["throw"]);
       mockConstructEvent.mockReturnValue(creditPackEvent("evt_cp_fault_throw"));
 
       const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
       const res = await webhookPOST(makeWebhookRequest("body", "sig"));
 
       expect(res.status).toBe(500);
-      expect(inserts.filter((i) => i.table === "stripe_events")).toHaveLength(0);
+      expect(
+        inserts.filter((i) => i.table === "stripe_events" && i.row.result === "processed"),
+      ).toHaveLength(0);
+      expect(
+        updates.filter((u) => u.table === "stripe_events" && u.patch.result === "failed").length,
+      ).toBeGreaterThan(0);
     });
 
     it("credit pack: failed delivery then Stripe redelivery → grant retried under the same idempotency key", async () => {
-      const { inserts, rpcCalls } = withGrantFaults(["error", "ok"]);
+      const { inserts, updates, rpcCalls } = withGrantFaults(["error", "ok"]);
       const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
 
       // First delivery: grant RPC is down → 500, no processed mark.
       mockConstructEvent.mockReturnValue(creditPackEvent("evt_cp_retry"));
       const first = await webhookPOST(makeWebhookRequest("body", "sig"));
       expect(first.status).toBe(500);
-      expect(inserts.filter((i) => i.table === "stripe_events")).toHaveLength(0);
+      expect(
+        inserts.filter((i) => i.table === "stripe_events" && i.row.result === "processed"),
+      ).toHaveLength(0);
+      expect(
+        updates.filter((u) => u.table === "stripe_events" && u.patch.result === "failed").length,
+      ).toBeGreaterThan(0);
 
       // Stripe redelivers the SAME event id after the RPC recovers.
       const second = await webhookPOST(makeWebhookRequest("body", "sig"));
@@ -1547,21 +1570,32 @@ describe("Webhook event processing — state mutations", () => {
       expect(grants[0].params.p_idempotency_key).toBe("creditpack_cs_creditpack_fault");
       expect(grants[1].params.p_idempotency_key).toBe("creditpack_cs_creditpack_fault");
 
-      // Event marked processed only after the successful delivery.
+      // The atomic claim inserts a "processing" row per delivery (this
+      // mock doesn't persist stripe_events, so the redelivery claims
+      // fresh rather than reclaiming "failed"); success is proven by the
+      // "processed" mark in updates, not by an insert.
       const eventInserts = inserts.filter((i) => i.table === "stripe_events");
-      expect(eventInserts).toHaveLength(1);
-      expect(eventInserts[0].row.stripe_event_id).toBe("evt_cp_retry");
+      expect(eventInserts.length).toBeGreaterThanOrEqual(1);
+      expect(eventInserts.every((i) => i.row.result === "processing")).toBe(true);
+      expect(
+        updates.filter((u) => u.table === "stripe_events" && u.patch.result === "processed").length,
+      ).toBeGreaterThanOrEqual(1);
     });
 
     it("invoice.paid: subscription grant_credits error → 500, event NOT marked processed", async () => {
-      const { inserts, rpcCalls } = withGrantFaults(["error"]);
+      const { inserts, updates, rpcCalls } = withGrantFaults(["error"]);
       mockConstructEvent.mockReturnValue(paidInvoiceEvent("evt_inv_fault"));
 
       const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
       const res = await webhookPOST(makeWebhookRequest("body", "sig"));
 
       expect(res.status).toBe(500);
-      expect(inserts.filter((i) => i.table === "stripe_events")).toHaveLength(0);
+      expect(
+        inserts.filter((i) => i.table === "stripe_events" && i.row.result === "processed"),
+      ).toHaveLength(0);
+      expect(
+        updates.filter((u) => u.table === "stripe_events" && u.patch.result === "failed").length,
+      ).toBeGreaterThan(0);
       const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
       expect(grants).toHaveLength(1);
       expect(grants[0].params.p_idempotency_key).toBe("invoice_grant_in_grant_fault");

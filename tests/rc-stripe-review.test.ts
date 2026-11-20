@@ -27,7 +27,15 @@ vi.mock("@/lib/supabase-admin", () => ({
         maybeSingle: async () => table === "users"
           ? probe.lookup()
           : { data: null, error: null },
-        insert: probe.processed,
+        // The atomic claim inserts the event row as "processing" up front;
+        // the "processed" mark is now an UPDATE, so probe.processed tracks
+        // updates carrying result === "processed" (a failed delivery marks
+        // "failed" instead and must not count).
+        insert: async () => ({ error: null }),
+        update: (patch: { result?: string }) => {
+          if (patch?.result === "processed") probe.processed(patch);
+          return { eq: async () => ({ error: null }) };
+        },
       };
       return builder;
     },
