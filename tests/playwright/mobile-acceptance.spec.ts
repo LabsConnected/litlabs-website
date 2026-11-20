@@ -579,7 +579,7 @@ test.describe("LiTT Studio mobile visual evidence", () => {
               resources: performance
                 .getEntriesByType("resource")
                 .filter((r) => r.name.includes("icon-512"))
-                .map((r) => `${r.name} ${r.initiatorType}`),
+                .map((r) => `${r.name} ${(r as PerformanceResourceTiming).initiatorType}`),
             },
             null,
             2,
