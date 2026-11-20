@@ -1258,6 +1258,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         });
         store.actions.setHoloState("APPROVAL");
         store.actions.setOverlay("none");
+      } else {
+        // Queue drained without a UI decision reaching handleApproval
+        // (bridge.cancel(), or any resolve path that bypassed the prompt).
+        // Never leave a dead approval prompt owning the keyboard.
+        store.actions.clearApproval();
+        if (store.state.holoState === "APPROVAL") {
+          store.actions.setHoloState(store.state.isProcessing ? "RUNNING" : "IDLE");
+        }
       }
     });
   }, [approvalBridge, store]);
@@ -1545,7 +1553,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
     if (input === "/help") {
-      act(store, "Commands: /new /resume /inspect /plan /act /fix /verify /diff /ship /workspace /branch /files /model /status /doctor /settings /run /route /providers /clear /help /exit", "help", "decision", "HELP");
+      act(store, "Commands: /new /resume /inspect /plan /act /fix /verify /diff /ship /workspace /branch /files /model /status /activity /doctor /settings /run /route /providers /clear /help /exit", "help", "decision", "HELP");
       return;
     }
     // ─── Mode commands — real Plan/Act policy ─────────────────────
@@ -1795,10 +1803,16 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
     if (input === "/activity") {
-      // Show full (untruncated) activity log for debugging.
+      // Scrollable activity history — the full retained feed with
+      // expandable details (PgUp/PgDn, d, Esc). Works during missions.
+      store.actions.setOverlay("activity");
+      return;
+    }
+    if (input === "/activity dump") {
+      // Legacy debug dump: full (untruncated) activity log inline.
       // Filters out tool-call markup that was intentionally excluded
-      // from the normal feed — /activity is for human-readable debug,
-      // not raw model protocol internals.
+      // from the normal feed — /activity dump is for human-readable
+      // debug, not raw model protocol internals.
       const log = store.state.activityLog;
       if (log.length === 0) {
         store.actions.addActivity({ id: `act_${Date.now()}`, ts: Date.now(), type: "info", text: "No activity recorded yet." });
@@ -3850,7 +3864,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     submitRef.current = submit;
   }, [submit]);
 
-  const handleApproval = useCallback(async (approved: boolean) => {
+  const handleApproval = useCallback(async (approved: boolean, scope: "once" | "session" = "once") => {
     const prompt = store.state.approvalPrompt;
     if (!prompt) return;
 
@@ -3879,7 +3893,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // Resolve the gateway's pending approval promise.
     // The gateway will then verifyApproval() → VerifiedApproval → continue.
     // The UI only provides the boolean — never the VerifiedApproval itself.
-    approvalBridge.decide(approved);
+    // "session" scope records a command-class grant so identical safe-class
+    // requests stop re-prompting (Approve similar / [⇧a]).
+    approvalBridge.decide(approved, scope);
 
     // Don't set IDLE here — the gateway execution is still in flight.
     // The submit() callback will set the final holo state when
