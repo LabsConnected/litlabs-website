@@ -474,11 +474,32 @@ test.describe("LiTT Studio mobile visual evidence", () => {
       await heroImage.scrollIntoViewIfNeeded();
       // Lazy images inside the scroll container can report a zero box until
       // painted — wait for the resource itself to finish loading instead.
-      await expect
+      const imgLoaded = await expect
         .poll(() =>
           heroImage.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0),
+          { timeout: 15_000 },
         )
-        .toBe(true);
+        .toBe(true)
+        .then(() => true)
+        .catch(async () => {
+          const { writeFileSync } = await import("fs");
+          const diag = await heroImage.evaluate((el: HTMLImageElement) => {
+            const r = el.getBoundingClientRect();
+            const cs = getComputedStyle(el);
+            return {
+              complete: el.complete,
+              naturalWidth: el.naturalWidth,
+              currentSrc: el.currentSrc,
+              rect: { x: r.x, y: r.y, w: r.width, h: r.height },
+              display: cs.display,
+              visibility: cs.visibility,
+              perfEntries: performance.getEntriesByName(el.currentSrc || el.src).length,
+            };
+          });
+          writeFileSync(`test-results/img-diag-${width}.json`, JSON.stringify(diag, null, 2));
+          return false;
+        });
+      expect(imgLoaded, "hero image should finish loading").toBe(true);
       await shot(page, `${width}-long-answer-expanded`);
       await page.getByRole("button", { name: "Show less" }).first().click();
 
