@@ -342,6 +342,26 @@ test.describe("LiTT Studio mobile visual evidence", () => {
       createdAt: now(),
       updatedAt: now(),
     });
+    // Give the workspace a projectId so handleComposerSend skips its
+    // post-send refreshCapabilities() await — otherwise the composer's
+    // synchronous submit lock stays held for the health-check round-trip
+    // and a fast follow-up Enter is silently dropped.
+    await page.route("**/api/capabilities**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          capabilities: [
+            {
+              id: "project",
+              status: "ready",
+              projectId: "proj-mobile-evidence",
+              projectName: "Mobile evidence chat",
+            },
+          ],
+        }),
+      });
+    });
     await page.route("**/api/studio/**", async (route) => {
       const { appendFileSync } = await import("fs");
       appendFileSync(

@@ -1955,7 +1955,11 @@ function CommandStudioContent() {
           }
         }
         if (!capabilities.projectId) {
-          await refreshCapabilities();
+          // Fire-and-forget: awaiting the health-check round-trip here holds
+          // the composer's synchronous submit lock, so a fast follow-up send
+          // is silently dropped. Nothing below depends on the refreshed
+          // capabilities, and the 15s interval refresh covers staleness.
+          void refreshCapabilities();
         }
       }
       return result;
