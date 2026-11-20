@@ -504,7 +504,9 @@ test.describe("LiTT Studio mobile visual evidence", () => {
 
       const response = await page.goto("/studio", { waitUntil: "domcontentloaded", timeout: 90_000 });
       expect(response?.status()).toBe(200);
-      await expect(page.locator(".studio-shell")).toBeVisible({ timeout: 30_000 });
+      // First test in a run pays the dev-server cold-compile cost; give the
+      // shell hydration room on a loaded runner.
+      await expect(page.locator(".studio-shell")).toBeVisible({ timeout: 90_000 });
       await expect(page.getByTestId("litt-mobile-sheet")).toBeVisible({ timeout: 30_000 });
       await expect(page.getByTestId("studio-loading")).not.toBeVisible();
 
@@ -525,16 +527,30 @@ test.describe("LiTT Studio mobile visual evidence", () => {
       await heroImage.scrollIntoViewIfNeeded();
       await expect(heroImage).toBeAttached();
       // Chromium can defer the fetch for an eagerly-loaded <img> that was
-      // mounted while its subtree was clipped; re-asserting src nudges the
-      // loader without changing what is being proven (the element decodes).
+      // mounted while its subtree was clipped; a cache-busted src re-assert
+      // forces the loader without changing what is being proven.
       await heroImage.evaluate((el: HTMLImageElement) => {
-        if (el.naturalWidth === 0) el.src = el.src;
+        if (el.naturalWidth === 0) {
+          const base = el.src.split("?")[0];
+          el.src = `${base}?evidence=${Date.now()}`;
+        }
       });
       try {
         await expect
           .poll(
-            () => heroImage.evaluate((el: HTMLImageElement) => el.naturalWidth),
-            { timeout: 15_000 },
+            async () => {
+              // Re-nudge only when the previous attempt settled without a
+              // decode (complete && naturalWidth 0); a pending fetch is left
+              // alone so we don't keep aborting it.
+              return heroImage.evaluate((el: HTMLImageElement) => {
+                if (el.naturalWidth === 0 && el.complete) {
+                  const base = el.src.split("?")[0];
+                  el.src = `${base}?evidence=${Date.now()}`;
+                }
+                return el.naturalWidth;
+              });
+            },
+            { timeout: 30_000, intervals: [500, 1000, 2000] },
           )
           .toBeGreaterThan(0);
       } catch (err) {
