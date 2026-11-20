@@ -472,8 +472,11 @@ test.describe("LiTT Studio mobile visual evidence", () => {
       await expect(page.getByRole("button", { name: "Show less" }).first()).toBeVisible();
       const heroImage = page.locator('img[alt="Generated hero mockup"]');
       await heroImage.scrollIntoViewIfNeeded();
-      // Lazy images inside the scroll container can report a zero box until
-      // painted — wait for the resource itself to finish loading instead.
+      // Unsized lazy images inside the scroll container can sit at 0×0 and
+      // never intersect — force eager loading, then wait for the resource.
+      await heroImage.evaluate((el: HTMLImageElement) => {
+        el.loading = "eager";
+      });
       const imgLoaded = await expect
         .poll(() =>
           heroImage.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0),

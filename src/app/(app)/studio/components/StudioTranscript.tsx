@@ -984,7 +984,10 @@ export default function StudioTranscript({
                         components={{
                           img: ({ src, alt }) => (
                             // eslint-disable-next-line @next/next/no-img-element
-                            <img src={src} alt={alt} className="h-auto max-w-full rounded-lg object-contain" loading="lazy" />
+                            // No lazy: unsized lazy images inside the scroll
+                            // container stay 0×0, never intersect, and never
+                            // fetch — chat images must render directly.
+                            <img src={src} alt={alt} className="h-auto max-w-full rounded-lg object-contain" decoding="async" />
                           ),
                           pre: ({ children }) => {
                             // Extract raw text from the code element for copying
