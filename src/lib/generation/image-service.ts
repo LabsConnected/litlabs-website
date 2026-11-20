@@ -1081,6 +1081,15 @@ export type ImageGenerationSuccess = {
   assetId: string | null;
   /** True if generation succeeded but Asset Lake persistence failed. */
   assetPersistenceFailed: boolean;
+  /**
+   * True when image bytes were verified this run: an inline data: URL, or
+   * bytes copied into durable storage (durableUrl differs from the
+   * provider URL). False when only an unverified provider URL is held —
+   * e.g. the Pollinations lazy endpoint that can answer 402/429 later.
+   * Async generation is preserved either way; this only distinguishes
+   * "we hold the image" from "we hold a link that might work".
+   */
+  deliveryVerified?: boolean;
   /** True when this response replayed an earlier completed operation. */
   replayed?: boolean;
   durationMs: number;
@@ -1717,6 +1726,13 @@ export async function generateImage(
     assetPersistenceFailed = true;
   }
 
+  // Bytes are verified when the payload is inline (data: URL — the bytes
+  // came back with the provider response) or when persistImage actually
+  // copied them into durable storage (it returns a different URL on
+  // success and the source URL unchanged on any failure).
+  const deliveryVerified =
+    result.downloadUrl.startsWith("data:") || durableUrl !== result.downloadUrl;
+
   const duration = Date.now() - startTime;
   console.info(
     `[image-service] OK provider=${usedProviderId} requestId=${requestId} duration=${duration}ms`,
@@ -1736,6 +1752,7 @@ export async function generateImage(
     generationJobId,
     assetId: generationJobId ? `generation_job:${generationJobId}` : null,
     assetPersistenceFailed,
+    deliveryVerified,
     durationMs: duration,
   };
 }

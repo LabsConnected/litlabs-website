@@ -155,4 +155,30 @@ describe("image.generate save failures are narrated truthfully", () => {
     });
     expect(summary).toBe("Media generated via cloudflare");
   });
+
+  it("summarizeToolResult names unverified delivery instead of implying it", () => {
+    const summary = summarizeToolResult("image.generate", {
+      success: true,
+      providerId: "pollinations",
+      downloadUrl: "https://image.pollinations.ai/prompt/a%20bike?...",
+      deliveryVerified: false,
+      assetPersistenceFailed: false,
+    });
+    expect(summary).toContain("delivery could not be verified");
+    expect(summary).not.toContain("saved to project");
+  });
+
+  it("summarizeToolResult keeps the saved-to-project claim when bytes landed despite unverified provider URL", () => {
+    const summary = summarizeToolResult("image.generate", {
+      success: true,
+      providerId: "pollinations",
+      downloadUrl: "https://image.pollinations.ai/prompt/a%20bike?...",
+      deliveryVerified: false,
+      savedToProject: true,
+      projectPath: "public/assets/images/bike.png",
+      assetPersistenceFailed: false,
+    });
+    // The project save fetched the bytes — that IS verified delivery.
+    expect(summary).toBe("Image generated and saved to project (public/assets/images/bike.png)");
+  });
 });
