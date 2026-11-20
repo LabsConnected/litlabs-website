@@ -234,7 +234,7 @@ export default function LiTTMobileSheet({
             <button
               type="button"
               onClick={() => onTabChange("live")}
-              className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+              className="flex min-h-11 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
               style={{
                 color: activeTab === "live" ? "var(--color-accent)" : "var(--text-muted)",
                 backgroundColor: activeTab === "live" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
@@ -250,7 +250,7 @@ export default function LiTTMobileSheet({
                 <button
                   type="button"
                   onClick={() => onTabChange("files")}
-                  className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+                  className="flex min-h-11 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
                   style={{
                     color: activeTab === "files" ? "var(--color-accent)" : "var(--text-muted)",
                     backgroundColor: activeTab === "files" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
@@ -264,7 +264,7 @@ export default function LiTTMobileSheet({
                 <button
                   type="button"
                   onClick={() => onTabChange("components")}
-                  className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+                  className="flex min-h-11 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
                   style={{
                     color: activeTab === "components" ? "var(--color-accent)" : "var(--text-muted)",
                     backgroundColor: activeTab === "components" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
