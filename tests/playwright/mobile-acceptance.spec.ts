@@ -441,7 +441,10 @@ test.describe("LiTT Studio mobile visual evidence", () => {
   async function sendAndWait(page: Page, text: string, expectedText: string) {
     const input = page.getByTestId("studio-command-input");
     await input.fill(text);
-    await page.getByTestId("studio-send-button").click();
+    await expect(input).toHaveValue(text);
+    // Enter submits — the send-button click proved flaky once a completion
+    // card mounted between turns (click landed but React state was stale).
+    await input.press("Enter");
     await expect(page.getByText(expectedText).last()).toBeVisible({ timeout: 30_000 });
   }
 
