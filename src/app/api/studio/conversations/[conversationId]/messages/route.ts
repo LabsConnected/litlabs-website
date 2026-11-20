@@ -1619,6 +1619,28 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               toolCalls: v2ToolCalls.map((c) => ({ toolId: c.toolId, success: c.success, mutating: c.mutating, paths: c.paths, persisted: c.persisted })),
               deployment: deploymentEvidenceFrom(v2ToolCalls),
               workspaceChange: v2Result?.workspaceChange ?? null,
+              // Preview evidence comes from the launch flow's own verified
+              // status — never a tool's self-report. Only set for build-flow
+              // statuses that actually ran a preview phase; "completed"
+              // (read-only/exec/media turns have no preview phase) and
+              // "cancelled" leave it unset so they are unaffected.
+              ...(launchFlowResult &&
+              (launchFlowResult.status === "preview_ready" ||
+                launchFlowResult.status === "deployed" ||
+                launchFlowResult.status === "failed")
+                ? {
+                    preview: {
+                      started:
+                        launchFlowResult.status !== "failed" ||
+                        !!launchFlowResult.previewUrl,
+                      ready:
+                        launchFlowResult.status === "preview_ready" ||
+                        launchFlowResult.status === "deployed" ||
+                        !!launchFlowResult.previewUrl,
+                      failed: launchFlowResult.status === "failed",
+                    },
+                  }
+                : {}),
             })
           : null;
         const executionNotVerified =
