@@ -3,7 +3,7 @@
 import { terminalHealthOf } from "@/lib/studio/terminal-health";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { Image as ImageIcon } from "lucide-react";
+import { Image as ImageIcon, LoaderCircle, Music, RefreshCw, Trash2, Video, X } from "lucide-react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
@@ -14,6 +14,8 @@ import { useStudioAgentStore, AGENT_META } from "../stores/useStudioAgentStore";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
+import { notifyAssetsChanged, useAssetsRefreshTrigger } from "../hooks/useAssetsRefresh";
+import type { StudioAsset } from "@/lib/assets/types";
 import { resolveSelectedModelHealth } from "../lib/model-health";
 import { useCanonicalConversation } from "../hooks/useCanonicalConversation";
 import { downloadProjectExport } from "../lib/export-project";
@@ -53,7 +55,7 @@ import StudioRightRail, { type StudioRailTab } from "./StudioRightRail";
 import { ApprovalCard } from "./ApprovalCard";
 import MissionCards from "./MissionCards";
 import PersistentMusicPlayer from "./PersistentMusicPlayer";
-import { MobileCommandNav, type MobileStudioSurface } from "./CommandStudioNav";
+import MobileStudioTopBar from "./MobileStudioTopBar";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
@@ -1199,42 +1201,41 @@ function CommandStudioContent() {
     }
   }, [contextDrawerTab]);
 
-  // Mobile is a work-surface dock over the same conversation, execution,
-  // preview, file, and activity state used by desktop. Switching a surface
-  // never creates a second runtime or stops the active mission.
-  const handleMobileSurface = useCallback((surface: MobileStudioSurface) => {
+  // Back to chat — the phone top bar's way home from any tool surface
+  // (mobile layout card, 2026-11-19). Also used by the Tools sheet's
+  // "Back to chat" row.
+  const openMobileChat = useCallback(() => {
+    setMobileToolsOpen(false);
     setMobileBuildOpen(false);
-    if (surface === "chat") {
-      setMobileToolsOpen(false);
-      setLittActiveTab("chat");
-      setMobileLittOpen(true);
-      return;
-    }
-    if (surface === "activity") {
-      setMobileToolsOpen(false);
-      setLittActiveTab("live");
-      setMobileLittOpen(true);
-      return;
-    }
-    if (surface === "preview") {
-      setMobileLittOpen(false);
-      setMobileToolsOpen(false);
-      setContextDrawerOpen(false);
-      setDestination("studio");
-      setStudioMode("preview");
-      return;
-    }
-    if (surface === "files") {
-      setMobileLittOpen(false);
-      setMobileToolsOpen(false);
-      setContextDrawerTab("files");
-      setContextDrawerOpen(true);
-      return;
-    }
+    // A full-screen tool surface (the mobile dock) must release when
+    // the user goes Back to chat — one surface at a time.
+    setDockOpen(false);
     setLittActiveTab("chat");
     setMobileLittOpen(true);
-    setMobileToolsOpen(true);
   }, []);
+
+  // Label shown beside Back to chat while a tool surface owns the phone
+  // screen — truthful surface names only.
+  const mobileSurfaceLabel = (() => {
+    if (dockOpen) {
+      return (
+        { activity: "Activity", terminal: "Terminal", inspector: "Inspector", media: "Media" }[dockTab] ??
+        "Tools"
+      );
+    }
+    if (destination === "create") {
+      return { image: "Image", video: "Video", audio: "Audio", music: "Music", environment: "Environment", game: "Game" }[createMode] ?? "Create";
+    }
+    if (destination !== "studio") return destination === "assets" ? "Assets" : destination === "agents" ? "Agents" : destination === "missions" ? "Missions" : "More";
+    switch (studioMode) {
+      case "preview": return "Static View";
+      case "code": return "Code";
+      case "files": return "Canvas";
+      case "media": return "Media";
+      case "design": return "Design";
+      default: return "Workspace";
+    }
+  })();
 
   // Derived booleans for downstream components (must be after state declarations)
   // Activity is an OPEN action. It always opens the bottom dock on the
@@ -1457,10 +1458,6 @@ function CommandStudioContent() {
 
   // Files panel state is now managed by the Context Drawer (Phase C2).
   // The old filesPanelOpen state has been replaced by contextDrawerOpen + contextDrawerTab.
-
-  const handleSelectDestination = useCallback((dest: StudioDestination) => {
-    setDestination(dest);
-  }, []);
 
   // New-project dialog state lives up here (not with the other project
   // creation logic below) because the conversation controller references
@@ -1960,7 +1957,11 @@ function CommandStudioContent() {
           }
         }
         if (!capabilities.projectId) {
-          await refreshCapabilities();
+          // Fire-and-forget: awaiting the health-check round-trip here holds
+          // the composer's synchronous submit lock, so a fast follow-up send
+          // is silently dropped. Nothing below depends on the refreshed
+          // capabilities, and the 15s interval refresh covers staleness.
+          void refreshCapabilities();
         }
       }
       return result;
@@ -2825,6 +2826,16 @@ function CommandStudioContent() {
     assistantText: "",
   });
 
+  // New Chat from the phone top bar / Tools menu — opens the chat sheet
+  // on a fresh conversation (declared after `conversation` exists).
+  const startNewMobileChat = useCallback(() => {
+    setMobileToolsOpen(false);
+    setMobileBuildOpen(false);
+    setLittActiveTab("chat");
+    setMobileLittOpen(true);
+    void conversation.createConversation({ forceNew: true });
+  }, [conversation]);
+
   const handleLiveTranscript = useCallback(async (role: "user" | "assistant", text: string) => {
     if (!text.trim()) return;
 
@@ -2992,19 +3003,6 @@ function CommandStudioContent() {
     },
     [studioMode, studioShellActive, openStageSurface],
   );
-  const mobileSurface: MobileStudioSurface | null = mobileToolsOpen
-    ? "more"
-    : mobileLittOpen
-      // The open LiTT sheet IS the Chat surface — its internal tabs
-      // (Chat / Live) switch inside it. The phone dock is exactly
-      // Chat · Preview · Files · More (Finish Spec, Larry 2026-11-14);
-      // Activity has no dock entry anymore.
-      ? "chat"
-      : contextDrawerOpen && contextDrawerTab === "files"
-        ? "files"
-        : isPreview
-          ? "preview"
-          : null;
   // Canvas-first 2-zone layout: exactly one primary workspace surface at a
   // time. The live preview is the Preview workspace tab — never a second
   // column beside the workspace.
@@ -3055,7 +3053,11 @@ function CommandStudioContent() {
       <span className="min-w-0 flex-1 font-medium">
         {conversation.requiresReauth
           ? "Your session expired. Sign in again to continue."
-          : conversation.sendError ?? projectCreateError}
+          : isMobileLitt && conversation.sendError
+            ? // Mobile card rule: chat shows only the safe copy — raw
+              // provider/server error text never renders on the phone.
+              "We hit a snag, try again."
+            : conversation.sendError ?? projectCreateError}
       </span>
       <div className="flex shrink-0 items-center gap-2">
         {!conversation.requiresReauth && (conversation.sendError || projectCreateError) && (
@@ -3969,7 +3971,32 @@ function CommandStudioContent() {
           backgroundImage: "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(23,122,54,0.05), transparent)",
         }}
       >
-        {/* One compact header — replaces AutonomicLoopBanner + StudioTopBar */}
+        {/* One compact header — replaces AutonomicLoopBanner + StudioTopBar.
+            Desktop/laptop keep the full CommandStudioHeader; the phone
+            (<lg, the mobile viewport tier) gets the slim chat-first top
+            bar instead — project name + New Chat + one menu button, with
+            Back to chat while a tool surface is open (layout card,
+            2026-11-19). */}
+        {isMobileLitt ? (
+          <MobileStudioTopBar
+            projectId={capabilities.projectId}
+            projectName={capabilities.projectName}
+            onProjectSelect={handleSelectProject}
+            onCreateProject={openProjectNameDialog}
+            onDeleteProject={handleDeleteProject}
+            onProjectRenamed={(projectId, name) => {
+              if (capabilities.projectId !== projectId) return;
+              refreshCapabilities();
+              window.dispatchEvent(new CustomEvent("studio:project-renamed", { detail: { projectId, name } }));
+            }}
+            chatOpen={mobileLittOpen}
+            surfaceLabel={mobileSurfaceLabel}
+            onBackToChat={openMobileChat}
+            onNewChat={startNewMobileChat}
+            onOpenMenu={() => setMobileToolsOpen(true)}
+            busy={conversation.busy}
+          />
+        ) : (
         <CommandStudioHeader
           onPreviewAction={handlePreview}
           onToggleDockAction={studioShellActive ? undefined : handleToggleDock}
@@ -4023,6 +4050,7 @@ function CommandStudioContent() {
           }
           onReconnectWorkspaceAction={handlePrepareWorkspace}
         />
+        )}
 
         {/* Export result toast — reports the server's real outcome. */}
         {exportJob.status !== "idle" && (
@@ -4395,9 +4423,30 @@ function CommandStudioContent() {
                 StudioDrawer and the desktop ContextDrawer: Activity |
                 Files | Terminal | Inspector | Media. The terminal stays
                 mounted (display:none when inactive) so the PTY survives
-                tab switches and auto-connect keeps working. */}
+                tab switches and auto-connect keeps working.
+                Mobile (2026-11-19 card): the dock is the full-screen
+                tool surface — an overlay bounded by the studio body so
+                Back to chat in the slim top bar stays reachable; in-flow
+                it keeps its desktop bottom-panel geometry. */}
+            <div
+              className={
+                isMobileLitt && dockOpen
+                  ? // Absolute (not fixed) so the overlay is bounded by
+                    // data-studio-body — it starts BELOW the slim top bar
+                    // (and the global banner) instead of covering them.
+                    "absolute inset-0 z-[10040] flex flex-col"
+                  : "contents"
+              }
+              style={
+                isMobileLitt && dockOpen
+                  ? { backgroundColor: "var(--studio-surface)" }
+                  : undefined
+              }
+              data-testid={isMobileLitt && dockOpen ? "mobile-dock-overlay" : undefined}
+            >
             <StudioDock
               open={dockOpen}
+              fill={isMobileLitt}
               activeTab={dockTab}
               onTabChange={setDockTab}
               onClose={() => setDockOpen(false)}
@@ -4466,6 +4515,7 @@ function CommandStudioContent() {
               }
               mediaContent={<MediaUtilityDock />}
             />
+            </div>
           </main>
 
           {/* Right rail — the Regular layout's third column (mockup
@@ -4553,113 +4603,16 @@ function CommandStudioContent() {
         {/* Persistent music player — survives tool switches while audio plays */}
         <PersistentMusicPlayer />
 
-        {/* Mobile work-surface dock — Chat / Preview / Files / Activity / More.
-            All surfaces operate on the same mission, conversation, preview,
-            browser, and execution stores as desktop. */}
-        <MobileCommandNav
-          active={destination}
-          onSelect={handleSelectDestination}
-          surface={mobileSurface}
-          onSelectSurface={handleMobileSurface}
-        />
+        {/* Mobile work-surface dock — RETIRED on the phone by the
+            2026-11-19 chat-first layout card: Chat · Static View · Files ·
+            More are now behind the slim top bar's menu, and tool surfaces
+            return via Back to chat. MobileCommandNav remains for
+            reference/tests but is no longer mounted on the mobile tier. */}
 
-        {/* Mobile LiTT FAB trigger (<1024px) — Phase C2.1. Secondary
-            affordance now: the Chat|Canvas segmented switcher above is the
-            primary fast path. The sheet reuses the exact same
-            littChatContent / littLiveContent used by the desktop rail —
-            never both at once. Hidden while the dock, context drawer,
-            canvas overlay, or live voice overlay is open: at z-[10015]
-            the FAB would float over their scrims and cover tool action
-            buttons. */}
-        {/* Mobile Chat|Canvas fast switcher — canvas-first 2-zone layout.
-            One primary surface dominates at a time on mobile; this compact
-            segmented control is the primary fast path between Chat and
-            Canvas, always thumb-reachable just above the bottom nav on the
-            canvas view. Both surfaces stay mounted and toggle via
-            visibility/display (same pattern as LiTTPanel's display:none
-            collapse), so SSE connections, scroll position, and unsent
-            composer drafts survive switching. Hidden while the dock,
-            context drawer, canvas overlay, or live voice overlay owns the
-            screen (same gate as the FAB trigger below). The segmented
-            control is a tablist: the active segment marks the visible
-            surface; tapping the other surface switches to it. */}
-        {isMobileLitt && !mobileLittOpen && !dockOpen && !contextDrawerOpen && !canvasOpen && !livePanelOpen && (
-          <div
-            className="fixed left-1/2 z-[10015] flex -translate-x-1/2 items-center gap-0.5 rounded-full border p-1 shadow-lg"
-            style={{
-              bottom: "calc(var(--studio-mobile-bottom-h) + env(safe-area-inset-bottom) + 12px)",
-              backgroundColor: "var(--studio-surface)",
-              borderColor: "var(--studio-border-strong)",
-              backdropFilter: "blur(12px)",
-            }}
-            role="tablist"
-            aria-label="Switch between chat and canvas"
-            data-testid="mobile-surface-switcher"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={false}
-              onClick={() => setMobileLittOpen(true)}
-              className="min-h-[40px] rounded-full px-4 text-[12px] font-bold transition active:scale-95"
-              style={{ color: "var(--text-muted)" }}
-              data-testid="mobile-switch-chat"
-            >
-              Chat
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={true}
-              className="min-h-[40px] rounded-full bg-accent/15 px-4 text-[12px] font-bold text-accent transition"
-              data-testid="mobile-switch-canvas"
-            >
-              Canvas
-            </button>
-          </div>
-        )}
-        {isMobileLitt && !mobileLittOpen && !dockOpen && !contextDrawerOpen && !canvasOpen && !livePanelOpen && (
-          <button
-            type="button"
-            onClick={() => setMobileLittOpen(true)}
-            className="fixed z-[10015] grid h-11 w-11 place-items-center rounded-full border shadow-lg transition active:scale-95"
-            style={{
-              right: 12,
-              bottom: "calc(var(--studio-mobile-bottom-h) + env(safe-area-inset-bottom) + 12px)",
-              backgroundColor: "var(--studio-surface)",
-              borderColor: "var(--studio-border-strong)",
-              color: "var(--litt-primary)",
-              backdropFilter: "blur(12px)",
-            }}
-            aria-label={conversation.busy ? "LiTT is working — open chat" : "Ask LiTT to build"}
-            title={conversation.busy ? "LiTT is working" : "Ask LiTT to build"}
-            data-testid="litt-mobile-trigger"
-          >
-            <span
-              className="flex h-6 w-6 items-center justify-center rounded-md text-[11px] font-black"
-              style={{
-                background: "linear-gradient(135deg, rgba(23,122,54,0.22), rgba(23,122,54,0.08))",
-              }}
-              aria-hidden
-            >
-              L
-            </span>
-            {/* Running indicator — when the chat sheet is closed mid-run,
-                this dot is the only signal that LiTT is still working.
-                Real state only: bound to conversation.busy, not a timer. */}
-            {conversation.busy && (
-              <span
-                className="absolute -right-0.5 -top-0.5 h-3 w-3 animate-pulse rounded-full border-2"
-                style={{
-                  backgroundColor: "var(--litt-primary)",
-                  borderColor: "var(--studio-surface)",
-                }}
-                data-testid="litt-mobile-busy-dot"
-                aria-hidden
-              />
-            )}
-          </button>
-        )}
+        {/* Mobile floating Chat|Canvas switcher + LiTT FAB — RETIRED by
+            the 2026-11-19 chat-first layout card ("nothing floats"). The
+            slim top bar's Back to chat / menu own those affordances now;
+            a busy run is signalled by the top bar's working dot. */}
         {/* Mobile Chat surface — stays MOUNTED on the mobile tier and
             toggles via display (same pattern as LiTTPanel's display:none
             collapse), so SSE connections, scroll position, and unsent
@@ -4685,6 +4638,7 @@ function CommandStudioContent() {
               projectName={capabilities.projectName}
               branch={capabilities.activeBranch}
               onOpenTools={() => setMobileToolsOpen(true)}
+              onNewChat={startNewMobileChat}
             />
           </div>
         )}
@@ -4703,7 +4657,7 @@ function CommandStudioContent() {
         )}
         {/* Mobile density redesign: Tools sheet — Code, Canvas, Preview,
             Files, Terminal, Activity in one place. */}
-        {isMobileLitt && mobileLittOpen && mobileToolsOpen && (
+        {isMobileLitt && mobileToolsOpen && (
           <MobileBottomSheet
             open={mobileToolsOpen}
             onClose={() => setMobileToolsOpen(false)}
@@ -4711,6 +4665,8 @@ function CommandStudioContent() {
             testId="mobile-tools-dialog"
           >
             <MobileToolsSheet
+              onOpenChat={openMobileChat}
+              onNewChat={startNewMobileChat}
               onOpenCode={openMobileTool(() => { setDestination("studio"); setStudioMode("code"); })}
               onOpenCanvas={openMobileTool(() => { setDestination("studio"); setStudioMode("files"); })}
               onOpenPreview={openMobileTool(handlePreview)}
@@ -4747,7 +4703,7 @@ function CommandStudioContent() {
       {/* Canvas overlay — opens when a canvas action is executed from chat */}
       {canvasOpen && (
         <aside
-          className="fixed z-[10009] flex flex-col overflow-hidden border shadow-2xl md:bottom-0 md:right-0 md:top-[calc(var(--studio-header-h)+4px)] md:w-full md:max-w-[520px] md:border-l bottom-[calc(var(--studio-mobile-bottom-h)+env(safe-area-inset-bottom))] left-0 right-0 top-auto h-[55dvh] rounded-t-2xl border-t"
+          className="fixed z-[10009] flex flex-col overflow-hidden border shadow-2xl md:bottom-0 md:right-0 md:top-[calc(var(--studio-header-h)+4px)] md:w-full md:max-w-[520px] md:border-l bottom-[env(safe-area-inset-bottom)] left-0 right-0 top-auto h-[55dvh] rounded-t-2xl border-t"
           style={{
             backgroundColor: "var(--studio-elevated)",
             borderColor: "var(--studio-border-strong)",
@@ -4868,18 +4824,113 @@ function StudioUnavailableSurface({
 
 export { describeSourceRows };
 
-/* ── Media workspace panel — generated images, video, music, audio ── */
-function MediaWorkspacePanel({
-  projectId: _projectId,
+/* ── Media workspace panel — generated images, video, music, audio ──
+   Classic-layout Media surface. Backed by the SAME Asset Lake read the
+   board's BoardMediaPanel uses (GET /api/assets?scope=project — the
+   round-10 merged scope: project assets + generation jobs bound to the
+   project), so what LiTT generates in chat shows up here too. This
+   surface was a hard-coded placeholder until 2026-11-17: it ignored
+   projectId and always rendered "No media artifacts yet." The empty
+   line below now renders ONLY when the scope is genuinely empty, and
+   a failed fetch shows the real error instead of a fake empty. */
+export function MediaWorkspacePanel({
+  projectId,
   onOpenCreate,
 }: {
   projectId: string | null;
   onOpenCreate: () => void;
 }) {
-  const modeLabel = "Media";
+  const refreshTrigger = useAssetsRefreshTrigger();
+  const [assets, setAssets] = useState<StudioAsset[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [actionNote, setActionNote] = useState<string | null>(null);
+
+  const fetchAssets = useCallback(async () => {
+    if (!projectId) {
+      setAssets([]);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      params.set("projectId", projectId);
+      params.set("scope", "project");
+      params.set("limit", "100");
+      const res = await fetch(`/api/assets?${params.toString()}`, {
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError(body.error || `HTTP ${res.status}`);
+        setAssets([]);
+        return;
+      }
+      const data = await res.json();
+      setAssets(data.assets ?? []);
+    } catch {
+      setError("Failed to load media.");
+      setAssets([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void fetchAssets();
+  }, [fetchAssets, refreshTrigger]);
+
+  const selected = useMemo(
+    () => assets.find((a) => a.id === selectedId) ?? null,
+    [assets, selectedId],
+  );
+
+  // Selection changes reset the per-item action state.
+  useEffect(() => {
+    setConfirmDelete(false);
+    setActionNote(null);
+  }, [selectedId]);
+
+  const deleteSelected = async () => {
+    if (!selected || deleting) return;
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
+    setDeleting(true);
+    setActionNote(null);
+    try {
+      const params = new URLSearchParams();
+      if (projectId) params.set("projectId", projectId);
+      const qs = params.toString();
+      const res = await fetch(
+        `/api/assets/${encodeURIComponent(selected.id)}${qs ? `?${qs}` : ""}`,
+        { method: "DELETE" },
+      ).catch(() => null);
+      if (!res || !res.ok) {
+        setActionNote("Delete failed — the item is still in the library.");
+        return;
+      }
+      setSelectedId(null);
+      setConfirmDelete(false);
+      // Announce so every asset surface refetches; the deleted item is
+      // gone from the underlying list, not just hidden here.
+      notifyAssetsChanged();
+      await fetchAssets();
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const kindLabel = (asset: StudioAsset) =>
+    asset.kind.charAt(0).toUpperCase() + asset.kind.slice(1);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden" data-testid="classic-media-panel">
       <div
         className="flex shrink-0 items-center justify-between border-b px-4 py-3"
         style={{ borderColor: "var(--studio-border)" }}
@@ -4889,44 +4940,260 @@ function MediaWorkspacePanel({
             className="text-[10px] font-black uppercase tracking-[0.12em]"
             style={{ color: "var(--litt-primary)" }}
           >
-            {modeLabel}
+            Media
           </span>
           <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
             Your creations, in one place
           </span>
         </div>
+        {!loading && !error && assets.length > 0 && (
+          <span className="text-[10px] tabular-nums" style={{ color: "var(--text-muted)" }}>
+            {assets.length} item{assets.length === 1 ? "" : "s"}
+          </span>
+        )}
       </div>
-      <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
-        <div className="text-center" style={{ color: "var(--text-muted)" }}>
-          <div
-            className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl"
-            style={{
-              background: "linear-gradient(135deg, rgba(23,122,54,0.10), rgba(23,122,54,0.04))",
-              border: "1px solid rgba(23,122,54,0.2)",
-            }}
-          >
-            <ImageIcon size={20} style={{ color: "var(--litt-primary)" }} />
-          </div>
-          <p className="text-sm font-bold" style={{ color: "var(--text-secondary)" }}>
-            No {modeLabel.toLowerCase()} artifacts yet
+
+      {!projectId ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+          <p className="text-center text-xs" style={{ color: "var(--text-muted)" }}>
+            Select a project to see its media.
           </p>
-          <p className="mt-1 text-xs">
-            Use the media tools in this workspace to create an image, video, or audio asset.
-          </p>
-          <button
-            type="button"
-            onClick={onOpenCreate}
-            className="mt-4 rounded-xl px-4 py-2 text-xs font-bold transition hover:opacity-80"
-            style={{
-              backgroundColor: "rgba(77,255,98,0.12)",
-              color: "var(--litt-primary)",
-              border: "1px solid rgba(77,255,98,0.3)",
-            }}
-          >
-            Open media tools
-          </button>
         </div>
-      </div>
+      ) : error ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+          <div className="text-center">
+            <p className="text-sm font-bold" style={{ color: "var(--text-secondary)" }}>
+              Media could not be loaded
+            </p>
+            <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }} data-testid="classic-media-error">
+              {error}
+            </p>
+            <button
+              type="button"
+              onClick={() => void fetchAssets()}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold transition hover:opacity-80"
+              style={{
+                backgroundColor: "rgba(77,255,98,0.12)",
+                color: "var(--litt-primary)",
+                border: "1px solid rgba(77,255,98,0.3)",
+              }}
+              data-testid="classic-media-retry"
+            >
+              <RefreshCw size={12} aria-hidden /> Try again
+            </button>
+          </div>
+        </div>
+      ) : loading && assets.length === 0 ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6" data-testid="classic-media-loading">
+          <div className="flex items-center gap-2" style={{ color: "var(--text-muted)" }}>
+            <LoaderCircle size={16} className="animate-spin" aria-hidden />
+            <span className="text-xs">Loading media…</span>
+          </div>
+        </div>
+      ) : assets.length === 0 ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
+          <div className="text-center" style={{ color: "var(--text-muted)" }} data-testid="classic-media-empty">
+            <div
+              className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl"
+              style={{
+                background: "linear-gradient(135deg, rgba(23,122,54,0.10), rgba(23,122,54,0.04))",
+                border: "1px solid rgba(23,122,54,0.2)",
+              }}
+            >
+              <ImageIcon size={20} style={{ color: "var(--litt-primary)" }} />
+            </div>
+            <p className="text-sm font-bold" style={{ color: "var(--text-secondary)" }}>
+              No media artifacts yet
+            </p>
+            <p className="mt-1 text-xs">
+              Use the media tools in this workspace to create an image, video, or audio asset.
+            </p>
+            <button
+              type="button"
+              onClick={onOpenCreate}
+              className="mt-4 rounded-xl px-4 py-2 text-xs font-bold transition hover:opacity-80"
+              style={{
+                backgroundColor: "rgba(77,255,98,0.12)",
+                color: "var(--litt-primary)",
+                border: "1px solid rgba(77,255,98,0.3)",
+              }}
+            >
+              Open media tools
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {selected && (
+            <div
+              className="mb-4 rounded-xl border p-3"
+              style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-surface)" }}
+              data-testid="classic-media-detail"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold" style={{ color: "var(--text-primary)" }}>
+                    {selected.name}
+                  </p>
+                  <p className="mt-0.5 text-[10px]" style={{ color: "var(--text-muted)" }}>
+                    {kindLabel(selected)} · {selected.source}
+                    {selected.provider ? ` · ${selected.provider}` : ""}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close details"
+                  data-testid="classic-media-detail-close"
+                  className="shrink-0 rounded-md p-1 transition hover:opacity-70"
+                  style={{ color: "var(--text-muted)" }}
+                  onClick={() => setSelectedId(null)}
+                >
+                  <X size={14} aria-hidden />
+                </button>
+              </div>
+
+              <div className="mt-3">
+                {selected.kind === "image" ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={selected.url}
+                    alt={selected.name}
+                    className="max-h-72 w-full rounded-lg object-contain"
+                  />
+                ) : selected.kind === "video" ? (
+                  <video
+                    src={selected.previewUrl ?? selected.url}
+                    controls
+                    className="max-h-72 w-full rounded-lg"
+                  />
+                ) : selected.kind === "music" || selected.kind === "audio" ? (
+                  <audio src={selected.previewUrl ?? selected.url} controls className="w-full" />
+                ) : (
+                  <a
+                    href={selected.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs font-bold underline"
+                    style={{ color: "var(--litt-primary)" }}
+                  >
+                    Open file
+                  </a>
+                )}
+              </div>
+
+              {selected.prompt && (
+                <p className="mt-2 text-[11px] leading-4" style={{ color: "var(--text-muted)" }}>
+                  {selected.prompt}
+                </p>
+              )}
+
+              <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                {!confirmDelete ? (
+                  <button
+                    type="button"
+                    data-testid="classic-media-action-delete"
+                    className="flex items-center gap-1 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition hover:opacity-80"
+                    style={{ borderColor: "var(--studio-border)", color: "var(--text-primary)" }}
+                    onClick={() => void deleteSelected()}
+                  >
+                    <Trash2 size={11} aria-hidden /> Delete
+                  </button>
+                ) : (
+                  <>
+                    <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                      Delete this item permanently?
+                    </span>
+                    <button
+                      type="button"
+                      data-testid="classic-media-action-delete-confirm"
+                      disabled={deleting}
+                      className="flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-semibold text-white transition disabled:opacity-50"
+                      style={{ backgroundColor: "#B3382E" }}
+                      onClick={() => void deleteSelected()}
+                    >
+                      {deleting ? (
+                        <LoaderCircle size={11} className="animate-spin" aria-hidden />
+                      ) : (
+                        <Trash2 size={11} aria-hidden />
+                      )}{" "}
+                      Delete
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="classic-media-action-delete-cancel"
+                      className="flex items-center gap-1 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition hover:opacity-80"
+                      style={{ borderColor: "var(--studio-border)", color: "var(--text-primary)" }}
+                      onClick={() => setConfirmDelete(false)}
+                    >
+                      <X size={11} aria-hidden /> Cancel
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {actionNote && (
+                <p className="mt-2 text-[11px] leading-4" style={{ color: "var(--text-muted)" }} data-testid="classic-media-action-note">
+                  {actionNote}
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+            {assets.map((asset) => (
+              <button
+                key={asset.id}
+                type="button"
+                data-testid={`classic-media-asset-${asset.id}`}
+                aria-pressed={selectedId === asset.id}
+                className="overflow-hidden rounded-xl border text-left transition hover:opacity-90"
+                style={{
+                  borderColor: selectedId === asset.id ? "var(--litt-primary)" : "var(--studio-border)",
+                  backgroundColor: "var(--studio-surface)",
+                }}
+                onClick={() => setSelectedId(asset.id)}
+                title={asset.name}
+              >
+                <span className="block h-28 w-full">
+                  {asset.kind === "image" ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={asset.thumbnailUrl ?? asset.url}
+                      alt={asset.name}
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <span
+                      className="flex h-full w-full items-center justify-center"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      {asset.kind === "video" ? (
+                        <Video size={22} aria-hidden />
+                      ) : asset.kind === "music" || asset.kind === "audio" ? (
+                        <Music size={22} aria-hidden />
+                      ) : (
+                        <ImageIcon size={22} aria-hidden />
+                      )}
+                    </span>
+                  )}
+                </span>
+                <span className="block px-2.5 py-2">
+                  <span className="block truncate text-[11px] font-semibold" style={{ color: "var(--text-primary)" }}>
+                    {asset.name}
+                  </span>
+                  <span className="mt-0.5 block text-[10px]" style={{ color: "var(--text-muted)" }}>
+                    {kindLabel(asset)}
+                    {typeof asset.durationSeconds === "number"
+                      ? ` · ${Math.floor(asset.durationSeconds / 60)}:${String(Math.round(asset.durationSeconds % 60)).padStart(2, "0")}`
+                      : ""}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

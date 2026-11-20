@@ -14,7 +14,7 @@
  */
 
 import type { ComponentType, CSSProperties } from "react";
-import { Activity, Film, FolderOpen, Hammer, Image as ImageIcon, Layout, Mic, Music, Play, Plug, Settings as SettingsIcon, Terminal, Plus, X } from "lucide-react";
+import { Activity, Film, FolderOpen, Hammer, Image as ImageIcon, Layout, MessageSquare, Mic, Music, Play, Plug, Settings as SettingsIcon, Terminal, Plus, X } from "lucide-react";
 import type { StudioTask } from "@/lib/studio/task-types";
 
 const ACCENT = "var(--color-accent)";
@@ -22,6 +22,10 @@ const CARD_BORDER = "rgba(255,255,255,0.07)";
 const TOOLS_BG = "color-mix(in srgb, var(--color-accent) 7%, transparent)";
 
 export interface MobileToolsSheetProps {
+  /** Returns to the chat surface — the phone menu's way back (layout card). */
+  onOpenChat?: () => void;
+  /** Starts a fresh conversation from inside the menu. */
+  onNewChat?: () => void;
   onOpenCode: () => void;
   onOpenCanvas: () => void;
   onOpenPreview: () => void;
@@ -243,6 +247,29 @@ function CreateTileButton({
 export default function MobileToolsSheet(props: MobileToolsSheetProps) {
   return (
     <div data-testid="mobile-tools-sheet" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {(props.onOpenChat || props.onNewChat) && (
+        <>
+          <SectionHeader>Chat</SectionHeader>
+          {props.onOpenChat && (
+            <ToolRowButton
+              id="chat"
+              label="Back to chat"
+              description="Return to the conversation"
+              icon={MessageSquare}
+              onClick={props.onOpenChat}
+            />
+          )}
+          {props.onNewChat && (
+            <ToolRowButton
+              id="new-chat"
+              label="New chat"
+              description="Start a fresh conversation"
+              icon={Plus}
+              onClick={props.onNewChat}
+            />
+          )}
+        </>
+      )}
       {props.tasks && props.tasks.length > 0 && (
         <>
           <SectionHeader>Tasks</SectionHeader>

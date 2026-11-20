@@ -18,8 +18,9 @@
  *   AND the quality gate passed (or no gate ran for this run).
  * - A model/route failure that arrives when the deliverable is already
  *   done settles the run COMPLETED WITH A WARNING: the work is
- *   reported done, and the text names the step that actually failed —
- *   the closing summary — instead of blaming the request.
+ *   reported done with a short completion line, and the step that
+ *   actually failed — the closing summary — is named in the run
+ *   record (failureContributors), never dumped into the chat text.
  * - EVERY failure contributor is recorded on the settlement (failed
  *   tool calls, unknown workspace verification, honest loop failure,
  *   model/route failure), whether or not it decided the outcome, so a
@@ -114,25 +115,23 @@ export function deliverableSucceeded(input: RunSettlementInput): boolean {
 }
 
 /**
- * Deterministic closing summary built from verified execution evidence.
- * Used when the model's own summary call failed, so the user still gets
- * the facts (what completed, which files the diff confirmed) without a
- * provider error dump. Never asserts more than the evidence supports:
- * file names only appear when the workspace diff actually reported them.
+ * The user-facing text for a completed-with-warning settlement.
+ *
+ * Larry's mobile-chat bar (2026-11-19, reaffirmed 2026-11-20 after the
+ * live "Make a pic of bike" run): short answers, no internal steps, no
+ * provider/model names or HTTP codes in the visible message. The
+ * previous text narrated the run's internals — "the changes were made
+ * and passed the quality gate", a workspace-change count, verified
+ * file lists, and a paragraph about the closing summary step — which
+ * reads as an error dump in chat and falsely frames a simple media
+ * request as a code change. All of that detail stays in the run
+ * record (failureContributors); the user just sees that the request
+ * completed. The deliverable itself (image markdown, file links) is
+ * appended to the final text by the loop, so this line stays generic
+ * across request types.
  */
-function describeVerifiedWork(input: RunSettlementInput): string {
-  const mutations = input.toolCalls.filter((c) => c.success && c.mutating);
-  const files = input.workspaceChange?.files ?? [];
-  const fileClause =
-    files.length > 0
-      ? ` Verified changes: ${files.slice(0, 5).join(", ")}${files.length > 5 ? ` (+${files.length - 5} more)` : ""}.`
-      : "";
-  const persistedClause =
-    input.workspaceChange?.status === "changed"
-      ? " The workspace diff confirms the changes persisted."
-      : "";
-  return `${mutations.length} workspace change(s) completed successfully.${fileClause}${persistedClause}`;
-}
+const COMPLETED_WITH_WARNING_USER_TEXT =
+  "Done — your request is complete, and the result is in your project.";
 
 export function settleRunOutcome(input: RunSettlementInput): RunSettlement {
   const failureContributors = collectFailureContributors(input);
@@ -140,16 +139,9 @@ export function settleRunOutcome(input: RunSettlementInput): RunSettlement {
     return { outcome: "cancelled", failureContributors };
   }
   if (input.modelFailed && !input.failedHonestly && deliverableSucceeded(input)) {
-    const gateClause =
-      input.qualityVerdictOk === true ? " and passed the quality gate" : "";
     return {
       outcome: "completed",
-      completedWithWarning:
-        `The requested work is complete — the changes were made${gateClause}. ` +
-        `${describeVerifiedWork(input)} ` +
-        `The only step that failed was the closing summary: the AI model call for the final reply ` +
-        `could not complete, so this run ends without a written summary. ` +
-        `The completed work is in the project and is not affected.`,
+      completedWithWarning: COMPLETED_WITH_WARNING_USER_TEXT,
       failureContributors,
     };
   }

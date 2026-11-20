@@ -654,6 +654,10 @@ export default function StudioTranscript({
   // Tap-revealed timestamp (Kimi wiring item 3): hover reveals via the
   // group class; touch has no hover, so a tap pins one message's time.
   const [revealedTimestampId, setRevealedTimestampId] = useState<string | null>(null);
+  // Long assistant messages collapse behind "Show more" across the whole
+  // mobile tier (max-lg: clamp + lg:hidden button, <1024px matches
+  // useViewportTier) — desktop rendering is unchanged.
+  const [expandedLongIds, setExpandedLongIds] = useState<Set<string>>(new Set());
 
   // ── Scroll-pin (Kimi wiring item 3) ────────────────────────────────
   // Auto-scroll follows the stream ONLY while the user is at (or near)
@@ -838,6 +842,14 @@ export default function StudioTranscript({
             message.id != null &&
             message.id === streamingId &&
             !typedMessageIds.has(message.id);
+          // Collapsible only for settled assistant messages — never while
+          // streaming or mid-typewriter, so live output is never clipped.
+          const isCollapsible =
+            !isUser &&
+            !isStreaming &&
+            !isTypingTarget &&
+            (message.content ?? "").length > 600;
+          const longExpanded = expandedLongIds.has(key);
           const displayContent = isTypingTarget
             ? (message.content ?? "").slice(0, typedLength)
             : message.content;
@@ -912,7 +924,7 @@ export default function StudioTranscript({
                   />
                 )}
                 <div
-                  className="relative min-w-0 max-w-full rounded-2xl border px-4 py-3 text-[13px] leading-6"
+                  className={`relative min-w-0 max-w-full rounded-2xl border px-4 py-3 text-[13px] leading-6 ${isCollapsible && !longExpanded ? "max-lg:max-h-80 max-lg:overflow-hidden" : ""}`}
                   style={{
                     overflowWrap: "anywhere",
                     wordBreak: "break-word",
@@ -959,13 +971,23 @@ export default function StudioTranscript({
                       </span>
                       <span>LiTT is thinking…</span>
                     </div>
+                  ) : isFailed ? (
+                    // Mobile layout card (2026-11-19): chat errors say
+                    // "We hit a snag, try again" — never raw error text or
+                    // codes anywhere in the chat surface.
+                    <p className="text-[13px] leading-6" style={{ color: "var(--text-main)" }}>
+                      We hit a snag, try again.
+                    </p>
                   ) : (
                     <div className="prose prose-sm max-w-none select-text prose-p:my-1 prose-pre:my-1">
                       <ReactMarkdown
                         components={{
                           img: ({ src, alt }) => (
                             // eslint-disable-next-line @next/next/no-img-element
-                            <img src={src} alt={alt} className="h-auto max-w-full rounded-lg object-contain" loading="lazy" />
+                            // No lazy: unsized lazy images inside the scroll
+                            // container stay 0×0, never intersect, and never
+                            // fetch — chat images must render directly.
+                            <img src={src} alt={alt} className="h-auto max-w-full rounded-lg object-contain" decoding="async" />
                           ),
                           pre: ({ children }) => {
                             // Extract raw text from the code element for copying
@@ -997,7 +1019,52 @@ export default function StudioTranscript({
                       )}
                     </div>
                   )}
+                  {isCollapsible && !longExpanded && (
+                    <div
+                      className="pointer-events-none absolute inset-x-0 bottom-0 h-12 rounded-b-2xl lg:hidden"
+                      style={{
+                        background:
+                          "linear-gradient(to bottom, transparent, var(--studio-card))",
+                      }}
+                      aria-hidden
+                    />
+                  )}
                 </div>
+                {isCollapsible && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedLongIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(key)) next.delete(key);
+                        else next.add(key);
+                        return next;
+                      })
+                    }
+                    className="inline-flex min-h-11 items-center px-1 text-[11px] font-bold transition hover:opacity-80 lg:hidden"
+                    style={{ color: "var(--litt-primary)" }}
+                    aria-expanded={longExpanded}
+                  >
+                    {longExpanded ? "Show less" : "Show more"}
+                  </button>
+                )}
+                {/* Failed turns get a persistent, always-visible Retry —
+                    the hover toolbar is unreachable on touch devices. */}
+                {isFailed && onRegenerateAction && (
+                  <button
+                    type="button"
+                    onClick={() => onRegenerateAction(message.id)}
+                    className="inline-flex min-h-11 items-center gap-1.5 self-start rounded-lg border px-4 text-[12px] font-bold transition hover:opacity-80"
+                    style={{
+                      borderColor: "color-mix(in srgb, var(--litt-primary) 45%, transparent)",
+                      backgroundColor: "color-mix(in srgb, var(--litt-primary) 10%, transparent)",
+                      color: "var(--litt-primary)",
+                    }}
+                    data-testid={`retry-${message.id}`}
+                  >
+                    <IconRefresh /> Retry
+                  </button>
+                )}
                 {message.actions && message.actions.length > 0 && (
                   <ActionChips
                     actions={message.actions}

@@ -90,6 +90,22 @@ describe("handleImageGenerate — Asset Lake visibility (F2a)", () => {
     expect(result.assetPersistenceFailed).toBe(true);
   });
 
+  it("scopes the requestId by prompt: same operation + different prompt = different key, same prompt = same key", async () => {
+    vi.mocked(generateImage).mockResolvedValue(successResult() as never);
+
+    await handleImageGenerate({ prompt: "a lion" }, transport);
+    await handleImageGenerate({ prompt: "a bike" }, transport);
+    await handleImageGenerate({ prompt: "a lion" }, transport);
+
+    const keys = vi
+      .mocked(generateImage)
+      .mock.calls.map((c) => (c[0] as { requestId?: string }).requestId);
+    expect(keys[0]).toMatch(/^approval:op-1:[0-9a-f]{12}$/);
+    expect(keys[1]).toMatch(/^approval:op-1:[0-9a-f]{12}$/);
+    expect(keys[1]).not.toBe(keys[0]);
+    expect(keys[2]).toBe(keys[0]);
+  });
+
   it("does not fabricate Asset Lake fields on a failed generation", async () => {
     vi.mocked(generateImage).mockResolvedValue({
       success: false,

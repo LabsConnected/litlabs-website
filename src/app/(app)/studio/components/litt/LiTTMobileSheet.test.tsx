@@ -62,7 +62,7 @@ describe("LiTTMobileSheet (real component)", () => {
     expect(screen.getByTestId("litt-mobile-live-panel")).toHaveAttribute("data-active", "false");
   });
 
-  it("keeps the full-screen sheet above the mobile nav with reachable chat controls", () => {
+  it("keeps the full-screen sheet above the keyboard with reachable chat controls", () => {
     renderSheet({
       chatContent: (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -77,8 +77,9 @@ describe("LiTTMobileSheet (real component)", () => {
     input.focus();
 
     // Geometry is driven by the Visual Viewport API so the full-screen
-    // sheet stays above the 62px bottom nav and any on-screen keyboard.
-    const expectedHeight = 844 - 62; // 782
+    // sheet owns the whole phone height down to the safe area — the
+    // bottom work-surface dock is retired (chat-first card, 2026-11-19).
+    const expectedHeight = 844; // full visual viewport, no bottom nav offset
     expect(sheet).toHaveStyle({
       top: "0px",
       height: `${expectedHeight}px`,
@@ -98,24 +99,40 @@ describe("LiTTMobileSheet (real component)", () => {
 
     const sheet = screen.getByTestId("litt-mobile-sheet");
     // innerHeight 844 - visualViewport 500 => bottomInset 344,
-    // bottomOffset 62 + 344 = 406, height 500 + 344 - 406 = 438.
+    // bottomOffset 344, height 500 + 344 - 344 = 500.
     expect(sheet).toHaveStyle({
       top: "0px",
-      height: "438px",
+      height: "500px",
     });
   });
 
-  it("clicking Live calls onTabChange without managing its own state", () => {
-    const { onTabChange } = renderSheet({ activeTab: "chat" });
-    fireEvent.click(screen.getByTestId("litt-mobile-tab-live"));
-    expect(onTabChange).toHaveBeenCalledWith("live");
-    expect(screen.getByTestId("litt-mobile-live-panel")).toHaveAttribute("data-active", "false");
+  it("shows sub-surface tabs and Back to chat only while a non-chat tab is open", () => {
+    const { onTabChange } = renderSheet({
+      activeTab: "files",
+      filesContent: <div data-testid="files-slot" />,
+    });
+    fireEvent.click(screen.getByTestId("litt-mobile-back-to-chat"));
+    expect(onTabChange).toHaveBeenCalledWith("chat");
+    expect(screen.getByTestId("litt-mobile-tab-live")).toHaveTextContent("Activity");
+    expect(screen.getByTestId("litt-mobile-tab-files")).toHaveTextContent("Files");
+    expect(screen.getByTestId("litt-mobile-tab-components")).toHaveTextContent("Components");
   });
 
-  it("labels the tabs Chat | Activity", () => {
-    renderSheet();
-    expect(screen.getByTestId("litt-mobile-tab-chat")).toHaveTextContent("Chat");
-    expect(screen.getByTestId("litt-mobile-tab-live")).toHaveTextContent("Activity");
+  it("hides the sub-surface tabs on the chat home tab", () => {
+    renderSheet({ activeTab: "chat" });
+    expect(screen.queryByTestId("litt-mobile-tab-live")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("litt-mobile-tab-files")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("litt-mobile-back-to-chat")).not.toBeInTheDocument();
+  });
+
+  it("shows the project name, New Chat, and menu on the chat home tab", () => {
+    const onNewChat = vi.fn();
+    renderSheet({ projectName: "Ember Roast", branch: "main", onNewChat, onOpenTools: vi.fn() });
+    expect(screen.getByTestId("litt-mobile-project-name").textContent).toContain("Ember Roast");
+    expect(screen.getByTestId("litt-mobile-project-name").textContent).toContain("main");
+    fireEvent.click(screen.getByTestId("litt-mobile-new-chat"));
+    expect(onNewChat).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("litt-mobile-tools-button")).toHaveAttribute("aria-label", "Menu");
   });
 
   it("renders the approval slot above the tabs when provided", () => {
@@ -132,18 +149,17 @@ describe("LiTTMobileSheet (real component)", () => {
     expect(screen.queryByTestId("litt-mobile-approval-slot")).not.toBeInTheDocument();
   });
 
-  it("clicking close calls onClose", () => {
-    const { onClose } = renderSheet();
-    fireEvent.click(screen.getByTestId("litt-mobile-sheet-close"));
-    expect(onClose).toHaveBeenCalledTimes(1);
+  it("omits the New Chat button when onNewChat is not provided", () => {
+    renderSheet({ activeTab: "chat" });
+    expect(screen.queryByTestId("litt-mobile-new-chat")).not.toBeInTheDocument();
   });
 
   describe("mobile density redesign", () => {
-    it("renders the tools button and calls onOpenTools when tapped", () => {
+    it("renders the menu button and calls onOpenTools when tapped", () => {
       const onOpenTools = vi.fn();
       renderSheet({ onOpenTools });
       const toolsButton = screen.getByTestId("litt-mobile-tools-button");
-      expect(toolsButton).toHaveAttribute("aria-label", "Open tools");
+      expect(toolsButton).toHaveAttribute("aria-label", "Menu");
       fireEvent.click(toolsButton);
       expect(onOpenTools).toHaveBeenCalledTimes(1);
     });
@@ -175,16 +191,9 @@ describe("LiTTMobileSheet (real component)", () => {
       expect(screen.queryByTestId("litt-mobile-build-status-slot")).not.toBeInTheDocument();
     });
 
-    it("renders the slim project/branch context row when provided", () => {
-      renderSheet({ projectName: "Ember Roast", branch: "main" });
-      const context = screen.getByTestId("litt-mobile-context");
-      expect(context.textContent).toContain("Ember Roast");
-      expect(context.textContent).toContain("main");
-    });
-
-    it("omits the context row when no project or branch is provided", () => {
+    it("falls back to the LiTT label when no project name is provided", () => {
       renderSheet();
-      expect(screen.queryByTestId("litt-mobile-context")).not.toBeInTheDocument();
+      expect(screen.getByTestId("litt-mobile-project-name").textContent).toContain("LiTT");
     });
   });
 });

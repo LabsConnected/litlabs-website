@@ -1345,22 +1345,24 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       const { user } = await renderCommandStudio();
       expect(screen.queryByTestId("litt-panel")).toBeNull();
       expect(screen.queryByTestId("litt-ambient-hud")).toBeNull();
-      // Close the entry-open sheet to reach the workspace-only state and its
-      // mobile access control.
-      await user.click(screen.getByTestId("litt-mobile-sheet-close"));
-      expect(screen.getByTestId("litt-mobile-trigger")).toBeTruthy();
+      // Chat-first layout: the chat sheet is the home surface on entry.
+      expect(screen.getByTestId("litt-mobile-sheet-mount").style.display).toBe("");
+      expect(screen.getByTestId("mobile-studio-topbar")).toBeTruthy();
+      // A tool surface takes over via the menu; Back to chat returns.
+      await user.click(screen.getByTestId("mobile-studio-menu"));
+      await waitFor(() => expect(screen.getByTestId("mobile-tools-dialog")).toBeTruthy());
+      await user.click(screen.getByTestId("mobile-tool-preview"));
+      await waitFor(() => {
+        expect(screen.getByTestId("litt-mobile-sheet-mount").style.display).toBe("none");
+      });
+      expect(screen.getByTestId("mobile-back-to-chat")).toBeTruthy();
     });
 
-    it("mobile trigger opens Chat with reachable context, input, and send control", async () => {
+    it("mobile chat opens with reachable context, input, and send control", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
       mockCapabilities = { ...defaultCapabilities(), projectName: "Test Project", activeBranch: "main" };
       const { user } = await renderCommandStudio();
-      // Chat is open on entry; close it so the trigger path is exercised.
-      await user.click(screen.getByTestId("litt-mobile-sheet-close"));
-      expect(screen.getByRole("button", { name: "Ask LiTT to build" })).toBeTruthy();
-      await user.click(screen.getByTestId("litt-mobile-trigger"));
-      await user.click(screen.getByTestId("litt-mobile-tab-chat"));
-
+      // Chat is the home surface on entry — no trigger needed.
       const sheet = screen.getByTestId("litt-mobile-sheet");
       const input = screen.getByRole("textbox", { name: /message input/i });
       input.focus();
@@ -1372,25 +1374,30 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       // Mobile density redesign: the composer context line is hidden on
       // mobile; project + branch moved to the slim sheet header row.
       expect(screen.queryByTestId("studio-workspace-context")).toBeNull();
-      expect(screen.getByTestId("litt-mobile-context").textContent).toContain("Test Project");
-      expect(screen.getByTestId("litt-mobile-context").textContent).toContain("main");
+      expect(screen.getByTestId("litt-mobile-project-name").textContent).toContain("Test Project");
+      expect(screen.getByTestId("litt-mobile-project-name").textContent).toContain("main");
       expect(document.activeElement).toBe(input);
       expect(screen.getByRole("button", { name: /send message|cancel response/i })).toBeVisible();
 
-      // Closing returns to workspace-only mobile state. Canvas-first
-      // layout: the sheet stays mounted and hides via display:none (chat
-      // state — composer drafts, SSE connections, scroll — survives), so
-      // the workspace-only state is a visibility toggle, not an unmount.
-      await user.click(screen.getByTestId("litt-mobile-sheet-close"));
-      expect(screen.getByTestId("litt-mobile-sheet-mount").style.display).toBe("none");
+      // A tool surface hides chat via display:none (chat state — composer
+      // drafts, SSE connections, scroll — survives); Back to chat restores.
+      await user.click(screen.getByTestId("mobile-studio-menu"));
+      await waitFor(() => expect(screen.getByTestId("mobile-tools-dialog")).toBeTruthy());
+      await user.click(screen.getByTestId("mobile-tool-preview"));
+      await waitFor(() => {
+        expect(screen.getByTestId("litt-mobile-sheet-mount").style.display).toBe("none");
+      });
       expect(screen.getByTestId("litt-mobile-sheet")).not.toBeVisible();
+      await user.click(screen.getByTestId("mobile-back-to-chat"));
+      await waitFor(() => {
+        expect(screen.getByTestId("litt-mobile-sheet-mount").style.display).toBe("");
+      });
     });
 
     it("mobile chat shows the compact Build status control in the sheet chrome instead of the Mission card stack", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
-      const { user } = await renderCommandStudio();
+      await renderCommandStudio();
       // The chat sheet is open on entry, already on the Chat tab.
-      await user.click(screen.getByTestId("litt-mobile-tab-chat"));
 
       // Clean-open: one ~36px light status control in the sheet's header
       // chrome (not a dark bar over the transcript), no card stack.
@@ -1405,7 +1412,6 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     it("mobile Build status control opens the Build sheet with the Mission cards", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
       const { user } = await renderCommandStudio();
-      await user.click(screen.getByTestId("litt-mobile-tab-chat"));
 
       await user.click(screen.getByTestId("mobile-build-status"));
       const sheet = screen.getByTestId("mobile-build-sheet");
@@ -1499,7 +1505,11 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.queryByTestId("litt-panel")).toBeNull();
       // The mobile chat sheet is open on entry.
       expect(screen.getByTestId("litt-mobile-sheet")).toBeTruthy();
-      // The sheet's Live tab shows activity.
+      // Files opens the sheet's sub-surface, whose tab row reaches Live.
+      await user.click(screen.getByTestId("mobile-studio-menu"));
+      await waitFor(() => expect(screen.getByTestId("mobile-tools-dialog")).toBeTruthy());
+      await user.click(screen.getByTestId("mobile-tool-files"));
+      await waitFor(() => expect(screen.getByTestId("litt-mobile-tab-live")).toBeTruthy());
       await user.click(screen.getByTestId("litt-mobile-tab-live"));
       expect(screen.getByTestId("litt-mobile-live-panel")).toHaveAttribute("data-active", "true");
       expect(screen.getByTestId("litt-mobile-tab-live")).toHaveAttribute("aria-pressed", "true");
@@ -1514,9 +1524,17 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       // collapse preference untouched.
       expect(screen.getByTestId("litt-mobile-sheet")).toBeTruthy();
       expect(localStorage.getItem("littree:studio:litt-collapsed")).toBe("false");
-      // And an explicit open via the trigger must not mutate it either.
-      await user.click(screen.getByTestId("litt-mobile-sheet-close"));
-      await user.click(screen.getByTestId("litt-mobile-trigger"));
+      // And an explicit open via Back to chat must not mutate it either.
+      await user.click(screen.getByTestId("mobile-studio-menu"));
+      await waitFor(() => expect(screen.getByTestId("mobile-tools-dialog")).toBeTruthy());
+      await user.click(screen.getByTestId("mobile-tool-preview"));
+      await waitFor(() => {
+        expect(screen.getByTestId("litt-mobile-sheet-mount").style.display).toBe("none");
+      });
+      await user.click(screen.getByTestId("mobile-back-to-chat"));
+      await waitFor(() => {
+        expect(screen.getByTestId("litt-mobile-sheet-mount").style.display).toBe("");
+      });
       expect(localStorage.getItem("littree:studio:litt-collapsed")).toBe("false");
     });
 
