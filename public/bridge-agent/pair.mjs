@@ -7,7 +7,8 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 
-export function loadIdentity(root = process.env.LITT_DEVICE_KEY_ROOT || join(homedir(), ".litt-bridge", "keys")) {
+export function loadIdentity(root = process.env.BRIDGE_KEY_ROOT || process.env.LITT_DEVICE_KEY_ROOT ||
+  (existsSync(join(process.cwd(), ".litt-device-key.json")) ? process.cwd() : join(homedir(), ".litt-bridge", "keys"))) {
   const file = join(root, ".litt-device-key.json");
   if (existsSync(file)) {
     const persisted = JSON.parse(readFileSync(file, "utf8"));
@@ -37,7 +38,7 @@ export function signedClaim(code, name, identity) {
 
 async function main() {
   const appUrl = process.argv[2];
-  if (!appUrl) throw new Error("Usage: node bridge-agent/pair.mjs https://<your LiTT app>");
+  if (!appUrl) throw new Error("Usage: node litt-pair.mjs https://<your LiTT app> [--key-root <existing key folder>]");
   const base = new URL(appUrl);
   if (base.protocol !== "https:" && !(base.protocol === "http:" && ["localhost", "127.0.0.1"].includes(base.hostname)))
     throw new Error("Pairing requires HTTPS (or localhost for development)");
@@ -46,7 +47,9 @@ async function main() {
   try { code = (await rl.question("Code shown in Connect PC: ")).trim().toUpperCase(); }
   finally { rl.close(); }
   if (!/^[A-HJKMNP-Z2-9]{12}$/.test(code)) throw new Error("Invalid pairing code");
-  const identity = loadIdentity();
+  const keyRootFlag = process.argv.indexOf("--key-root");
+  if (keyRootFlag >= 0 && !process.argv[keyRootFlag + 1]) throw new Error("--key-root requires a folder");
+  const identity = loadIdentity(keyRootFlag >= 0 ? process.argv[keyRootFlag + 1] : undefined);
   const response = await fetch(new URL("/api/local-devices/pairing/device-claim", base), {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(signedClaim(code, hostname().slice(0, 80), identity)),

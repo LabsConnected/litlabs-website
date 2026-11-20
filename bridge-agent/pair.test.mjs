@@ -11,6 +11,9 @@ test("re-pair retains the same key and signs the owner-visible claim", () => {
   const first = loadIdentity(root);
   const second = loadIdentity(root);
   assert.equal(first.publicKey, second.publicKey);
+  process.env.BRIDGE_KEY_ROOT = root;
+  try { assert.equal(loadIdentity().publicKey, first.publicKey); }
+  finally { delete process.env.BRIDGE_KEY_ROOT; }
   const claim = signedClaim("ABCDEFGHJKMN", "Office PC", second);
   const payload = Buffer.from(JSON.stringify(["litt-pc-pair-v1", claim.code, claim.fingerprint, claim.name]));
   assert.equal(verify(null, payload, claim.publicKey, Buffer.from(claim.signature, "base64")), true);

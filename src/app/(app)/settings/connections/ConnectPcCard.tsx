@@ -82,6 +82,7 @@ export default function ConnectPcCard() {
     </button>
     {code && <div className="mt-3 text-xs">
       <p><a className="underline" href="/bridge-agent/pair.mjs" download="litt-pair.mjs">Download pairing helper</a> on the PC, then run <code>node litt-pair.mjs {origin}</code> and enter this code:</p>
+      <p className="mt-1 opacity-70">Re-pairing an existing PC? Add <code>--key-root &lt;folder with your .litt-device-key.json&gt;</code> to reuse its identity.</p>
       <p className="my-2 font-mono text-xl tracking-widest">{code}</p>
       <p>Expires {new Date(expiresAt).toLocaleTimeString()}.</p>
       {claim ? <div className="mt-3 rounded-lg border p-3" style={{ borderColor: T.borderColor }}>
