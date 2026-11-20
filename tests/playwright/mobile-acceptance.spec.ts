@@ -202,7 +202,7 @@ test.describe("LiTT Studio mobile acceptance", () => {
 });
 
 test.describe("LiTT Studio mobile density redesign", () => {
-  for (const width of [390, 670]) {
+  for (const width of [360, 390, 670, 768]) {
     test(`density geometry at ${width}px — chat dominates, cards collapsed`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 844 });
 
@@ -284,6 +284,157 @@ test.describe("LiTT Studio mobile density redesign", () => {
       await expect(page.getByTestId("mobile-tools-dialog")).toBeHidden();
 
       await screenshot(page, testInfo, `density-chat-sheet-${width}px`);
+    });
+  }
+});
+
+// Visual evidence for the 2026-11-19 mobile layout card: long chat, a long
+// answer collapsed behind Show more / Show less, an image rendered inline,
+// a failed turn showing "We hit a snag, try again" + Retry, and the composer
+// with a simulated keyboard — captured at 360px, 390px, and 768px into
+// evidence/mobile/. The messages API is mocked so the states are
+// deterministic and no real AI calls are made.
+test.describe("LiTT Studio mobile visual evidence", () => {
+  const LONG_ANSWER = [
+    "Here is the full breakdown you asked for. ",
+    "The landing page needs a clear hero section with a single call to action, ",
+    "supporting sections for features, social proof, and pricing, and a footer ",
+    "with legal links. Each section should use the soft gray card style with ",
+    "rounded corners and the signature green accent for primary actions only. ",
+    "Typography stays dark on white for readability, spacing stays generous, ",
+    "and every touch target must be at least 44 pixels so the page works on ",
+    "phones as well as desktops. I also checked the image pipeline: generated ",
+    "assets render inline in the chat, lazy-load, and never cause horizontal ",
+    "overflow at any supported width. Below is the mock hero image.",
+    "",
+    "![Generated hero mockup](/icon-512.png)",
+    "",
+    "If you want a different tone or section order, tell me and I will revise.",
+  ].join("");
+
+  async function mockMessageSequence(page: Page) {
+    let call = 0;
+    await page.route("**/api/studio/conversations/*/messages", async (route) => {
+      call += 1;
+      const request = route.request();
+      const body = JSON.parse(request.postData() ?? "{}") as { message?: string };
+      const userMessageId = `ev-user-${call}`;
+      const assistantMessageId = `ev-assistant-${call}`;
+
+      if (call === 3) {
+        // Third turn fails server-side: 200 JSON error body marks the
+        // assistant message failed (raw text stays internal; UI shows the
+        // safe "We hit a snag" copy + Retry).
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: "provider exploded",
+            detail: "internal stack trace that must never render",
+            userMessage: { id: userMessageId, role: "user", content: body.message, status: "completed" },
+            revision: 10 + call,
+          }),
+        });
+        return;
+      }
+
+      const answer = call === 1 ? LONG_ANSWER : `Short follow-up answer number ${call}. All done.`;
+      const mockResponse = [
+        `data: ${JSON.stringify({
+          type: "user_message",
+          userMessage: { id: userMessageId, role: "user", content: body.message, status: "completed" },
+          revision: 10 + call,
+        })}\n\n`,
+        `data: ${JSON.stringify({
+          type: "assistant_message",
+          assistantMessage: { id: assistantMessageId, role: "assistant", content: "", status: "streaming" },
+        })}\n\n`,
+        `data: ${JSON.stringify({ type: "text", text: answer })}\n\n`,
+        `data: ${JSON.stringify({
+          type: "done",
+          assistantMessage: {
+            id: assistantMessageId,
+            role: "assistant",
+            content: answer,
+            status: "completed",
+          },
+          revision: 10 + call,
+        })}\n\n`,
+        `data: [DONE]\n\n`,
+      ].join("");
+
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: mockResponse,
+      });
+    });
+  }
+
+  async function sendAndWait(page: Page, text: string, expectedText: string) {
+    const input = page.getByTestId("studio-command-input");
+    await input.fill(text);
+    await page.getByTestId("studio-send-button").click();
+    await expect(page.getByText(expectedText).last()).toBeVisible({ timeout: 30_000 });
+  }
+
+  async function shot(page: Page, name: string) {
+    const directory = path.join("evidence", "mobile");
+    await mkdir(directory, { recursive: true });
+    await page.screenshot({ path: path.join(directory, `${name}.png`), animations: "disabled", fullPage: false });
+  }
+
+  for (const width of [360, 390, 768]) {
+    test(`evidence at ${width}px — long chat, collapsed answer, image, snag+retry, keyboard`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await mockMessageSequence(page);
+
+      const response = await page.goto("/studio", { waitUntil: "domcontentloaded", timeout: 90_000 });
+      expect(response?.status()).toBe(200);
+      await expect(page.locator(".studio-shell")).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId("litt-mobile-sheet")).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId("studio-loading")).not.toBeVisible();
+
+      // Turn 1: long answer (>600 chars) with an inline image — collapsed.
+      await sendAndWait(page, "Build me a landing page", "Show more");
+      await expect(page.getByText("We hit a snag", { exact: false })).toHaveCount(0);
+      await shot(page, `${width}-long-answer-collapsed`);
+
+      // Expand, verify image + full text, collapse again.
+      await page.getByRole("button", { name: "Show more" }).first().click();
+      await expect(page.getByRole("button", { name: "Show less" }).first()).toBeVisible();
+      await expect(page.locator('img[alt="Generated hero mockup"]')).toBeVisible();
+      await shot(page, `${width}-long-answer-expanded`);
+      await page.getByRole("button", { name: "Show less" }).first().click();
+
+      // Turn 2: short answer so the transcript reads as a long chat.
+      await sendAndWait(page, "Looks good, continue", "Short follow-up answer number 2");
+      await shot(page, `${width}-long-chat`);
+
+      // Turn 3: provider failure → safe copy + Retry, never raw error text.
+      await sendAndWait(page, "Try once more", "We hit a snag, try again.");
+      const failedTurn = page.locator('[data-testid="studio-transcript"]').last();
+      await expect(failedTurn.getByText("We hit a snag, try again.")).toBeVisible();
+      await expect(failedTurn.getByRole("button", { name: "Retry" })).toBeVisible();
+      await expect(page.getByText("provider exploded")).toHaveCount(0);
+      await expect(page.getByText("internal stack trace")).toHaveCount(0);
+      await failedTurn.scrollIntoViewIfNeeded();
+      await shot(page, `${width}-snag-retry`);
+
+      // Composer with a simulated Android keyboard (short viewport).
+      const input = page.getByTestId("studio-command-input");
+      await input.focus();
+      await page.setViewportSize({ width, height: 500 });
+      await expect(input).toBeFocused();
+      await shot(page, `${width}-keyboard-open`);
+      await page.setViewportSize({ width, height: 844 });
+
+      // No sideways scrolling at any point.
+      const overflow = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      expect(overflow.scrollWidth, "no horizontal overflow").toBeLessThanOrEqual(overflow.clientWidth + 1);
     });
   }
 });

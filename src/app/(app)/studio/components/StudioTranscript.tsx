@@ -654,8 +654,9 @@ export default function StudioTranscript({
   // Tap-revealed timestamp (Kimi wiring item 3): hover reveals via the
   // group class; touch has no hover, so a tap pins one message's time.
   const [revealedTimestampId, setRevealedTimestampId] = useState<string | null>(null);
-  // Long assistant messages collapse behind "Show more" on mobile only
-  // (max-sm: clamp + sm:hidden button) — desktop rendering is unchanged.
+  // Long assistant messages collapse behind "Show more" across the whole
+  // mobile tier (max-lg: clamp + lg:hidden button, <1024px matches
+  // useViewportTier) — desktop rendering is unchanged.
   const [expandedLongIds, setExpandedLongIds] = useState<Set<string>>(new Set());
 
   // ── Scroll-pin (Kimi wiring item 3) ────────────────────────────────
@@ -923,7 +924,7 @@ export default function StudioTranscript({
                   />
                 )}
                 <div
-                  className={`relative min-w-0 max-w-full rounded-2xl border px-4 py-3 text-[13px] leading-6 ${isCollapsible && !longExpanded ? "max-sm:max-h-80 max-sm:overflow-hidden" : ""}`}
+                  className={`relative min-w-0 max-w-full rounded-2xl border px-4 py-3 text-[13px] leading-6 ${isCollapsible && !longExpanded ? "max-lg:max-h-80 max-lg:overflow-hidden" : ""}`}
                   style={{
                     overflowWrap: "anywhere",
                     wordBreak: "break-word",
@@ -1017,7 +1018,7 @@ export default function StudioTranscript({
                   )}
                   {isCollapsible && !longExpanded && (
                     <div
-                      className="pointer-events-none absolute inset-x-0 bottom-0 h-12 rounded-b-2xl sm:hidden"
+                      className="pointer-events-none absolute inset-x-0 bottom-0 h-12 rounded-b-2xl lg:hidden"
                       style={{
                         background:
                           "linear-gradient(to bottom, transparent, var(--studio-card))",
@@ -1037,7 +1038,7 @@ export default function StudioTranscript({
                         return next;
                       })
                     }
-                    className="inline-flex min-h-11 items-center px-1 text-[11px] font-bold transition hover:opacity-80 sm:hidden"
+                    className="inline-flex min-h-11 items-center px-1 text-[11px] font-bold transition hover:opacity-80 lg:hidden"
                     style={{ color: "var(--litt-primary)" }}
                     aria-expanded={longExpanded}
                   >

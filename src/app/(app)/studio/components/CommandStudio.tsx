@@ -3047,7 +3047,11 @@ function CommandStudioContent() {
       <span className="min-w-0 flex-1 font-medium">
         {conversation.requiresReauth
           ? "Your session expired. Sign in again to continue."
-          : conversation.sendError ?? projectCreateError}
+          : isMobileLitt && conversation.sendError
+            ? // Mobile card rule: chat shows only the safe copy — raw
+              // provider/server error text never renders on the phone.
+              "We hit a snag, try again."
+            : conversation.sendError ?? projectCreateError}
       </span>
       <div className="flex shrink-0 items-center gap-2">
         {!conversation.requiresReauth && (conversation.sendError || projectCreateError) && (
