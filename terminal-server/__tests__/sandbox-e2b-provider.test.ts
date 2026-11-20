@@ -19,6 +19,7 @@ import { describe, it, expect } from "vitest";
 import {
   clampSandboxTimeoutMs,
   E2B_MAX_TIMEOUT_MS,
+  E2bRequestTimeoutError,
   E2bSandboxProvider,
   SandboxNotFoundError,
   SANDBOX_EGRESS_DENY_OUT,
@@ -44,18 +45,40 @@ const API_KEY = ["e2b", "test", "key", "must", "never", "leak"].join("_");
 class FakeE2bHandle implements E2bSandboxHandle {
   readonly sandboxId: string;
   private readonly createEnvs: Record<string, string>;
+  /** The create-time metadata (what getInfo reports back). */
+  readonly metadata: Record<string, string>;
   paused = false;
   killed = false;
+  /** Test knob: isRunning reports false without pause/kill semantics. */
+  forceNotRunning = false;
+  /** Test knob: readFileBytes never settles (deadline tests). */
+  hangReads = false;
+  /** What getExpiry reports; null = cannot report. */
+  expiryMs: number | null = null;
   timeoutExtensions: number[] = [];
   /** In-memory files for the Phase 2 transfer surface. */
   readonly files = new Map<string, Uint8Array>();
 
-  constructor(sandboxId: string, envs: Record<string, string>) {
+  constructor(
+    sandboxId: string,
+    envs: Record<string, string>,
+    metadata: Record<string, string> = {},
+  ) {
     this.sandboxId = sandboxId;
     this.createEnvs = envs;
+    this.metadata = metadata;
+  }
+
+  async getMetadata(): Promise<Record<string, string> | null> {
+    return this.metadata;
+  }
+
+  async getExpiry(): Promise<number | null> {
+    return this.expiryMs;
   }
 
   async readFileBytes(path: string): Promise<Uint8Array> {
+    if (this.hangReads) return new Promise<Uint8Array>(() => {});
     const data = this.files.get(path);
     if (!data) throw new Error(`no such file: ${path}`);
     return data;
@@ -145,7 +168,7 @@ class FakeE2bHandle implements E2bSandboxHandle {
   }
 
   async isRunning(): Promise<boolean> {
-    return !this.killed && !this.paused;
+    return !this.killed && !this.paused && !this.forceNotRunning;
   }
 
   // ─── PTY fake (terminal bridge) ──────────────────────────────────
@@ -258,7 +281,7 @@ class FakeE2bClient implements E2bClient {
   async create(opts: E2bCreateOptions): Promise<E2bSandboxHandle> {
     this.creates.push(opts);
     this.seq += 1;
-    const handle = new FakeE2bHandle(`e2b-sbx-${this.seq}`, opts.envs);
+    const handle = new FakeE2bHandle(`e2b-sbx-${this.seq}`, opts.envs, opts.metadata);
     this.handles.set(handle.sandboxId, handle);
     return handle;
   }
@@ -266,7 +289,10 @@ class FakeE2bClient implements E2bClient {
   async connect(sandboxId: string): Promise<E2bSandboxHandle> {
     this.connectCalls += 1;
     const handle = this.handles.get(sandboxId);
-    if (!handle) throw new Error(`no such sandbox ${sandboxId}`);
+    // The real SDK refuses to connect a sandbox that is gone
+    // (killed / never existed) — the fake models that refusal,
+    // which re-adoption's dead-id fallthrough depends on.
+    if (!handle || handle.killed) throw new Error(`no such sandbox ${sandboxId}`);
     handle.paused = false;
     return handle;
   }
@@ -999,5 +1025,170 @@ describe("E2bSandboxProvider — PTY terminal (terminal bridge)", () => {
     await Promise.resolve();
     expect(handle.ptys.get(101)!.disconnected).toBe(true);
     expect(handle.ptyKills).toEqual([]);
+  });
+});
+
+/**
+ * Provisioning fix (2026-11-19): the provider registry is in-memory,
+ * so a terminal-process restart emptied it while the sandboxes lived
+ * on at E2B — get() returned null for every persisted binding, boot
+ * reconcile deleted them all, and the next ensure paid a full cold
+ * create+mirror. get() now re-adopts by id, recovering identity from
+ * the create-time metadata, and fails closed whenever identity
+ * cannot be proven. A "restart" is modeled as a second provider
+ * instance over the same fake client.
+ */
+describe("E2bSandboxProvider — re-adoption after restart (provisioning fix)", () => {
+  it("get() re-adopts a live sandbox the registry has never seen, recovering identity from metadata", async () => {
+    const client = new FakeE2bClient();
+    const creator = makeProvider(client);
+    const instance = await creator.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+
+    const restarted = makeProvider(client);
+    const adopted = await restarted.get(instance.sandboxId);
+    expect(adopted).not.toBeNull();
+    expect(adopted?.userId).toBe("user-1");
+    expect(adopted?.projectId).toBe("proj-1");
+    expect(adopted?.workspaceId).toBe("ws-1");
+    expect(adopted?.state).toBe("running");
+    expect(client.connectCalls).toBe(1);
+
+    // The registry is repopulated: a second get() serves the entry
+    // (with its liveness probe) without reconnecting.
+    const again = await restarted.get(instance.sandboxId);
+    expect(again?.sandboxId).toBe(instance.sandboxId);
+    expect(client.connectCalls).toBe(1);
+
+    // The adopted env is recomposed from the recovered identity:
+    // commands through the new provider see the real sandbox id.
+    const idResult = await restarted.execute(instance.sandboxId, {
+      command: "printenv LITTREE_SANDBOX_ID",
+    });
+    expect(idResult.stdout.trim()).toBe(instance.sandboxId);
+    const who = await restarted.execute(instance.sandboxId, {
+      command: "printenv LITTREE_USER_ID",
+    });
+    expect(who.stdout.trim()).toBe("user-1");
+  });
+
+  it("adopts an existing-but-not-running sandbox as stopped, then serves it from the registry", async () => {
+    const client = new FakeE2bClient();
+    const creator = makeProvider(client);
+    const instance = await creator.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+    client.handles.get(instance.sandboxId)!.forceNotRunning = true;
+
+    const restarted = makeProvider(client);
+    const adopted = await restarted.get(instance.sandboxId);
+    // Registered stopped — the executor's start() resume branch and
+    // reconcile's paused handling apply to it unchanged.
+    expect(adopted?.state).toBe("stopped");
+    expect(client.connectCalls).toBe(1);
+    const again = await restarted.get(instance.sandboxId);
+    expect(again?.state).toBe("stopped");
+    expect(client.connectCalls).toBe(1);
+  });
+
+  it("get() returns null for an id E2B no longer has — the dead id falls through", async () => {
+    const client = new FakeE2bClient();
+    const provider = makeProvider(client);
+    await expect(provider.get("e2b-gone")).resolves.toBeNull();
+    expect(client.connectCalls).toBe(1);
+  });
+
+  it("adoption fails closed when the sandbox carries no identity metadata", async () => {
+    const client = new FakeE2bClient();
+    // A sandbox created outside this provider: no littree_* tags.
+    const foreign = await client.create({
+      template: "litt-test-template",
+      timeoutMs: 60_000,
+      envs: {},
+      metadata: {},
+      cpuCount: 1,
+      memoryMB: 512,
+      network: { denyOut: [] },
+    });
+    const provider = makeProvider(client);
+    await expect(provider.get(foreign.sandboxId)).resolves.toBeNull();
+  });
+
+  it("adoption fails closed when any one identity field is missing", async () => {
+    const client = new FakeE2bClient();
+    const creator = makeProvider(client);
+    const instance = await creator.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+    delete client.handles.get(instance.sandboxId)!.metadata.littree_workspace_id;
+
+    const restarted = makeProvider(client);
+    await expect(restarted.get(instance.sandboxId)).resolves.toBeNull();
+  });
+});
+
+/**
+ * Provisioning fix (2026-11-19): every awaited SDK call carries a
+ * request deadline. Before this, one stalled call among the
+ * mirror's thousands of sequential files calls wedged the workspace
+ * lock chain indefinitely. The deadline rejects with
+ * E2bRequestTimeoutError; the underlying call is never cancelled.
+ */
+describe("E2bSandboxProvider — per-call request deadlines (provisioning fix)", () => {
+  it("a hanging file read rejects with E2bRequestTimeoutError inside the injected deadline", async () => {
+    const client = new FakeE2bClient();
+    const provider = new E2bSandboxProvider({
+      apiKey: API_KEY,
+      client,
+      templateId: "litt-test-template",
+      requestTimeoutMs: 50,
+    });
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+    client.handles.get(instance.sandboxId)!.hangReads = true;
+
+    const startedAt = Date.now();
+    const failure = await provider.fileTransfer
+      .readFile(instance.sandboxId, "/workspace/never.txt")
+      .then(
+        () => null,
+        (err: unknown) => err as Error,
+      );
+    expect(failure).toBeInstanceOf(E2bRequestTimeoutError);
+    expect(failure!.message).toContain("did not settle within 50 ms");
+    // The rejection arrived on the deadline's clock, not the hang's.
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+  });
+
+  it("a healthy call inside the deadline is untouched by it", async () => {
+    const client = new FakeE2bClient();
+    const provider = new E2bSandboxProvider({
+      apiKey: API_KEY,
+      client,
+      templateId: "litt-test-template",
+      requestTimeoutMs: 50,
+    });
+    const instance = await provider.create({
+      workspaceId: "ws-1",
+      userId: "user-1",
+      projectId: "proj-1",
+    });
+    await provider.fileTransfer.writeFile(
+      instance.sandboxId,
+      "/workspace/a.txt",
+      new TextEncoder().encode("content"),
+    );
+    const bytes = await provider.fileTransfer.readFile(instance.sandboxId, "/workspace/a.txt");
+    expect(new TextDecoder().decode(bytes)).toBe("content");
   });
 });

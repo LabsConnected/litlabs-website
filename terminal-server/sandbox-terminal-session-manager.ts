@@ -47,6 +47,11 @@
  * (SANDBOX_TERMINAL_PROVISION_TIMEOUT_MS) — both added after the
  * 2026-11-19 live proof, where a cold open raced a second
  * provision and hung past every client timeout with no error.
+ * The ensure stage's bound is armed by the executor's lock signal
+ * (provisioning fix): it charges only the locked ensure work,
+ * never the wait queued behind the workspace lock — the original
+ * bound wrapped both, so after a restart three serialized cold
+ * provisions each "timed out" in the queue behind the first.
  */
 
 import { randomUUID } from "crypto";
@@ -59,6 +64,7 @@ import {
 import {
   SANDBOX_HOME_DIR,
   SANDBOX_WORKSPACE_ROOT,
+  type EnsureSandboxOptions,
 } from "./sandbox/workspace-executor";
 import type { WorkspaceDescriptor } from "./workspace/WorkspaceManager";
 import {
@@ -135,15 +141,56 @@ async function settleWithin<T>(
   }
 }
 
+/**
+ * settleWithin with the clock armed by a signal instead of by the
+ * call: the deadline starts counting only when `lockSignal`
+ * resolves — the moment the executor reports the workspace lock
+ * held and the locked ensure actually beginning (provisioning fix).
+ * Time spent queued behind the lock is therefore never charged
+ * against the bound. The promise's own settle always wins the race,
+ * armed or not: an executor that declines without ever taking the
+ * lock (the gate-closed path returns null before locking) resolves
+ * immediately, exactly as before. Same never-cancel discipline as
+ * settleWithin.
+ */
+async function settleWithinAfterLockSignal<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  lockSignal: Promise<void>,
+): Promise<SettleOutcome<T>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let done = false;
+  const deadline = new Promise<SettleOutcome<T>>((resolve) => {
+    void lockSignal.then(() => {
+      if (done) return;
+      timer = setTimeout(() => resolve({ settled: false }), timeoutMs);
+      if (typeof timer.unref === "function") timer.unref();
+    });
+  });
+  try {
+    return await Promise.race([
+      promise.then((value): SettleOutcome<T> => ({ settled: true, value })),
+      deadline,
+    ]);
+  } finally {
+    done = true;
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 // ─── Dependency shapes ──────────────────────────────────────────────
 
 /**
  * The executor surface this manager needs. SandboxWorkspaceExecutor
- * satisfies it structurally; tests inject a fake.
+ * satisfies it structurally; tests inject a fake. The ensure's
+ * options carry the lock-acquired signal that arms this manager's
+ * settle bound (see settleWithinAfterLockSignal); an executor fake
+ * that ignores the second parameter remains structurally valid.
  */
 export interface SandboxTerminalExecutor {
   ensureSandboxForTerminal(
     descriptor: WorkspaceDescriptor,
+    options?: EnsureSandboxOptions,
   ): Promise<{ sandboxId: string } | null>;
   syncBackForTerminal(descriptor: WorkspaceDescriptor): Promise<void>;
 }
@@ -478,9 +525,21 @@ export class SandboxTerminalSessionManager {
       );
     }
 
-    const ensureOutcome = await settleWithin(
-      this.executor.ensureSandboxForTerminal(opts.descriptor),
+    // The ensure's settle bound arms on the executor's lock signal,
+    // not here: the clock charges the locked ensure work only, so a
+    // cold provision queued behind another operation (a prepare, a
+    // racing preview ensure) is not killed for waiting its turn.
+    // The 480 s value is unchanged — its scope was the defect.
+    let signalLockAcquired!: () => void;
+    const lockAcquired = new Promise<void>((resolve) => {
+      signalLockAcquired = resolve;
+    });
+    const ensureOutcome = await settleWithinAfterLockSignal(
+      this.executor.ensureSandboxForTerminal(opts.descriptor, {
+        onLockAcquired: signalLockAcquired,
+      }),
       this.provisionTimeoutMs,
+      lockAcquired,
     );
     if (!ensureOutcome.settled) {
       throw new Error(
