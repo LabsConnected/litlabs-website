@@ -320,11 +320,44 @@ test.describe("LiTT Studio mobile visual evidence", () => {
         "test-results/evidence-route.log",
         `${new Date().toISOString()} ${route.request().method()} ${route.request().url()}\n`,
       );
-      // Only POST .../messages is mocked; everything else (conversation
-      // create, GET history, project APIs) hits the real backend.
+      // Mock the full send path so no real backend/AI is involved:
+      //  - POST /api/studio/conversations        → canned conversation
+      //  - GET  .../conversations/:id/messages   → empty history
+      //  - POST .../conversations/:id/messages   → canned SSE/JSON turns
       const url = route.request().url();
+      const method = route.request().method();
+      if (method === "POST" && url.endsWith("/api/studio/conversations")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            conversation: {
+              id: "conv-mobile-evidence",
+              ownerId: "user-evidence",
+              projectId: "",
+              title: "Mobile evidence chat",
+              activeAgentSlug: "litt",
+              activeAgentMode: "auto",
+              agentInstanceId: null,
+              revision: 1,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              archivedAt: null,
+            },
+          }),
+        });
+        return;
+      }
+      if (method === "GET" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ messages: [], revision: 1 }),
+        });
+        return;
+      }
       const isMessagePost =
-        route.request().method() === "POST" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url);
+        method === "POST" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url);
       if (!isMessagePost) {
         await route.continue();
         return;
