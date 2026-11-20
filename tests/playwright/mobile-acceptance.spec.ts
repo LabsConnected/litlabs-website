@@ -66,12 +66,18 @@ async function measureOpenSheet(page: Page) {
     viewport.documentClientWidth + 1,
   );
   // Chat-first layout (2026-11-19 card): the sheet is the home surface —
-  // it starts at the top bar's bottom edge and fills the visual viewport.
-  // No bottom navigation dock exists anymore.
-  expect(sheet.y, "sheet should sit directly below the slim top bar").toBeGreaterThanOrEqual(topbar.y);
+  // it fills the whole visual viewport and its own slim header (project
+  // name + New Chat + menu) IS the top bar while chat is open. The
+  // studio top bar underneath only becomes visible on tool surfaces,
+  // where it leads with Back to chat. No bottom navigation dock exists.
+  expect(sheet.y, "sheet should reach the top of the visual viewport").toBe(0);
   expect(bottom(sheet), "sheet should reach the bottom of the visual viewport").toBeGreaterThanOrEqual(
     viewport.height - 2,
   );
+  await expect(
+    page.getByTestId("litt-mobile-topbar"),
+    "sheet should carry the slim chat-home header",
+  ).toBeVisible();
 
   return { viewport, sheet, composer, input, action, topbar };
 }
@@ -224,10 +230,14 @@ test.describe("LiTT Studio mobile density redesign", () => {
       const statusRect = await visibleRect(statusBar, "Build status bar");
       expect(statusRect.height, "Build status bar should be compact (≤48px)").toBeLessThanOrEqual(48);
 
-      // 3. Conversation + composer are the dominant surfaces.
+      // 3. Conversation + composer are the dominant surfaces. A fresh
+      // conversation shows the empty state instead of a transcript —
+      // either way the chat column owns the viewport.
       const transcript = page.getByTestId("studio-transcript");
-      await expect(transcript, "transcript should be visible").toBeVisible();
-      const transcriptRect = await visibleRect(transcript, "transcript");
+      const emptyState = page.getByTestId("empty-state");
+      const chatSurface = (await transcript.count()) > 0 ? transcript : emptyState;
+      await expect(chatSurface, "chat surface (transcript or empty state) should be visible").toBeVisible();
+      const transcriptRect = await visibleRect(chatSurface, "chat surface");
       const viewportHeight = 844;
       expect(
         transcriptRect.height,
