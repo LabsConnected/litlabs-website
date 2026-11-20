@@ -517,13 +517,19 @@ test.describe("LiTT Studio mobile visual evidence", () => {
       await page.getByRole("button", { name: "Show more" }).first().click();
       await expect(page.getByRole("button", { name: "Show less" }).first()).toBeVisible();
       // Scope to the mobile sheet — the desktop transcript stays mounted
-      // (display:none) and its copy of the image never fetches. Assert DOM
-      // presence; the screenshot is the visual evidence.
+      // (display:none) and its copy of the image never fetches. The image
+      // must actually decode (naturalWidth > 0), not merely exist in the DOM.
       const heroImage = page
         .getByTestId("litt-mobile-sheet")
         .locator('img[alt="Generated hero mockup"]');
       await heroImage.scrollIntoViewIfNeeded();
       await expect(heroImage).toBeAttached();
+      await expect
+        .poll(
+          () => heroImage.evaluate((el: HTMLImageElement) => el.naturalWidth),
+          { timeout: 15_000 },
+        )
+        .toBeGreaterThan(0);
       await shot(page, `${width}-long-answer-expanded`);
       await page.getByRole("button", { name: "Show less" }).first().click();
 
