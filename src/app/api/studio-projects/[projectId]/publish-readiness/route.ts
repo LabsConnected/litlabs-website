@@ -33,6 +33,14 @@ const MAX_ENTRIES = 600;
 
 type WsEntry = { name: string; type: string };
 
+// The terminal-server /ws-files endpoint labels directories "folder";
+// other transports use "directory" or "dir". Mirrors the identical fix in
+// collectStaticArtifact — without it nested assets are invisible to the
+// readiness check.
+function isDirectoryEntry(entry: WsEntry): boolean {
+  return entry.type === "directory" || entry.type === "folder" || entry.type === "dir";
+}
+
 async function listDir(
   base: string,
   headers: Record<string, string>,
@@ -133,10 +141,10 @@ export async function GET(
         if (dir === ".") {
           // Mirror validateArtifact exactly: the entrypoint must be
           // lowercase "index.html" at the root.
-          if (entry.type !== "directory" && entry.name === "index.html") {
+          if (!isDirectoryEntry(entry) && entry.name === "index.html") {
             hasIndexHtml = true;
           }
-          if (entry.type === "directory" && PUBLISH_EXCLUDED_DIRS.has(entry.name)) {
+          if (isDirectoryEntry(entry) && PUBLISH_EXCLUDED_DIRS.has(entry.name)) {
             // Build output / dependency dirs are never published — note the
             // framework-ish ones for the warning, then don't descend.
             if ([".next", "dist", "build"].includes(entry.name)) {
@@ -145,7 +153,7 @@ export async function GET(
           }
         }
 
-        if (entry.type === "directory") {
+        if (isDirectoryEntry(entry)) {
           if (PUBLISH_EXCLUDED_DIRS.has(entry.name)) continue;
           if (!isSafeArtifactPath(path)) continue;
           if (!seenDirs.has(path)) {
@@ -161,7 +169,7 @@ export async function GET(
       }
 
       // Read package.json once, from the root listing.
-      if (dir === "." && entries.some((e) => e.type !== "directory" && e.name === "package.json")) {
+      if (dir === "." && entries.some((e) => !isDirectoryEntry(e) && e.name === "package.json")) {
         const raw = await readTextFile(base, headers, "package.json", 64 * 1024);
         if (raw) packageJson = raw;
       }
