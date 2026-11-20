@@ -81,7 +81,7 @@ const STATUS_DOT_COLOR: Record<PreviewState, string> = {
  * null means the stage cannot be distinguished — the panel then renders the
  * single honest "Preparing Static View…" state instead of inventing stages.
  */
-type StartPhase = "provision" | "devserver" | null;
+type StartPhase = "provision" | "install" | "build" | "devserver" | null;
 
 /**
  * Workspace content truth, as reported by /api/studio-projects/[id]/workspace-state.
@@ -98,16 +98,35 @@ type StartPhase = "provision" | "devserver" | null;
  */
 type WorkspaceTruth = "unknown" | "has_content" | "no_content";
 const START_STAGES = ["Provision", "Dev server"] as const;
+/** Production-build starts have two more real stages (health-fix):
+    the runtime's own [preview] log lines mark them, so the panel can
+    show Install and Build instead of sitting on "Dev server" through
+    a 30-minute install+build. */
+const PROD_START_STAGES = ["Provision", "Install", "Build", "Server"] as const;
+const START_PHASE_ORDER: Record<string, number> = { provision: 0, install: 1, build: 2, devserver: 3 };
 /** A not_started preview with nothing in flight must fail visibly after this. */
 const STUCK_NOT_STARTED_MS = 20000;
 /** How long the preview URL gets to answer before "ready" is rejected. */
 const FRAME_PROBE_TIMEOUT_MS = 20000;
 
-function deriveStartPhase(state: PreviewState, workspaceStatus: string | null, runtimeStatusRaw: string | null): StartPhase {
+function deriveStartPhase(state: PreviewState, workspaceStatus: string | null, runtimeStatusRaw: string | null, payload?: PreviewPayload | null): StartPhase {
   if (state !== "starting" && state !== "restarting") return null;
   // A restart re-starts the dev server; provisioning is not repeated.
   if (state === "restarting") return "devserver";
   if (workspaceStatus === "preparing" || workspaceStatus === "provisioning") return "provision";
+  if (payload?.serveMode === "production-build" && workspaceStatus === "ready" && runtimeStatusRaw === "starting") {
+    // The latest phase signal in the runtime's own logs wins: scan
+    // from the end so a later stage supersedes an earlier one.
+    const logs = Array.isArray(payload.logs) ? (payload.logs as string[]) : [];
+    for (let i = logs.length - 1; i >= 0; i--) {
+      const line = logs[i];
+      if (typeof line !== "string") continue;
+      if (line.includes("in sandbox on port")) return "devserver";
+      if (line.includes("Building production bundle")) return "build";
+      if (line.includes("Installing dependencies")) return "install";
+    }
+    return "install";
+  }
   if (workspaceStatus === "ready" && runtimeStatusRaw === "starting") return "devserver";
   return null;
 }
@@ -120,6 +139,7 @@ interface PreviewPayload {
   framework?: unknown;
   developmentCommand?: unknown;
   packageManager?: unknown;
+  serveMode?: unknown;
   logs?: unknown;
   port?: unknown;
 }
@@ -364,6 +384,10 @@ export default function StudioPreviewPanel({
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [startPhase, setStartPhase] = useState<StartPhase>(null);
+  // Serve mode reported by the runtime's status payloads (health-fix):
+  // a production-build start gets the longer poll bound and the
+  // Install/Build stages; dev starts keep the existing behavior.
+  const [serveMode, setServeMode] = useState<"dev" | "production-build">("dev");
   // Content truth gates auto-start. Starts as "unknown" (blocking) so the
   // very first render can never auto-start on an unresolved truth.
   const [workspaceTruth, setWorkspaceTruth] = useState<WorkspaceTruth>("unknown");
@@ -411,6 +435,14 @@ export default function StudioPreviewPanel({
   // get a response applied).
   const statusInFlightRef = useRef(false);
   const MAX_START_POLL_ATTEMPTS = 420; // 420 × 3s ≈ 21 min — with the terminal's async accept (C3/C4), the poll is the start's verdict channel, so its window must cover the terminal's own worst case: sandbox install budget (900s) + start health-probe window (120s) + provision/launch slack. The old 110 (≈330s, matched to the start-POST budget) declared "took too long" over starts that were still legitimately installing.
+  // Production-build starts carry one more server phase the dev
+  // window never priced: the build itself (≤900s) plus the longer
+  // production health window (300s). 900 × 3s = 45 min covers
+  // provision (480s) + install (900s) + build (900s) + health (300s)
+  // with slack; the old 420 declared "took too long" ~19 min before
+  // a legitimate production start could finish (health-fix).
+  const PROD_MAX_START_POLL_ATTEMPTS = 900;
+  const maxStartPollAttempts = serveMode === "production-build" ? PROD_MAX_START_POLL_ATTEMPTS : MAX_START_POLL_ATTEMPTS;
   // Which project this panel is showing right now, and a token per start
   // attempt: late results for a previous project are discarded, not applied.
   const activeProjectRef = useRef<string | null>(projectId);
@@ -645,9 +677,12 @@ export default function StudioPreviewPanel({
       }
       const next = statusFromPayload(payload, workspaceStatus);
       const runtimeStatusRaw = typeof payload.runtimeStatus === "string" ? payload.runtimeStatus : null;
+      if (payload.serveMode === "production-build" || payload.serveMode === "dev") {
+        setServeMode(payload.serveMode);
+      }
       // Display-only: pin the staged-loading indicator to what the status
       // logic can truthfully distinguish. null → the honest single state.
-      setStartPhase(deriveStartPhase(next.state, workspaceStatus, runtimeStatusRaw));
+      setStartPhase(deriveStartPhase(next.state, workspaceStatus, runtimeStatusRaw, payload));
       setState((prevState) => {
         // Only reload iframe when transitioning from non-ready to ready,
         // or when a file change explicitly requested a refresh.
@@ -869,7 +904,7 @@ export default function StudioPreviewPanel({
     const interval = setInterval(() => {
       if (statusInFlightRef.current) return;
       startPollAttemptsRef.current += 1;
-      if (startPollAttemptsRef.current >= MAX_START_POLL_ATTEMPTS) {
+      if (startPollAttemptsRef.current >= maxStartPollAttempts) {
         clearInterval(interval);
         statusSeqRef.current++;
         statusInFlightRef.current = false;
@@ -882,7 +917,7 @@ export default function StudioPreviewPanel({
       void loadStatus(true);
     }, 3000);
     return () => clearInterval(interval);
-  }, [state, loadStatus]);
+  }, [state, loadStatus, serveMode]);
 
   // Health check while ready. A dev server that dies AFTER reaching ready
   // must not keep the green "Preview ready" dot over a dead iframe.
@@ -915,7 +950,7 @@ export default function StudioPreviewPanel({
           statusSeqRef.current++;
           const nextState = died ? "failed" : next.state;
           setState(nextState);
-          setStartPhase(deriveStartPhase(nextState, workspaceStatus, typeof payload.runtimeStatus === "string" ? payload.runtimeStatus : null));
+          setStartPhase(deriveStartPhase(nextState, workspaceStatus, typeof payload.runtimeStatus === "string" ? payload.runtimeStatus : null, payload));
           setError(died ? "The preview dev server stopped unexpectedly." : next.error);
           setErrorCode(next.errorCode);
           if (!died) setPreviewUrl(next.url);
@@ -1294,7 +1329,7 @@ export default function StudioPreviewPanel({
   // session and its content, which is the machinery sense, and the
   // Code panel's own preview concept is untouched.
   const label = !projectId ? "Select a project" : state === "loading" ? "Checking Static View status…" : state === "starting" ? "Preparing Static View…" : state === "restarting" ? "Restarting dev server…" : state === "ready" ? (frameFailed ? "Static View failed to load" : stylingFailed ? "Static View styling failed to apply" : frameCheck === "ok" ? "Static View ready" : "Loading Static View…") : state === "stale" ? "Static View may be stale" : state === "not_started" ? (hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_LABEL : awaitingFirstContent ? "No Static View yet" : "Static View not started") : state === "unreachable" ? "Static View runtime unreachable" : state === "failed" ? (isAuthConfigError ? "Authentication configuration error" : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_LABEL : "Static View failed to start") : "Static View runtime unreachable";
-  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "ready" && frameFailed ? (frameError ?? "The preview address did not load. Retry to check it again.") : state === "not_started" ? (hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : awaitingFirstContent ? "Build something in this project and the preview will start automatically. Already have files? Start it manually." : "Preparing your preview automatically…") : state === "unreachable" ? (humanError ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? "Provisioning the workspace and starting the dev server…" : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (humanError ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : humanError ?? "The preview failed to start. Try restarting it.") : humanError ?? "The preview surface reports only real project runtime state.";
+  const detail = !projectId ? "Choose an existing project or start a blank project to launch a preview." : state === "ready" && frameFailed ? (frameError ?? "The preview address did not load. Retry to check it again.") : state === "not_started" ? (hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : awaitingFirstContent ? "Build something in this project and the preview will start automatically. Already have files? Start it manually." : "Preparing your preview automatically…") : state === "unreachable" ? (humanError ?? "The preview runtime could not be reached. It may be starting up or temporarily unavailable. Try refreshing.") : state === "starting" ? (serveMode === "production-build" ? "Provisioning the workspace, installing dependencies, and running the production build…" : "Provisioning the workspace and starting the dev server…") : state === "restarting" ? "Restarting the dev server…" : state === "stale" ? "A file changed — reloading the preview…" : state === "failed" ? (isAuthConfigError ? (humanError ?? "The Clerk secret key or publishable key is invalid, stale, or mismatched. This is NOT a generic preview failure — add both keys to this project's Studio secrets or the workspace .env.local, then restart the preview.") : hostExecBlocked ? HOST_EXECUTION_UNAVAILABLE_MESSAGE : humanError ?? "The preview failed to start. Try restarting it.") : humanError ?? "The preview surface reports only real project runtime state.";
   const dotColor = stylingFailed ? STATUS_DOT_COLOR.stale : STATUS_DOT_COLOR[state];
   const isLive = state === "ready" || state === "stale";
 
@@ -1897,10 +1932,10 @@ export default function StudioPreviewPanel({
               <div className="flex flex-col items-center gap-2">
                 {startPhase && (
                   <div className="flex items-center gap-2" data-testid="preview-start-stages" aria-label="Static View startup progress">
-                    {START_STAGES.map((stageName) => {
-                      const stageKey = stageName === "Provision" ? "provision" : "devserver";
-                      const isCurrent = startPhase === stageKey || (startPhase === "devserver" && stageKey === "provision");
-                      const isDone = startPhase === "devserver" && stageKey === "provision";
+                    {(serveMode === "production-build" ? PROD_START_STAGES : START_STAGES).map((stageName) => {
+                      const stageKey = stageName === "Provision" ? "provision" : stageName === "Install" ? "install" : stageName === "Build" ? "build" : "devserver";
+                      const isDone = (START_PHASE_ORDER[stageKey] ?? 0) < (START_PHASE_ORDER[startPhase] ?? 0);
+                      const isCurrent = startPhase === stageKey || isDone;
                       return (
                         <div key={stageName} className="flex items-center gap-1.5">
                           <span

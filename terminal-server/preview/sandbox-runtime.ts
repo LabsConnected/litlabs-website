@@ -73,6 +73,7 @@ import {
   type PreviewUpstream,
 } from "./PreviewManager";
 import {
+  resolvePreviewHealthProbeTimeoutMs,
   SANDBOX_PREVIEW_BUILD_TIMEOUT_MS,
   type PreviewServeMode,
 } from "./serve-mode";
@@ -101,6 +102,17 @@ const HEALTH_PROBE_INTERVAL_MS = 1000;
  * now reaches "ready" instead of a false "did not become healthy".
  */
 export const HEALTH_PROBE_TIMEOUT_MS = 120_000;
+/**
+ * Per-attempt probe abort on the production-build path. The dev
+ * path keeps probeUpstream's 3 s default: a dev server's first
+ * response is a fast local compile. A production server's first
+ * GET / render on a just-build-saturated 2 vCPU box can run far
+ * past 3 s — and with a 3 s abort EVERY attempt failed identically,
+ * so the retry loop could never accumulate progress (live proof
+ * 2026-11-19). 20 s matches the in-guest ground-truth curl's
+ * budget (checkSandboxPreviewGroundTruth).
+ */
+const PROD_HEALTH_PROBE_ATTEMPT_TIMEOUT_MS = 20_000;
 /** Session extension granted while a sandbox preview is in use. */
 const PREVIEW_SESSION_EXTENSION_MS = 120 * 60_000;
 
@@ -477,19 +489,74 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
 
   // Background health probe through the upstream — don't block the
   // response, mirroring the host path.
-  const probe = args.probe ?? probeUpstream;
+  //
+  // Health-fix (2026-11-19), from the failed #1062 live proof where
+  // a production-build start died at this probe while its server
+  // was still alive: (1) the budget is serve-mode sized
+  // (serve-mode.ts) — production gets 300 s because this clock
+  // starts at spawn, while `next start` is still loading on a
+  // build-saturated box; dev keeps 120 s. (2) The default probe's
+  // per-attempt abort is 20 s on the production path (see
+  // PROD_HEALTH_PROBE_ATTEMPT_TIMEOUT_MS); test doubles passed via
+  // args.probe are used untouched. (3) While probing, the preview
+  // log is scanned for the server's own ready line, so the final
+  // verdict can separate "the server booted" from "the first
+  // response never became healthy".
+  const healthProbeTimeoutMs = resolvePreviewHealthProbeTimeoutMs(
+    serveMode,
+    HEALTH_PROBE_TIMEOUT_MS,
+  );
+  const probe =
+    args.probe ??
+    ((origin: string, headers: Record<string, string>) =>
+      probeUpstream(
+        origin,
+        headers,
+        serveMode === "production-build"
+          ? PROD_HEALTH_PROBE_ATTEMPT_TIMEOUT_MS
+          : 3_000,
+      ));
   const upstreamHeaders = { ...runtime.upstream.headers };
   void (async () => {
-    const deadline = Date.now() + HEALTH_PROBE_TIMEOUT_MS;
+    const deadline = Date.now() + healthProbeTimeoutMs;
     let result: SandboxProbeResult = {
       healthy: false,
       authConfigError: false,
       rootRouteMissing: false,
       status: null,
     };
+    let serverReportedReady = false;
+    let readyScanOffset = 0;
+    let lastReadyScanAt = 0;
     while (Date.now() < deadline) {
       result = await probe(endpoint.url, upstreamHeaders).catch(() => result);
       if (result.healthy || result.authConfigError || result.rootRouteMissing) break;
+      // Ready-line scan (throttled to 5 s; scan-local offset — the
+      // shared offsets in logOffsets belong to
+      // tailSandboxPreviewLogs and are not touched here).
+      // Best-effort: a failed read means no boot evidence this
+      // round, never a probe failure.
+      if (!serverReportedReady && Date.now() - lastReadyScanAt >= 5_000) {
+        lastReadyScanAt = Date.now();
+        try {
+          const bytes = await transfer.readFile(sandboxId, LOG_PATH);
+          if (bytes.length > readyScanOffset) {
+            const fresh = new TextDecoder().decode(
+              bytes.slice(readyScanOffset),
+            );
+            readyScanOffset = bytes.length;
+            if (/Ready in|started server on/.test(fresh)) {
+              serverReportedReady = true;
+              pushPreviewLog(
+                runtime,
+                `[preview] Server reported ready in its output — waiting for the first response`,
+              );
+            }
+          }
+        } catch {
+          // No log yet, or the read failed — boot evidence stays absent.
+        }
+      }
       await new Promise((r) => setTimeout(r, HEALTH_PROBE_INTERVAL_MS));
     }
     runtime.lastHealthCheck = Date.now();
@@ -538,7 +605,7 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
         runtime.error = withPreviewLogDiagnostic(
           "The dev server is running inside the sandbox, but its preview " +
             "address did not answer from outside within " +
-            `${HEALTH_PROBE_TIMEOUT_MS / 1000}s. This is a preview ` +
+            `${healthProbeTimeoutMs / 1000}s. This is a preview ` +
             "connection problem, not a dev server failure — the server " +
             "itself is up.",
           boundedPreviewLogTail(runtime.logs),
@@ -552,11 +619,42 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
       } else {
         runtime.status = "failed";
         runtime.errorCode = "preview_port_never_ready";
-        runtime.error = withPreviewLogDiagnostic(
-          `Dev server did not become healthy within ${HEALTH_PROBE_TIMEOUT_MS / 1000}s`,
-          boundedPreviewLogTail(runtime.logs),
-        );
-        pushPreviewLog(runtime, `[preview] Health check failed — timeout`);
+        // Verdict honesty (health-fix): record what the in-guest
+        // ground truth actually established, distinctly. A readable
+        // "not answering" (answering === false) convicts the guest;
+        // an unreadable check (answering === null, or the check
+        // threw and the catch above produced null) must be recorded
+        // as unreadable — the 2026-11-19 proof window had 30 s
+        // channel timeouts on this same path, so "unreadable" was a
+        // live possibility the old single verdict text erased. Boot
+        // evidence from the ready-line scan is recorded too, so a
+        // booted server with an unhealthy first response is not
+        // reported the same as a server that never came up.
+        const bootNote = serverReportedReady
+          ? " The server reported ready in its own output, so it booted — " +
+            "its first response never became healthy."
+          : "";
+        if (groundTruth?.answering === false) {
+          runtime.error = withPreviewLogDiagnostic(
+            `Dev server did not become healthy within ${healthProbeTimeoutMs / 1000}s ` +
+              `(in-sandbox check: guest confirmed not answering locally).${bootNote}`,
+            boundedPreviewLogTail(runtime.logs),
+          );
+          pushPreviewLog(
+            runtime,
+            `[preview] Health check failed — timeout (guest confirmed not answering locally)`,
+          );
+        } else {
+          runtime.error = withPreviewLogDiagnostic(
+            `Dev server did not become healthy within ${healthProbeTimeoutMs / 1000}s ` +
+              `(in-sandbox check unreadable — the guest's local state could not be confirmed).${bootNote}`,
+            boundedPreviewLogTail(runtime.logs),
+          );
+          pushPreviewLog(
+            runtime,
+            `[preview] Health check failed — timeout (in-sandbox check unreadable)`,
+          );
+        }
       }
     }
   })();
