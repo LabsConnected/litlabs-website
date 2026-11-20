@@ -4,6 +4,8 @@ export interface LogContext {
   conversationId?: string;
   projectId?: string;
   actionRunId?: string;
+  billingRunId?: string;
+  billingStatus?: "confirmed" | "failed" | "pending_reconciliation";
   actionRunCancellation?: "not_applicable" | "requested" | "failed";
   userId?: string;
   agentSlug?: string;

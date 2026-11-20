@@ -35,14 +35,25 @@ describe("LiTT chat — no floating promises", () => {
     expect(content).not.toContain("void harvestUserPreferences");
   });
 
-  it("settleRun calls have .catch() handlers", () => {
+  it("settlement runs only through the awaited finishAgentBilling helper (no floating settleRun)", () => {
     const content = readSrc(MESSAGES_ROUTE);
-    // Every settleRun call must be followed by .catch()
-    const settleCalls = content.match(/settleRun\(/g);
-    const catchCalls = content.match(/settleRun\([^)]+\)[^;]*\.catch\(/g);
-    expect(settleCalls).toBeTruthy();
-    expect(catchCalls).toBeTruthy();
-    expect(catchCalls!.length).toBeGreaterThanOrEqual(settleCalls!.length);
+    // Settlement must go through the finishAgentBilling helper, and every
+    // call site must await it — a bare finishAgentBilling(...) call would be
+    // a floating promise.
+    const helperCalls = content.match(/finishAgentBilling\(/g) ?? [];
+    const awaitedHelperCalls = content.match(/await finishAgentBilling\(/g) ?? [];
+    expect(helperCalls.length).toBeGreaterThan(0);
+    expect(awaitedHelperCalls.length).toBe(helperCalls.length);
+    // The single direct settleRun( invocation lives inside that helper,
+    // awaited within a try/catch that logs failures (never silently dropped).
+    const settleCalls = content.match(/settleRun\(/g) ?? [];
+    expect(settleCalls.length).toBe(1);
+    expect(content).toMatch(/try \{\s*const outcome = await settleRun\(/);
+    expect(content).toContain("message:billing_unconfirmed");
+    expect(content).toContain("message:billing_settle_exception");
+    // The old fire-and-forget shape must not come back: no settleRun(...).catch(...)
+    // anywhere in the route (it would bypass the helper's failure logging).
+    expect(content.match(/settleRun\([^)]+\)[^;]*\.catch\(/g)).toBeNull();
   });
 
   it("persistMemory calls have .catch() handlers", () => {

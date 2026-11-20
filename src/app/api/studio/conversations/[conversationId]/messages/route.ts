@@ -988,6 +988,23 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   let reservationId: string | null = null;
   let actionRun: ActionRun | null = null;
   let actionContext: ActionExecutionContext | null = null;
+  const finishAgentBilling = async (billingResult: Parameters<typeof settleRun>[1]): Promise<void> => {
+    if (!agentRunId) return;
+    try {
+      const outcome = await settleRun(agentRunId, billingResult, reservedCredits, reservationId);
+      if (!outcome.ok) {
+        studioLog("message:billing_unconfirmed", {
+          billingRunId: agentRunId,
+          billingStatus: outcome.billingStatus,
+        });
+      }
+    } catch (error) {
+      studioLog("message:billing_settle_exception", {
+        billingRunId: agentRunId,
+        errorClass: error instanceof Error ? error.name : "unknown",
+      });
+    }
+  };
   if (runtimeAgent?.agentInstanceId && clerkId) {
     // Estimate the maximum cost: per-run fee + estimated tokens
     const estimatedTokens = Math.ceil(finalPrompt.length / 4) + 2048; // prompt + max output
@@ -1093,13 +1110,13 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       });
       await updateMessageStatus(assistantMessage.id, userId, "failed", safeMessage);
       if (agentRunId) {
-        settleRun(agentRunId, {
+        await finishAgentBilling({
           inputTokens: 0,
           outputTokens: 0,
           actualCredits: 0,
           status: "failed",
           error: "ACTION_RUNTIME_UNAVAILABLE",
-        }, reservedCredits, reservationId).catch(() => {});
+        });
       }
       return false;
     }
@@ -1271,9 +1288,19 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           });
         }
 
+        // D4 text channel: how many reply-text segments were already
+        // streamed to the client via progress "text" events during this
+        // run. When >0 the terminal full-text send below is skipped —
+        // the client appends text events, so re-sending the whole
+        // finalText would duplicate it in the streaming bubble (the
+        // done payload remains authoritative for the persisted content).
+        let streamedTextSegments = 0;
         const streamProgress = new ProgressEmitter((evt: ProgressEvent) => {
           // Stream each event to the client immediately
-          if (evt.type === "tool_start") {
+          if (evt.type === "text") {
+            streamedTextSegments++;
+            safeEvent({ type: "text", text: evt.text });
+          } else if (evt.type === "tool_start") {
             safeEvent({ type: "tool_execution", toolId: evt.toolId, summary: evt.summary });
           } else if (evt.type === "tool_result") {
             safeEvent({
@@ -1469,9 +1496,15 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
 
         v2Result = launchFlowResult.agentLoopResult ?? null;
 
-        // Stream the final text
+        // Stream the final text — unless reply text already streamed
+        // in segments during the run (D4): the client appends text
+        // events, so a second full send would duplicate the answer in
+        // the streaming bubble. The done payload below still carries
+        // the authoritative final content either way.
         assistantText = launchFlowResult.finalText;
-        safeEvent({ type: "text", text: assistantText });
+        if (streamedTextSegments === 0) {
+          safeEvent({ type: "text", text: assistantText });
+        }
 
         // If V2 paused for approval, persist the paused state and flag it
         let pausedRunId: string | undefined;
@@ -1735,7 +1768,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           const actualCredits = runtimeAgent
             ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
             : 0;
-          settleRun(agentRunId, {
+          await finishAgentBilling({
             inputTokens: Math.ceil(finalPrompt.length / 4),
             outputTokens: Math.ceil(assistantText.length / 4),
             actualCredits,
@@ -1744,8 +1777,6 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               : finalMessageStatus === "cancelled"
                 ? "cancelled"
                 : "failed",
-          }, reservedCredits, reservationId).catch(() => {
-            // Best-effort settlement — must not leak unhandled rejection
           });
         }
 
@@ -2007,13 +2038,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             const actualCredits = runtimeAgent
               ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
               : 0;
-            settleRun(agentRunId, {
+            await finishAgentBilling({
               inputTokens: Math.ceil(finalPrompt.length / 4),
               outputTokens: Math.ceil(assistantText.length / 4),
               actualCredits,
               status: cancelledV1 ? "cancelled" : v1Failed ? "failed" : "completed",
-            }, reservedCredits, reservationId).catch(() => {
-              // Best-effort settlement — must not leak unhandled rejection
             });
           }
 
@@ -2167,14 +2196,12 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           }
         }
         if (agentRunId) {
-          settleRun(agentRunId, {
+          await finishAgentBilling({
             inputTokens: 0,
             outputTokens: 0,
             actualCredits: 0,
             status: cancelledBySignal ? "cancelled" : "failed",
             ...(cancelledBySignal ? {} : { error: errorMsg }),
-          }, reservedCredits, reservationId).catch(() => {
-            // Best-effort settlement on failure — must not leak unhandled rejection
           });
         }
         studioLog(cancelledBySignal ? "message:cancelled" : "message:failed", {
