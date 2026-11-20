@@ -322,6 +322,8 @@ test.describe("LiTT Studio mobile visual evidence", () => {
         return;
       }
       call += 1;
+      const { appendFileSync } = await import("fs");
+      appendFileSync("test-results/evidence-route.log", `${new Date().toISOString()} POST ${route.request().url()}\n`);
       const request = route.request();
       const body = JSON.parse(request.postData() ?? "{}") as { message?: string };
       const userMessageId = `ev-user-${call}`;
