@@ -27,6 +27,7 @@ import type {
   TerminalConnectOptions,
   TerminalTransport,
 } from "../sandbox/provider";
+import type { EnsureSandboxOptions } from "../sandbox/workspace-executor";
 import type { WorkspaceDescriptor } from "../workspace/WorkspaceManager";
 
 const DESCRIPTOR: WorkspaceDescriptor = {
@@ -152,11 +153,22 @@ class FakeExecutor implements SandboxTerminalExecutor {
   ensureOverride:
     | ((descriptor: WorkspaceDescriptor) => Promise<{ sandboxId: string } | null>)
     | null = null;
+  /**
+   * The onLockAcquired hook from the most recent ensure call, so
+   * scoping tests can fire it by hand. By default the hook fires at
+   * ensure entry — honest for this fake, whose ensure never queues
+   * behind a lock. deferLockSignal turns that off.
+   */
+  lastLockHook: (() => void) | null = null;
+  deferLockSignal = false;
 
   async ensureSandboxForTerminal(
     descriptor: WorkspaceDescriptor,
+    options?: EnsureSandboxOptions,
   ): Promise<{ sandboxId: string } | null> {
     this.ensureCalls.push(descriptor);
+    this.lastLockHook = options?.onLockAcquired ?? null;
+    if (!this.deferLockSignal) options?.onLockAcquired?.();
     if (this.ensureOverride) return this.ensureOverride(descriptor);
     return this.gateOpen ? { sandboxId: "sbx-1" } : null;
   }
@@ -555,6 +567,55 @@ describe("SandboxTerminalSessionManager — provision settle bound (2026-11-19 s
     const snapshot = await manager.create(openOpts());
     expect(snapshot.workspaceId).toBe("ws-1");
     expect(manager.size).toBe(1);
+  });
+
+  /**
+   * Provisioning fix: the ensure bound arms on the executor's
+   * lock-acquired signal, so lock-queue wait is not charged against
+   * it. The 480 s value was never the defect — its scope was: it
+   * wrapped the queue wait AND the work, so a contended cold
+   * provision timed out before it started.
+   */
+  it("the ensure clock excludes lock wait: a hook delayed past the raw bound does not fail a prompt ensure", async () => {
+    const { manager, executor } = makeManager({ provisionTimeoutMs: 60 });
+    executor.deferLockSignal = true;
+    let releaseEnsure!: (v: { sandboxId: string } | null) => void;
+    executor.ensureOverride = () =>
+      new Promise((res) => {
+        releaseEnsure = res;
+      });
+
+    const created = manager.create(openOpts());
+    // The ensure sits unarmed — queued behind the workspace lock,
+    // in the real executor's terms — for well past the raw bound.
+    await new Promise((r) => setTimeout(r, 150));
+    expect(executor.ensureCalls).toHaveLength(1);
+
+    // The lock is acquired; the locked work then finishes promptly,
+    // inside a bound that only starts counting now.
+    executor.lastLockHook?.();
+    releaseEnsure({ sandboxId: "sbx-1" });
+    const snapshot = await created;
+    expect(snapshot.workspaceId).toBe("ws-1");
+    expect(manager.size).toBe(1);
+  });
+
+  it("an ensure that signals the lock but never settles still rejects with the stage: ensure error", async () => {
+    const { manager, provider, executor } = makeManager({ provisionTimeoutMs: 60 });
+    executor.deferLockSignal = true;
+    executor.ensureOverride = () => new Promise(() => {});
+
+    const created = manager.create(openOpts());
+    await flushMicrotasks();
+    expect(executor.ensureCalls).toHaveLength(1);
+    // Arm the clock by hand: from here the bound runs, and the
+    // never-settling ensure is rejected inside it.
+    executor.lastLockHook?.();
+    await expect(created).rejects.toThrow(
+      /did not settle within 60 ms \(stage: ensure\)/,
+    );
+    expect(provider.connectCalls).toHaveLength(0);
+    expect(manager.size).toBe(0);
   });
 });
 
