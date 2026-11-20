@@ -470,7 +470,11 @@ test.describe("LiTT Studio mobile visual evidence", () => {
       // Expand, verify image + full text, collapse again.
       await page.getByRole("button", { name: "Show more" }).first().click();
       await expect(page.getByRole("button", { name: "Show less" }).first()).toBeVisible();
-      const heroImage = page.locator('img[alt="Generated hero mockup"]');
+      // Scope to the mobile sheet — the desktop transcript stays mounted
+      // (display:none) and its copy of the image never fetches.
+      const heroImage = page
+        .getByTestId("litt-mobile-sheet")
+        .locator('img[alt="Generated hero mockup"]');
       await heroImage.scrollIntoViewIfNeeded();
       // Unsized lazy images inside the scroll container can sit at 0×0 and
       // never intersect — force eager loading, then wait for the resource.
