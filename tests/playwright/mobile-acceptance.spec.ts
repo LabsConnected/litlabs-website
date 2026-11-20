@@ -524,6 +524,12 @@ test.describe("LiTT Studio mobile visual evidence", () => {
         .locator('img[alt="Generated hero mockup"]');
       await heroImage.scrollIntoViewIfNeeded();
       await expect(heroImage).toBeAttached();
+      // Chromium can defer the fetch for an eagerly-loaded <img> that was
+      // mounted while its subtree was clipped; re-asserting src nudges the
+      // loader without changing what is being proven (the element decodes).
+      await heroImage.evaluate((el: HTMLImageElement) => {
+        if (el.naturalWidth === 0) el.src = el.src;
+      });
       try {
         await expect
           .poll(
