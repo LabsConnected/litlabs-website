@@ -22,7 +22,7 @@ import { render, screen, fireEvent, cleanup, waitFor, act } from "@testing-libra
 import * as React from "react";
 
 vi.mock("next/link", () => ({
-  default: ({ children, href, onClick, ...rest }: any) => (
+  default: ({ children, href, onClick, ...rest }: React.ComponentProps<"a">) => (
     <a href={typeof href === "string" ? href : "#"} onClick={onClick} {...rest}>
       {children}
     </a>
@@ -41,10 +41,6 @@ vi.mock("@/hooks/useClerkAuth", () => ({
     isSignedIn: true,
     getToken: vi.fn().mockResolvedValue("test-token"),
   }),
-}));
-
-vi.mock("@/components/PageShell", () => ({
-  default: ({ children }: any) => <div data-testid="page-shell">{children}</div>,
 }));
 
 vi.mock("@/context/ThemeContext", () => ({
@@ -127,6 +123,8 @@ describe("projects delete UI", () => {
     fireEvent.click(screen.getByRole("button", { name: /Delete litlabs-website/ }));
     const dialog = screen.getByRole("alertdialog");
     expect(dialog.textContent).toContain("litlabs-website");
+    expect(dialog.textContent).toContain("LiTT project registration");
+    expect(dialog.textContent).toContain("does not delete project source files");
     fireEvent.click(screen.getByRole("button", { name: /Delete project/ }));
     await waitFor(() => {
       expect(deleteCalls).toContain("/api/studio-projects/p4");

@@ -56,6 +56,7 @@ import {
   readLastOpenedProject,
   recordLastOpenedProject,
 } from "@/lib/projects/project-state";
+import { mergeCanonicalProjectList } from "@/lib/projects/canonical-project-list";
 import ProjectsSidebar, {
   RECENT_WINDOW_MS,
   type ProjectsCategory,
@@ -119,10 +120,8 @@ export default function ProjectsPage() {
       const res = await fetch("/api/studio-projects", { signal, cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || "Projects are unavailable right now.");
-      const canonical = Array.isArray(data.projects) ? data.projects : [];
-      const legacy = Array.isArray(data.legacyOnly) ? data.legacyOnly : [];
       setSandboxAvailable(data?.sandboxAvailable === true);
-      setProjects(sortProjectsRecentFirst([...canonical, ...legacy]));
+      setProjects(sortProjectsRecentFirst(mergeCanonicalProjectList<Project>(data)));
     } catch (err) {
       if ((err as { name?: string })?.name !== "AbortError") {
         setError("We couldn’t load your projects. Your work is safe—try again in a moment.");
@@ -247,13 +246,17 @@ export default function ProjectsPage() {
   }, []);
 
   const toggleSelect = useCallback((id: string) => {
+    // Legacy-only rows have no studio_projects row to delete — the
+    // card withholds its checkbox copy, and this guards the same
+    // rule against a stale click.
+    if (projects.find((p) => p.id === id)?.isLegacyOnly) return;
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }, []);
+  }, [projects]);
 
   const exitSelectMode = useCallback(() => {
     setSelectMode(false);
@@ -422,7 +425,7 @@ export default function ProjectsPage() {
                 <>
                   <button
                     type="button"
-                    onClick={() => setSelected(new Set(filtered.map((p) => p.id)))}
+                    onClick={() => setSelected(new Set(filtered.filter((p) => !p.isLegacyOnly).map((p) => p.id)))}
                     className="inline-flex h-9 items-center rounded-xl border px-3 text-xs font-bold"
                     style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
                   >
@@ -430,7 +433,7 @@ export default function ProjectsPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSelected(new Set(filtered.filter(isTestDuplicate).map((p) => p.id)))}
+                    onClick={() => setSelected(new Set(filtered.filter((p) => isTestDuplicate(p) && !p.isLegacyOnly).map((p) => p.id)))}
                     className="inline-flex h-9 items-center rounded-xl border px-3 text-xs font-bold"
                     style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
                     title="Select acceptance-test duplicates (timestamped names)"
@@ -547,7 +550,7 @@ export default function ProjectsPage() {
               </h2>
             </div>
             <p id="delete-projects-desc" className="mt-3 text-sm" style={{ color: T.textMuted }}>
-              This permanently removes {confirmTargets.length === 1 ? "this project" : "these projects"} and can’t be undone.
+              This removes the LiTT project registration{confirmTargets.length === 1 ? "" : "s"}; it does not delete project source files.
             </p>
             <ul className="mt-3 max-h-40 space-y-1 overflow-y-auto text-sm font-bold" style={{ color: T.textColor }}>
               {confirmTargets.slice(0, 6).map((p) => (

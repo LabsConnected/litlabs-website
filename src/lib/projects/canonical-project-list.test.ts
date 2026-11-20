@@ -17,6 +17,8 @@ describe("mergeCanonicalProjectList", () => {
     });
     expect(merged.map((p) => p.id)).toEqual(["a", "b"]);
     expect(merged[0].name).toBe("Coffee cart");
+    expect(merged[0].isLegacyOnly).toBeUndefined();
+    expect(merged[1].isLegacyOnly).toBe(true);
   });
 
   it("returns [] for missing or malformed payloads", () => {
