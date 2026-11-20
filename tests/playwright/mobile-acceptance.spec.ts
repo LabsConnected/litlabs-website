@@ -314,16 +314,22 @@ test.describe("LiTT Studio mobile visual evidence", () => {
 
   async function mockMessageSequence(page: Page) {
     let call = 0;
-    await page.route("**/api/studio/conversations/*/messages", async (route) => {
-      // GET loads history — let those hit the real API; only POST sends
-      // are mocked so the turn counter stays aligned with user sends.
-      if (route.request().method() !== "POST") {
+    await page.route("**/api/studio/**", async (route) => {
+      const { appendFileSync } = await import("fs");
+      appendFileSync(
+        "test-results/evidence-route.log",
+        `${new Date().toISOString()} ${route.request().method()} ${route.request().url()}\n`,
+      );
+      // Only POST .../messages is mocked; everything else (conversation
+      // create, GET history, project APIs) hits the real backend.
+      const url = route.request().url();
+      const isMessagePost =
+        route.request().method() === "POST" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url);
+      if (!isMessagePost) {
         await route.continue();
         return;
       }
       call += 1;
-      const { appendFileSync } = await import("fs");
-      appendFileSync("test-results/evidence-route.log", `${new Date().toISOString()} POST ${route.request().url()}\n`);
       const request = route.request();
       const body = JSON.parse(request.postData() ?? "{}") as { message?: string };
       const userMessageId = `ev-user-${call}`;
