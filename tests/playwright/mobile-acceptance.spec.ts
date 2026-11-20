@@ -524,12 +524,45 @@ test.describe("LiTT Studio mobile visual evidence", () => {
         .locator('img[alt="Generated hero mockup"]');
       await heroImage.scrollIntoViewIfNeeded();
       await expect(heroImage).toBeAttached();
-      await expect
-        .poll(
-          () => heroImage.evaluate((el: HTMLImageElement) => el.naturalWidth),
-          { timeout: 15_000 },
-        )
-        .toBeGreaterThan(0);
+      try {
+        await expect
+          .poll(
+            () => heroImage.evaluate((el: HTMLImageElement) => el.naturalWidth),
+            { timeout: 15_000 },
+          )
+          .toBeGreaterThan(0);
+      } catch (err) {
+        const { writeFileSync } = await import("fs");
+        const diag = await heroImage.evaluate((el: HTMLImageElement) => {
+          const chain: string[] = [];
+          let node: HTMLElement | null = el;
+          while (node && chain.length < 12) {
+            const cs = getComputedStyle(node);
+            chain.push(
+              `${node.tagName.toLowerCase()}${node.getAttribute("data-testid") ? `[${node.getAttribute("data-testid")}]` : ""} disp=${cs.display} vis=${cs.visibility} op=${cs.opacity} h=${node.getBoundingClientRect().height}`,
+            );
+            node = node.parentElement;
+          }
+          return JSON.stringify(
+            {
+              src: el.currentSrc || el.src,
+              complete: el.complete,
+              naturalWidth: el.naturalWidth,
+              naturalHeight: el.naturalHeight,
+              rect: el.getBoundingClientRect().toJSON(),
+              chain,
+              resources: performance
+                .getEntriesByType("resource")
+                .filter((r) => r.name.includes("icon-512"))
+                .map((r) => `${r.name} ${r.initiatorType}`),
+            },
+            null,
+            2,
+          );
+        });
+        writeFileSync(`test-results/evidence-img-diag-${width}.json`, diag);
+        throw err;
+      }
       await shot(page, `${width}-long-answer-expanded`);
       await page.getByRole("button", { name: "Show less" }).first().click();
 
