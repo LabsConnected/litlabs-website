@@ -270,7 +270,7 @@ export default function BoardPanelBindings(props: BoardPanelBindingsProps) {
         <div className="flex h-full min-h-0 flex-col" data-testid="board-binding-browser">
           {workspaceBanner}
           <div className="min-h-0 flex-1">
-            <BoardBrowserPanel />
+            <BoardBrowserPanel projectId={projectId} />
           </div>
         </div>
       );

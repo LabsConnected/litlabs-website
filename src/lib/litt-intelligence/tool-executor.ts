@@ -27,6 +27,10 @@ import {
   type WebFetchToolResponse,
 } from "./web-search-tool";
 import {
+  executePlacesLookup,
+  type PlacesToolResponse,
+} from "./places-tool";
+import {
   runOneShotScreenshot,
   detectScreenshotIntent,
   extractScreenshotUrl,
@@ -35,7 +39,7 @@ import type { ConversationTurn } from "./turn-resolver";
 
 /* ── Types ──────────────────────────────────────────────────────── */
 
-export type ToolId = "weather" | "web_search" | "web_fetch" | "browser_screenshot" | "none";
+export type ToolId = "weather" | "web_search" | "web_fetch" | "browser_screenshot" | "places" | "none";
 
 /* ── Explicit location extraction ──────────────────────────────── */
 
@@ -112,7 +116,7 @@ export interface ToolExecutionResult {
   /** Structured metadata for the response payload */
   metadata: ToolMetadata;
   /** The raw tool response (for callers that need structured data) */
-  raw?: WeatherToolResponse | WebSearchToolResponse | WebFetchToolResponse;
+  raw?: WeatherToolResponse | WebSearchToolResponse | WebFetchToolResponse | PlacesToolResponse;
 }
 
 /* ── Intent detection ───────────────────────────────────────────── */
@@ -248,6 +252,76 @@ export function extractSearchQuery(message: string): string {
   return message.trim();
 }
 
+/** Nouns that indicate a Studio UI/navigation request, not a places lookup. */
+const PLACES_EXCLUDE_NOUNS =
+  /\b(file|files|terminal|approval|approvals|settings|panel|project|repo|repository|branch|deploy|deployment|editor|code|component|task|pr|pull request|screenshot|screen shot|section|footer|header|website|page)\b/i;
+
+const PLACES_INHERENT_PATTERNS = [
+  /\b(?:what time does|what time is|when does|when is)\b[^.!?]{0,60}\b(?:open|close|closes|opens|closed)\b/i,
+  /\bis\b[^.!?]{0,40}\bopen\b[^.!?]{0,20}\b(?:now|today|right now|still)\b/i,
+];
+
+// These patterns can appear inside ordinary (non-question) sentences —
+// e.g. site-editing content like "Add a section with our store hours"
+// or "Update the footer to say we open at 9am" — so they only count
+// when the message is actually phrased as a question. Without this
+// gate they hijacked normal Studio build/edit requests into a places
+// lookup, dropping the user's real request before it ever reached the
+// agent loop.
+const PLACES_CONTEXT_PATTERNS = [
+  /\b(?:opening hours|business hours|store hours)\b/i,
+  /\bcloses?\s+at\b/i,
+  /\bopens?\s+at\b/i,
+];
+
+const PLACES_QUESTION_FORM = /^\s*(?:what|when|is|are|does|how late)\b/i;
+
+function looksLikeQuestion(message: string): boolean {
+  return PLACES_QUESTION_FORM.test(message) || /\?\s*$/.test(message.trim());
+}
+
+/**
+ * Detects whether a user message asks about a business/place's hours,
+ * address, or open-now status (e.g. "What time does Best Buy open?").
+ * Excludes Studio UI/navigation phrases ("open the terminal") and
+ * weather questions, which are handled by their own tools.
+ */
+export function detectPlacesIntent(message: string): boolean {
+  const lower = message.toLowerCase();
+  if (PLACES_EXCLUDE_NOUNS.test(lower)) return false;
+  if (WEATHER_KEYWORDS.some((kw) => lower.includes(kw))) return false;
+  if (PLACES_INHERENT_PATTERNS.some((p) => p.test(message))) return true;
+  return looksLikeQuestion(message) && PLACES_CONTEXT_PATTERNS.some((p) => p.test(message));
+}
+
+/**
+ * Extracts the business/place name from a places-intent message.
+ * Falls back to the full message if no pattern matches.
+ */
+export function extractPlaceQuery(message: string): string {
+  const patterns = [
+    /(?:what time does|what time is|when does|when is)\s+(.+?)\s+(?:open|close|closes|opens|closed)\b/i,
+    /\bis\s+(.+?)\s+open\b/i,
+    // Anchored to a capitalized-word run (the business name), not an
+    // unanchored lazy ".+?" — the lazy version matched too much of the
+    // leading question clause (e.g. "What are Target's store hours?"
+    // extracted "What are Target" instead of "Target") because nothing
+    // stopped it from swallowing "What are" before the possessive "'s".
+    /\b([A-Z][a-zA-Z]*(?:\s+[A-Z][a-zA-Z]*){0,3})(?:'s)?\s+(?:opening hours|business hours|store hours)\b/,
+    /(.+?)\s+closes?\s+at\b/i,
+    /(.+?)\s+opens?\s+at\b/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match?.[1] && match[1].trim().length > 1) {
+      return match[1].trim();
+    }
+  }
+
+  return message.trim();
+}
+
 /**
  * Detects any tool intent from the message.
  * Returns the tool id + refined intent, or null if no tool matches.
@@ -260,6 +334,13 @@ export function detectToolIntent(
 ): { tool: ToolId; weatherType?: "current" | "hourly" | "daily" } | null {
   const weatherType = detectWeatherIntent(message);
   if (weatherType) return { tool: "weather", weatherType };
+
+  // Check for places intent (business hours, address, open-now) before
+  // web search/fetch: a specific "what time does X open" question is a
+  // more specific instruction than a generic search keyword match.
+  if (detectPlacesIntent(message)) {
+    return { tool: "places" };
+  }
 
   // Check for explicit URL fetch intent ("read https://…", a bare URL, …).
   // Runs before web search: a concrete URL is a more specific instruction
@@ -339,6 +420,10 @@ export async function detectAndExecuteTool(
 
   if (intent.tool === "weather") {
     return executeWeatherTool(userId, message, intent.weatherType ?? "current", options?.headers, options?.history);
+  }
+
+  if (intent.tool === "places") {
+    return executePlacesTool(userId, message, options?.headers);
   }
 
   if (intent.tool === "web_fetch") {
@@ -445,6 +530,50 @@ async function executeWeatherTool(
   return {
     executed: true,
     toolId: "weather",
+    text: result.error,
+    metadata,
+    raw: result,
+  };
+}
+
+/**
+ * Executes the places tool for a user: resolves business hours,
+ * address, and open-now status for a named place.
+ */
+async function executePlacesTool(
+  userId: string,
+  message: string,
+  headers?: Headers,
+): Promise<ToolExecutionResult> {
+  const query = extractPlaceQuery(message);
+
+  const ctx = await getUserContext(userId, {
+    capabilities: ["places.search"],
+    headers,
+  });
+
+  const result: PlacesToolResponse = await executePlacesLookup(ctx, query);
+
+  const metadata: ToolMetadata = {
+    tool: "places",
+    provider: "google_places",
+    realtime: true,
+    location: null,
+  };
+
+  if (result.success) {
+    return {
+      executed: true,
+      toolId: "places",
+      text: result.formatted,
+      metadata,
+      raw: result,
+    };
+  }
+
+  return {
+    executed: true,
+    toolId: "places",
     text: result.error,
     metadata,
     raw: result,

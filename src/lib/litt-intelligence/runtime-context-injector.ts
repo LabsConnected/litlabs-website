@@ -13,6 +13,7 @@
 
 import "server-only";
 import type { AgentMode } from "../litt-intelligence/agent-identity";
+import { isPlacesAvailable } from "./places-provider";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -371,6 +372,13 @@ export function buildToolManifest(ctx: RuntimeContextSnapshot): ToolCapabilityMa
       name: "Weather",
       description: "Fetches current weather for a location",
       available: true, // Weather tool uses open-meteo (no API key needed)
+    },
+    {
+      id: "places.search",
+      name: "Places Search",
+      description: "Looks up business hours, address, and open-now status for a named place",
+      available: isPlacesAvailable(),
+      unavailableReason: isPlacesAvailable() ? undefined : "GOOGLE_PLACES_API_KEY is not configured",
     },
     {
       id: "web.search",

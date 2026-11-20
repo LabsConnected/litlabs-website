@@ -19,11 +19,17 @@ describe("provider-registry", () => {
       expect(PLATFORM_PROVIDERS.open_meteo.capabilities).toContain("weather.geocode");
     });
 
-    it("includes brave_search with search capabilities", () => {
+    it("includes brave_search with search capabilities (not places — see google_places)", () => {
       expect(PLATFORM_PROVIDERS.brave_search).toBeDefined();
       expect(PLATFORM_PROVIDERS.brave_search.capabilities).toContain("web.search");
       expect(PLATFORM_PROVIDERS.brave_search.capabilities).toContain("news.search");
-      expect(PLATFORM_PROVIDERS.brave_search.capabilities).toContain("places.search");
+      expect(PLATFORM_PROVIDERS.brave_search.capabilities).not.toContain("places.search");
+    });
+
+    it("includes google_places with the places.search capability", () => {
+      expect(PLATFORM_PROVIDERS.google_places).toBeDefined();
+      expect(PLATFORM_PROVIDERS.google_places.capabilities).toContain("places.search");
+      expect(PLATFORM_PROVIDERS.google_places.envVars).toContain("GOOGLE_PLACES_API_KEY");
     });
 
     it("includes firecrawl with web fetch capabilities", () => {
@@ -96,6 +102,12 @@ describe("provider-registry", () => {
     it("defines web search with none permission", () => {
       expect(CAPABILITY_DEFINITIONS["web.search"].permission).toBe("none");
       expect(CAPABILITY_DEFINITIONS["web.search"].mutation).toBe(false);
+    });
+
+    it("defines places.search with none permission, served by google_places", () => {
+      expect(CAPABILITY_DEFINITIONS["places.search"].permission).toBe("none");
+      expect(CAPABILITY_DEFINITIONS["places.search"].mutation).toBe(false);
+      expect(CAPABILITY_DEFINITIONS["places.search"].provider).toBe("google_places");
     });
 
     it("defines google_calendar_read as connection_consent", () => {

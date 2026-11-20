@@ -10,6 +10,7 @@
 export type PlatformProvider =
   | "open_meteo"
   | "brave_search"
+  | "google_places"
   | "firecrawl"
   | "nango"
   | "gemini"
@@ -115,9 +116,17 @@ export const PLATFORM_PROVIDERS: Record<PlatformProvider, ProviderDefinition> = 
     id: "brave_search",
     label: "Brave Search",
     category: "platform",
-    capabilities: ["web.search", "news.search", "places.search", "images.search", "videos.search"],
+    capabilities: ["web.search", "news.search", "images.search", "videos.search"],
     envVars: ["SEARCH_PROVIDER", "BRAVE_SEARCH_API_KEY"],
-    description: "Web, news, images, videos, and places search",
+    description: "Web, news, images, and videos search",
+  },
+  google_places: {
+    id: "google_places",
+    label: "Google Places",
+    category: "platform",
+    capabilities: ["places.search"],
+    envVars: ["GOOGLE_PLACES_API_KEY"],
+    description: "Business/place hours, address, and open-now status",
   },
   firecrawl: {
     id: "firecrawl",
@@ -373,7 +382,7 @@ export const CAPABILITY_DEFINITIONS: Record<CapabilityId, CapabilityDefinition> 
     label: "Places Search",
     description: "Search for nearby businesses and places",
     permission: "none",
-    provider: "brave_search",
+    provider: "google_places",
     mutation: false,
   },
   "images.search": {
