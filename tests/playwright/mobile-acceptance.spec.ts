@@ -315,6 +315,12 @@ test.describe("LiTT Studio mobile visual evidence", () => {
   async function mockMessageSequence(page: Page) {
     let call = 0;
     await page.route("**/api/studio/conversations/*/messages", async (route) => {
+      // GET loads history — let those hit the real API; only POST sends
+      // are mocked so the turn counter stays aligned with user sends.
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
       call += 1;
       const request = route.request();
       const body = JSON.parse(request.postData() ?? "{}") as { message?: string };
