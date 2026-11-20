@@ -171,7 +171,7 @@ test.describe("LiTT Studio mobile acceptance", () => {
     // Chat-first layout: a tool surface takes the phone via the top-bar
     // menu, and Back to chat returns — the sheet stays mounted (hidden)
     // in between so drafts and streams survive.
-    await page.getByTestId("mobile-studio-menu").click();
+    await page.getByTestId("litt-mobile-tools-button").click();
     await expect(page.getByTestId("mobile-tools-dialog")).toBeVisible();
     await page.getByTestId("mobile-tool-preview").click();
     await expect(page.getByTestId("litt-mobile-sheet")).toBeHidden();
@@ -185,7 +185,7 @@ test.describe("LiTT Studio mobile acceptance", () => {
     // not cover chat while closed, and Back to chat must release it.
     const collapsedDeveloperTools = page.getByTestId("dock-collapsed-toggle");
     if (await collapsedDeveloperTools.count() > 0 && await collapsedDeveloperTools.isVisible()) {
-      await page.getByTestId("mobile-studio-menu").click();
+      await page.getByTestId("litt-mobile-tools-button").click();
       await page.getByTestId("mobile-tool-terminal").click();
       await expect(page.getByTestId("mobile-dock-overlay")).toBeVisible();
       await page.getByTestId("mobile-back-to-chat").click();
@@ -237,11 +237,14 @@ test.describe("LiTT Studio mobile density redesign", () => {
       const emptyState = page.getByTestId("empty-state");
       const chatSurface = (await transcript.count()) > 0 ? transcript : emptyState;
       await expect(chatSurface, "chat surface (transcript or empty state) should be visible").toBeVisible();
-      const transcriptRect = await visibleRect(chatSurface, "chat surface");
+      const chatPanelRect = await visibleRect(
+        page.getByTestId("litt-mobile-chat-panel"),
+        "mobile chat panel",
+      );
       const viewportHeight = 844;
       expect(
-        transcriptRect.height,
-        "transcript should occupy the majority of the first viewport",
+        chatPanelRect.height,
+        "chat panel should occupy the majority of the first viewport",
       ).toBeGreaterThan(viewportHeight / 2);
 
       const composer = page.getByTestId("studio-command-composer");
