@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { UserMessageAvatar } from "@/components/chat/MessageAvatar";
@@ -838,27 +837,12 @@ export default function StudioTranscript({
               className={`group flex gap-3 studio-anim-in ${isUser ? "flex-row-reverse" : "flex-row"} ${isPinned ? "relative" : ""}`}
               data-testid={isUser ? "user-message" : "assistant-message"}
             >
-              {isUser ? (
-                <UserMessageAvatar size={30} />
-              ) : (
-                <div
-                  className="grid shrink-0 place-items-center overflow-hidden rounded-xl border"
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderColor: `${agentColor}30`,
-                    backgroundColor: `${agentColor}10`,
-                  }}
-                >
-                  <Image
-                    src={activeAgentId === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt/litt-avatar-64.webp"}
-                    alt={agentMeta.displayName}
-                    width={32}
-                    height={32}
-                    className="h-full w-full object-contain p-0.5"
-                  />
-                </div>
-              )}
+              {/* Assistant rows carry NO avatar/logo image (Larry,
+                  2026-11-20): the old LiTT robot logo hanging over the
+                  left edge of the message row is removed entirely — the
+                  "LITT" text label below is the only identifier. The
+                  user's own avatar on their messages stays. */}
+              {isUser ? <UserMessageAvatar size={30} /> : null}
               <div
                 className={`flex max-w-[88%] min-w-0 flex-col sm:max-w-[78%] ${isUser ? "items-end" : "items-start"}`}
               >
@@ -1121,18 +1105,8 @@ export default function StudioTranscript({
         })}
         {busy && !messages.some((m) => m.status === "streaming") && (
           <div className="flex gap-3">
-            <div
-              className="grid shrink-0 place-items-center overflow-hidden rounded-full border"
-              style={{ width: 32, height: 32, borderColor: `${agentColor}30`, backgroundColor: `${agentColor}10` }}
-            >
-              <Image
-                src={activeAgentId === "spark" ? "/brand/spark-agent-portrait.png" : "/brand/litt/litt-avatar-64.webp"}
-                alt={agentMeta.displayName}
-                width={32}
-                height={32}
-                className="h-full w-full object-cover"
-              />
-            </div>
+            {/* No avatar/logo on the typing row either — same removal
+                as the settled message rows (Larry, 2026-11-20). */}
             <div className="flex items-center gap-1.5 rounded-2xl border px-4 py-3" style={{ borderColor: `${agentColor}26` }}>
               {[0, 1, 2].map((i) => (
                 <span
