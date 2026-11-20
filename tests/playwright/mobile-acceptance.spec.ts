@@ -472,7 +472,13 @@ test.describe("LiTT Studio mobile visual evidence", () => {
       await expect(page.getByRole("button", { name: "Show less" }).first()).toBeVisible();
       const heroImage = page.locator('img[alt="Generated hero mockup"]');
       await heroImage.scrollIntoViewIfNeeded();
-      await expect(heroImage).toBeVisible();
+      // Lazy images inside the scroll container can report a zero box until
+      // painted — wait for the resource itself to finish loading instead.
+      await expect
+        .poll(() =>
+          heroImage.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0),
+        )
+        .toBe(true);
       await shot(page, `${width}-long-answer-expanded`);
       await page.getByRole("button", { name: "Show less" }).first().click();
 
