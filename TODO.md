@@ -22,14 +22,23 @@ only matches `not_prepared`/`failed`.
 - Called at the top of `src/app/api/studio-projects/[projectId]/workspace/prepare/route.ts`
   before `claimProvisioningLock`
 
-## Production Runtime (BLOCKED)
+## Production Runtime (RESOLVED via E2B — verified 2026-11-16)
 
-The terminal server requires Docker for workspace isolation. Railway does not provide
-a Docker daemon inside containers. The terminal is **not production-ready** until one
-of these is configured:
+The terminal server no longer depends on in-container Docker. Production
+runs on Railway project `litlabs-terminal-server` (service
+`litlabs-terminal-server`, domain `terminal.litlabs.net`) with the E2B
+sandbox provider: `SANDBOX_PROVIDER=e2b`, `E2B_API_KEY`, `E2B_TEMPLATE_ID`,
+`SANDBOX_PRODUCTION_ENABLED` are set, and `/health` reports
+`sandbox.execution=enabled, state=verified` via a fresh green canary.
+Host execution stays fail-closed by design; repo work executes inside E2B
+sandboxes (`terminal-server/sandbox/`).
 
-- Dedicated VM with Docker installed and `littree-terminal:latest` image built
-- Sandbox provider integration (e.g. E2B, Fly Machines) replacing Docker-based isolation
+Remaining caveat: a duplicate `terminal-server` service inside the
+`litlabs-website` Railway project has no sandbox provider configured
+(`sandbox.state=not-configured`) and receives no traffic — the production
+web service points at `terminal.litlabs.net`. Candidate for retirement
+after owner confirmation.
 
-The Dockerfile (`terminal-server/Dockerfile`) currently has `TERMINAL_USE_DOCKER=false`
-and `TERMINAL_WORKSPACE_ROOT=/tmp/...` — both must be changed for production.
+`TERMINAL_USE_DOCKER` remains a local-dev-only option; the Railway
+Dockerfile (`terminal-server/Dockerfile.railway`) does not require a
+Docker daemon inside the container.
