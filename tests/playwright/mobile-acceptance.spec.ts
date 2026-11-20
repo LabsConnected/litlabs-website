@@ -450,7 +450,16 @@ test.describe("LiTT Studio mobile visual evidence", () => {
     // Enter submits — the send-button click proved flaky once a completion
     // card mounted between turns (click landed but React state was stale).
     await input.press("Enter");
-    await expect(page.getByText(expectedText).last()).toBeVisible({ timeout: 30_000 });
+    try {
+      await expect(page.getByText(expectedText).last()).toBeVisible({ timeout: 30_000 });
+    } catch (err) {
+      const { writeFileSync } = await import("fs");
+      const diag = await page.evaluate(() =>
+        (window as unknown as { __mobileDiagDump?: () => string }).__mobileDiagDump?.() ?? "no-dump",
+      );
+      writeFileSync(`test-results/evidence-diag-${expectedText.slice(0, 20).replace(/\W+/g, "_")}.txt`, diag);
+      throw err;
+    }
   }
 
   async function shot(page: Page, name: string) {
