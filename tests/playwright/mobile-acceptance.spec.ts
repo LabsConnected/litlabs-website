@@ -314,16 +314,35 @@ test.describe("LiTT Studio mobile visual evidence", () => {
 
   async function mockMessageSequence(page: Page) {
     let call = 0;
+    // The client polls GET .../messages while a run looks active; the mock
+    // must therefore behave like a real backend and persist each turn, or
+    // the polls would wipe the streamed messages from the transcript.
+    const persisted: Array<Record<string, unknown>> = [];
+    let revision = 1;
+    const now = () => new Date().toISOString();
+    const mkMsg = (
+      id: string,
+      role: "user" | "assistant",
+      content: string,
+      status: string,
+    ): Record<string, unknown> => ({
+      id,
+      conversationId: "conv-mobile-evidence",
+      ownerId: "user-evidence",
+      projectId: "",
+      role,
+      agentSlug: role === "assistant" ? "litt" : null,
+      agentMode: null,
+      agentInstanceId: null,
+      content,
+      status,
+      parentMessageId: null,
+      regenerationOfMessageId: null,
+      clientRequestId: null,
+      createdAt: now(),
+      updatedAt: now(),
+    });
     await page.route("**/api/studio/**", async (route) => {
-      const { appendFileSync } = await import("fs");
-      appendFileSync(
-        "test-results/evidence-route.log",
-        `${new Date().toISOString()} ${route.request().method()} ${route.request().url()}\n`,
-      );
-      // Mock the full send path so no real backend/AI is involved:
-      //  - POST /api/studio/conversations        → canned conversation
-      //  - GET  .../conversations/:id/messages   → empty history
-      //  - POST .../conversations/:id/messages   → canned SSE/JSON turns
       const url = route.request().url();
       const method = route.request().method();
       if (method === "POST" && url.endsWith("/api/studio/conversations")) {
@@ -352,7 +371,7 @@ test.describe("LiTT Studio mobile visual evidence", () => {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ messages: [], revision: 1 }),
+          body: JSON.stringify({ messages: persisted, revision }),
         });
         return;
       }
@@ -363,49 +382,50 @@ test.describe("LiTT Studio mobile visual evidence", () => {
         return;
       }
       call += 1;
+      revision += 1;
       const request = route.request();
       const body = JSON.parse(request.postData() ?? "{}") as { message?: string };
       const userMessageId = `ev-user-${call}`;
       const assistantMessageId = `ev-assistant-${call}`;
+      const userMsg = mkMsg(userMessageId, "user", body.message ?? "", "completed");
 
       if (call === 3) {
         // Third turn fails server-side: 200 JSON error body marks the
         // assistant message failed (raw text stays internal; UI shows the
         // safe "We hit a snag" copy + Retry).
+        const failedContent = "provider exploded: internal stack trace that must never render";
+        persisted.push(userMsg, mkMsg(assistantMessageId, "assistant", failedContent, "failed"));
         await route.fulfill({
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
             error: "provider exploded",
             detail: "internal stack trace that must never render",
-            userMessage: { id: userMessageId, role: "user", content: body.message, status: "completed" },
-            revision: 10 + call,
+            userMessage: userMsg,
+            revision,
           }),
         });
         return;
       }
 
       const answer = call === 1 ? LONG_ANSWER : `Short follow-up answer number ${call}. All done.`;
+      persisted.push(userMsg, mkMsg(assistantMessageId, "assistant", answer, "completed"));
       const mockResponse = [
         `data: ${JSON.stringify({
           type: "user_message",
-          userMessage: { id: userMessageId, role: "user", content: body.message, status: "completed" },
-          revision: 10 + call,
+          userMessage: userMsg,
+          revision,
         })}\n\n`,
         `data: ${JSON.stringify({
           type: "assistant_message",
-          assistantMessage: { id: assistantMessageId, role: "assistant", content: "", status: "streaming" },
+          assistantMessage: { ...mkMsg(assistantMessageId, "assistant", "", "streaming") },
         })}\n\n`,
         `data: ${JSON.stringify({ type: "text", text: answer })}\n\n`,
         `data: ${JSON.stringify({
           type: "done",
-          assistantMessage: {
-            id: assistantMessageId,
-            role: "assistant",
-            content: answer,
-            status: "completed",
-          },
-          revision: 10 + call,
+          userMessage: userMsg,
+          assistantMessage: mkMsg(assistantMessageId, "assistant", answer, "completed"),
+          revision,
         })}\n\n`,
         `data: [DONE]\n\n`,
       ].join("");
