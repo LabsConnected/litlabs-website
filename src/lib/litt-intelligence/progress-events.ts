@@ -38,6 +38,18 @@ export type ProgressEvent =
   | { type: "route_plan"; routes: Array<{ provider: string; models: string[] }>; excluded: Array<{ provider: string; reason: string }> }
   | { type: "reasoning"; summary: string }
   | { type: "status"; summary: string }
+  /**
+   * Reply-text segment from the model's current step (D4 text channel).
+   * The V2 lane previously had NO text event: the answer was composed
+   * invisibly inside the loop and delivered whole in the terminal done
+   * payload, so the client's streaming/typewriter rendering never
+   * engaged on execution turns. Segments are emitted as each step's
+   * text is produced (per completed segment today — the tool-calling
+   * adapters are non-streaming; a streaming adapter forwards deltas
+   * through the same event). Deliberately NOT a substantive-progress
+   * type: narration must not refresh the round-14 stall clock.
+   */
+  | { type: "text"; text: string }
   | { type: "quality_verdict"; passed: boolean; missing: string[]; reason: string; designPasses: number };
 
 export type AgentLoopPhase =
@@ -72,8 +84,9 @@ export type AgentLoopPhase =
  * a checkpoint, a build/preview/deploy step, a quality verdict, a
  * repair attempt, an approval gate, or the run finishing. Model
  * routing/response/failure bookkeeping, step timings, reasoning
- * summaries, and free-text status narration are NOT progress — they
- * can all be produced by a loop that is going nowhere.
+ * summaries, free-text status narration, and reply-text segments
+ * (the "text" event) are NOT progress — they can all be produced by
+ * a loop that is going nowhere.
  */
 const SUBSTANTIVE_PROGRESS_TYPES: ReadonlySet<ProgressEvent["type"]> = new Set([
   "phase",

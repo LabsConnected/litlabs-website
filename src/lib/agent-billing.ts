@@ -52,6 +52,8 @@ export interface ReserveResult {
 
 export interface SettleResult {
   ok: boolean;
+  /** The ledger outcome, independent of whether the run metadata update succeeded. */
+  billingStatus: "confirmed" | "failed" | "pending_reconciliation";
   runId: string;
   reservationId: string | null;
   creditsCharged: number;
@@ -88,6 +90,69 @@ function unwrapRpcRow<T extends Record<string, unknown>>(data: unknown): T | nul
     return null;
   }
   return candidate as T;
+}
+
+type BillingStatus = SettleResult["billingStatus"];
+
+type ReservationRow = {
+  id: string;
+  status: string;
+  reserved_amount: number;
+  settled_amount: number;
+  idempotency_key?: string;
+};
+
+/** A lost RPC response is not proof of failure: the transaction may have committed. */
+function failureMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function confirmedAmount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+async function readReservation(reservationId: string): Promise<{ row: ReservationRow | null; uncertain: boolean }> {
+  try {
+    const { data, error } = await supabaseAdmin!
+      .from("credit_reservations")
+      .select("id,status,reserved_amount,settled_amount,idempotency_key")
+      .eq("id", reservationId)
+      .maybeSingle();
+    return { row: error ? null : data as ReservationRow | null, uncertain: Boolean(error) };
+  } catch {
+    return { row: null, uncertain: true };
+  }
+}
+
+/** The old SQL RPC returns success for any already-settled reservation, even with a different key. */
+async function verifyPriorSettlement(runId: string, reservationId: string, actualCredits: number, reservedCredits: number): Promise<BillingStatus> {
+  const reservation = await readReservation(reservationId);
+  if (reservation.uncertain || !reservation.row) return "pending_reconciliation";
+  if (reservation.row.status !== "settled" || reservation.row.settled_amount !== actualCredits || reservation.row.reserved_amount !== reservedCredits) return "failed";
+  try {
+    // Settlement debits are bucket-allocated: one ledger row per bucket with
+    // keys '<runId>:settle:<bucket>' / '<runId>:overage:<bucket>' (legacy rows
+    // used '<runId>:settle' / '<runId>:overage'). Verify the full set of debit
+    // rows for this reservation sums to the settled amount and every key
+    // belongs to this run.
+    const { data, error } = await supabaseAdmin!
+      .from("credit_ledger")
+      .select("idempotency_key,reference_id,direction,amount")
+      .eq("reference_id", reservationId)
+      .eq("direction", "debit");
+    if (error || !data || data.length === 0) return "pending_reconciliation";
+    const rows = data as Array<{ idempotency_key: string; reference_id: string; direction: string; amount: number }>;
+    const keyOk = (key: string) =>
+      key === `${runId}:settle` || key.startsWith(`${runId}:settle:`) ||
+      key === `${runId}:overage` || key.startsWith(`${runId}:overage:`);
+    const totalDebited = rows.reduce((sum, row) => sum + row.amount, 0);
+    const allMatch = rows.every(
+      (row) => row.reference_id === reservationId && row.direction === "debit" && keyOk(row.idempotency_key),
+    );
+    return allMatch && totalDebited === actualCredits ? "confirmed" : "failed";
+  } catch {
+    return "pending_reconciliation";
+  }
 }
 
 /**
@@ -128,6 +193,7 @@ export async function reserveCredits(
         user_id: user.id,
         agent_name: ctx.agentInstanceId,
         task: ctx.idempotencyKey,
+        idempotency_key: ctx.idempotencyKey,
         status: "running",
         agent_mode: ctx.model ?? "default",
         input: {
@@ -164,6 +230,7 @@ export async function reserveCredits(
 
   // Reserve BITS via the canonical RPC
   let reservationId: string | null = null;
+  let reservationWasExisting = false;
   if (estimatedCredits > 0) {
     const { data: reserveData, error: reserveError } = await supabaseAdmin.rpc("reserve_bits", {
       p_user_id: user.id,
@@ -210,6 +277,7 @@ export async function reserveCredits(
       // Idempotent retry — reservation already exists
       if (reason === "already_reserved" && reserveRow?.reservation_id) {
         reservationId = reserveRow.reservation_id;
+        reservationWasExisting = true;
         // Fall through to create/find the run row
       } else {
         return {
@@ -223,6 +291,17 @@ export async function reserveCredits(
       }
     } else {
       reservationId = reserveRow.reservation_id ?? null;
+      reservationWasExisting = reserveRow.reason === "already_reserved";
+    }
+    if (reservationWasExisting && reservationId) {
+      const prior = await readReservation(reservationId);
+      if (prior.uncertain || !prior.row) {
+        await createReconciliationRecord(ctx, estimatedCredits, "reservation_retry_unverified", "Existing reservation could not be read", reservationId);
+        return { ok: false, runId: null, reservationId, status: 503, error: "Existing reservation could not be verified", reservedCredits: 0 };
+      }
+      if (prior.row.status !== "reserved" || prior.row.reserved_amount !== estimatedCredits || prior.row.idempotency_key !== ctx.idempotencyKey) {
+        return { ok: false, runId: null, reservationId, status: 409, error: "Existing reservation does not match this request", reservedCredits: 0 };
+      }
     }
   }
 
@@ -233,6 +312,7 @@ export async function reserveCredits(
       user_id: user.id,
       agent_name: ctx.agentInstanceId,
       task: ctx.idempotencyKey,
+      idempotency_key: ctx.idempotencyKey,
       status: "running",
       agent_mode: ctx.model ?? "default",
       input: {
@@ -251,22 +331,39 @@ export async function reserveCredits(
     .single();
 
   if (runError) {
-    // Run-row insert failed — release the reservation if it was made
-    if (reservationId && estimatedCredits > 0) {
-      const { error: releaseErr } = await supabaseAdmin.rpc("release_bits", {
-        p_reservation_id: reservationId,
-        p_idempotency_key: ctx.idempotencyKey + ":release-on-insert-fail",
-      });
-      if (releaseErr) {
-        console.error(
-          `[agent-billing] CRITICAL: run insert failed AND release failed. ` +
-          `User ${ctx.clerkId} may have ${estimatedCredits} BITS stuck in reservation ${reservationId}. ` +
-          `Error: ${releaseErr.message}`,
-        );
-        await createReconciliationRecord(ctx, estimatedCredits, "release_after_insert_failure", releaseErr.message, reservationId);
-      }
+    if (runError.code === "23505" && reservationWasExisting) {
+      return { ok: false, runId: null, reservationId, status: 409, error: "Agent run already exists for this request", reservedCredits: 0 };
     }
-    return { ok: false, runId: null, reservationId: null, status: 500, error: runError.message, reservedCredits: 0 };
+    // Run-row insert failed — release the reservation if it was made
+    if (reservationId && estimatedCredits > 0 && !reservationWasExisting) {
+      let releaseProblem: string | null = null;
+      try {
+        const { data, error } = await supabaseAdmin.rpc("release_bits", {
+          p_reservation_id: reservationId,
+          p_idempotency_key: ctx.idempotencyKey + ":release-on-insert-fail",
+        });
+        const row = unwrapRpcRow<{ success?: boolean; reason?: string; released_amount?: number }>(data);
+        if (error) releaseProblem = error.message;
+        else if (row?.success !== true) releaseProblem = row?.reason ?? "missing_release_result";
+        else if (row.reason === "already_released") {
+          const prior = await readReservation(reservationId);
+          if (prior.uncertain || prior.row?.status !== "released" || prior.row.reserved_amount !== estimatedCredits) {
+            releaseProblem = "prior_release_unverified";
+          }
+        } else if (row.reason !== "released" || row.released_amount !== estimatedCredits) {
+          releaseProblem = "release_inconsistent_result";
+        }
+      } catch (error) {
+        releaseProblem = failureMessage(error);
+      }
+      if (releaseProblem) {
+        console.error(`[agent-billing] CRITICAL: run insert failed and reservation release is unconfirmed for ${reservationId}: ${releaseProblem}`);
+        await createReconciliationRecord(ctx, estimatedCredits, "release_after_insert_failure", releaseProblem, reservationId);
+      }
+    } else if (reservationWasExisting) {
+      await createReconciliationRecord(ctx, estimatedCredits, "run_insert_existing_reservation", runError.message, reservationId);
+    }
+    return { ok: false, runId: null, reservationId: null, status: runError.code === "23505" ? 409 : 500, error: runError.message, reservedCredits: 0 };
   }
 
   return { ok: true, runId: runRow.id, reservationId, reservedCredits: estimatedCredits };
@@ -297,106 +394,182 @@ export async function settleRun(
   reservationId: string | null,
 ): Promise<SettleResult> {
   if (!supabaseAdmin) {
-    return { ok: false, runId, reservationId, creditsCharged: 0, creditsRefunded: 0 };
+    return { ok: false, billingStatus: "pending_reconciliation", runId, reservationId, creditsCharged: 0, creditsRefunded: 0 };
   }
 
   let creditsCharged = 0;
   let creditsRefunded = 0;
+  let billingStatus: BillingStatus = "confirmed";
+  let billingReason = "";
+  let billingDetail = "";
 
-  if (result.status === "completed" && reservationId && result.actualCredits > 0) {
-    // Settle: debit actual cost, release remainder
-    // The RPC appends ':settle' to this key when writing the ledger row,
-    // so pass the bare run id: the ledger key becomes `runId:settle`,
-    // which is what emitSettleMetering looks up to stamp usage_event_id.
-    // (Passing `runId + ":settle"` produced `runId:settle:settle` and the
-    // evidence link silently never matched.)
-    const { data: settleData, error: settleError } = await supabaseAdmin.rpc("settle_bits", {
-      p_reservation_id: reservationId,
-      p_actual_amount: result.actualCredits,
-      p_idempotency_key: runId,
-      p_overage_policy: "reject",
-      p_description: `Agent run settled: ${runId}`,
-    });
-
-    const settleRow = unwrapRpcRow<{
-      success?: boolean;
-      reason?: string;
-      settled_amount?: number;
-      released_amount?: number;
-    }>(settleData);
-
-    if (settleError) {
-      console.error(`[agent-billing] CRITICAL: settle_bits failed for run ${runId}. Error: ${settleError.message}`);
-      await createReconciliationRecord(
-        { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
-        result.actualCredits,
-        "settle_failed",
-        settleError.message,
-        reservationId,
-      );
-    } else if (settleRow?.success) {
-      creditsCharged = settleRow.settled_amount ?? 0;
-      creditsRefunded = settleRow.released_amount ?? 0;
-    } else {
-      console.error(`[agent-billing] settle_bits returned failure for run ${runId}: ${settleRow?.reason}`);
-      await createReconciliationRecord(
-        { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
-        result.actualCredits,
-        "settle_rejected",
-        settleRow?.reason ?? "unknown",
-        reservationId,
-      );
-    }
-  } else if (result.status !== "completed" && reservationId && reservedCredits > 0) {
-    // Release: execution failed, return all reserved BITS
-    const { error: releaseError } = await supabaseAdmin.rpc("release_bits", {
-      p_reservation_id: reservationId,
-      p_idempotency_key: runId + ":release",
-    });
-
-    if (releaseError) {
-      console.error(`[agent-billing] CRITICAL: release_bits failed for run ${runId}. Error: ${releaseError.message}`);
-      await createReconciliationRecord(
-        { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
-        reservedCredits,
-        "release_failed",
-        releaseError.message,
-        reservationId,
-      );
-    } else {
-      creditsRefunded = reservedCredits;
-    }
-  } else if (result.status === "completed" && result.actualCredits === 0) {
-    // Free run — nothing to settle, but release the reservation if one was made
-    if (reservationId && reservedCredits > 0) {
-      const { error: releaseError } = await supabaseAdmin.rpc("release_bits", {
+  if (!confirmedAmount(result.actualCredits) || !confirmedAmount(reservedCredits)) {
+    billingStatus = "failed";
+    billingReason = "invalid_billing_amount";
+  } else if (!reservationId && reservedCredits > 0) {
+    billingStatus = "failed";
+    billingReason = "missing_reservation";
+  } else if (result.status === "completed" && result.actualCredits > 0 && reservationId) {
+    // The RPC commits the debit and reservation transition in one transaction.
+    // A success row is confirmation; a transport failure has an unknown outcome.
+    try {
+      const { data, error } = await supabaseAdmin.rpc("settle_bits", {
         p_reservation_id: reservationId,
-        p_idempotency_key: runId + ":release-free",
+        p_actual_amount: result.actualCredits,
+        p_idempotency_key: runId,
+        p_overage_policy: "reject",
+        p_description: `Agent run settled: ${runId}`,
       });
-      if (releaseError) {
-        console.error(`[agent-billing] release_bits failed for free run ${runId}. Error: ${releaseError.message}`);
+      if (error) {
+        billingStatus = "pending_reconciliation";
+        billingReason = "settle_rpc_error";
+        billingDetail = error.message;
       } else {
-        creditsRefunded = reservedCredits;
+        const row = unwrapRpcRow<{ success?: boolean; reason?: string; settled_amount?: number; released_amount?: number }>(data);
+        if (row?.success === false) {
+          billingStatus = "failed";
+          billingReason = "settle_rejected";
+          billingDetail = row.reason ?? "unknown";
+        } else if (row?.success !== true) {
+          billingStatus = "pending_reconciliation";
+          billingReason = "settle_missing_result";
+        } else if (row.reason === "already_settled") {
+          billingStatus = await verifyPriorSettlement(runId, reservationId, result.actualCredits, reservedCredits);
+          if (billingStatus === "confirmed") {
+            creditsCharged = result.actualCredits;
+            creditsRefunded = reservedCredits - result.actualCredits;
+          } else {
+            billingReason = "prior_settlement_unverified";
+            billingDetail = "Existing settlement does not match this run or could not be read";
+          }
+        } else if (row.reason === "settled" && confirmedAmount(row.settled_amount) && confirmedAmount(row.released_amount)
+          && row.settled_amount === result.actualCredits && row.settled_amount + row.released_amount === reservedCredits) {
+          creditsCharged = row.settled_amount;
+          creditsRefunded = row.released_amount;
+        } else {
+          billingStatus = "pending_reconciliation";
+          billingReason = "settle_inconsistent_result";
+          billingDetail = row.reason ?? "unknown";
+        }
       }
+    } catch (error) {
+      billingStatus = "pending_reconciliation";
+      billingReason = "settle_rpc_exception";
+      billingDetail = failureMessage(error);
+    }
+  } else if (reservationId) {
+    // Failed/cancelled and zero-cost runs release the hold. A repeated release
+    // changes no balance, but the reservation row can confirm the original amount.
+    try {
+      const { data, error } = await supabaseAdmin.rpc("release_bits", {
+        p_reservation_id: reservationId,
+        p_idempotency_key: `${runId}:${result.status === "completed" ? "release-free" : "release"}`,
+      });
+      if (error) {
+        billingStatus = "pending_reconciliation";
+        billingReason = "release_rpc_error";
+        billingDetail = error.message;
+      } else {
+        const row = unwrapRpcRow<{ success?: boolean; reason?: string; released_amount?: number }>(data);
+        if (row?.success === false) {
+          billingStatus = "failed";
+          billingReason = "release_rejected";
+          billingDetail = row.reason ?? "unknown";
+        } else if (row?.success !== true) {
+          billingStatus = "pending_reconciliation";
+          billingReason = "release_missing_result";
+        } else if (row.reason === "already_released") {
+          const prior = await readReservation(reservationId);
+          if (prior.uncertain || !prior.row) {
+            billingStatus = "pending_reconciliation";
+            billingReason = "prior_release_unverified";
+          } else if (prior.row.status !== "released" || prior.row.reserved_amount !== reservedCredits) {
+            billingStatus = "failed";
+            billingReason = "prior_release_mismatch";
+          } else {
+            const { data: runRow, error: runError } = await supabaseAdmin.from("agent_runs").select("input").eq("id", runId).maybeSingle();
+            if (runError) {
+              billingStatus = "pending_reconciliation";
+              billingReason = "prior_release_owner_unverified";
+              billingDetail = runError.message;
+            } else {
+              const input = runRow?.input as { reservation_id?: unknown; idempotency_key?: unknown } | null;
+              if (input?.reservation_id !== reservationId || !prior.row.idempotency_key || input.idempotency_key !== prior.row.idempotency_key) {
+                billingStatus = "failed";
+                billingReason = "prior_release_owner_mismatch";
+              } else {
+                creditsRefunded = prior.row.reserved_amount;
+              }
+            }
+          }
+        } else if (row.reason === "released" && confirmedAmount(row.released_amount) && row.released_amount === reservedCredits) {
+          creditsRefunded = row.released_amount;
+        } else {
+          billingStatus = "pending_reconciliation";
+          billingReason = "release_inconsistent_result";
+          billingDetail = row.reason ?? "unknown";
+        }
+      }
+    } catch (error) {
+      billingStatus = "pending_reconciliation";
+      billingReason = "release_rpc_exception";
+      billingDetail = failureMessage(error);
+    }
+  } else if (result.status === "completed" && result.actualCredits > 0) {
+    // Owner-exempt runs have no reservation. Confirm that persisted decision;
+    // an unexpectedly missing reservation on a paid run is a billing failure.
+    try {
+      const { data, error } = await supabaseAdmin.from("agent_runs").select("input").eq("id", runId).maybeSingle();
+      if (error) {
+        billingStatus = "pending_reconciliation";
+        billingReason = "exemption_lookup_failed";
+        billingDetail = error.message;
+      } else if ((data?.input as { billing_exempt?: unknown } | null)?.billing_exempt !== true) {
+        billingStatus = "failed";
+        billingReason = "missing_reservation";
+      }
+    } catch (error) {
+      billingStatus = "pending_reconciliation";
+      billingReason = "exemption_lookup_exception";
+      billingDetail = failureMessage(error);
     }
   }
 
+  if (billingStatus !== "confirmed") {
+    console.error(`[agent-billing] ${billingReason} for run ${runId}: ${billingDetail}`);
+    await createReconciliationRecord(
+      { clerkId: "", agentInstanceId: "", agentId: null, agentVersionId: null, idempotencyKey: runId },
+      result.status === "completed" ? result.actualCredits : reservedCredits,
+      billingReason,
+      billingDetail,
+      reservationId,
+    );
+  }
+
   // Update the agent_runs row (using production schema columns)
-  const { error: updateError } = await supabaseAdmin
-    .from("agent_runs")
-    .update({
-      status: result.status,
-      output: {
-        input_tokens: result.inputTokens,
-        output_tokens: result.outputTokens,
-        credits_charged: creditsCharged,
-        credits_refunded: creditsRefunded,
-        reservation_id: reservationId,
-        error: result.error ?? null,
-      },
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", runId);
+  let updateError: { message: string } | null = null;
+  try {
+    const updated = await supabaseAdmin
+      .from("agent_runs")
+      .update({
+        status: billingStatus === "confirmed" ? result.status : "reconciliation_required",
+        output: {
+          input_tokens: result.inputTokens,
+          output_tokens: result.outputTokens,
+          credits_charged: creditsCharged,
+          credits_refunded: creditsRefunded,
+          reservation_id: reservationId,
+          billing_status: billingStatus,
+          billing_reason: billingReason || null,
+          error: result.error ?? null,
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", runId);
+    updateError = updated.error;
+  } catch (error) {
+    updateError = { message: failureMessage(error) };
+  }
 
   if (updateError) {
     console.error(`[agent-billing] CRITICAL: agent_runs update failed for run ${runId}. Error: ${updateError.message}`);
@@ -407,14 +580,14 @@ export async function settleRun(
       updateError.message,
       reservationId,
     );
-    return { ok: false, runId, reservationId, creditsCharged, creditsRefunded: 0 };
+    return { ok: false, billingStatus, runId, reservationId, creditsCharged, creditsRefunded };
   }
 
   // Canonical metering (P0): token-level provider-cost evidence for the
   // settle. Best-effort — never breaks settlement.
-  await emitSettleMetering(runId, result, creditsCharged).catch(() => {});
+  if (billingStatus === "confirmed") await emitSettleMetering(runId, result, creditsCharged).catch(() => {});
 
-  return { ok: true, runId, reservationId, creditsCharged, creditsRefunded };
+  return { ok: billingStatus === "confirmed", billingStatus, runId, reservationId, creditsCharged, creditsRefunded };
 }
 
 // ─── Canonical metering (P0) ─────────────────────────────────────
@@ -474,10 +647,12 @@ async function emitSettleMetering(
       .limit(1)
       .maybeSingle();
     if (existing?.usage_event_id) {
+      // Settlement debits are bucket-allocated: '<runId>:settle' plus one
+      // '<runId>:settle:<bucket>' row per funded bucket. Stamp them all.
       await supabaseAdmin
         .from("credit_ledger")
         .update({ usage_event_id: existing.usage_event_id as string })
-        .eq("idempotency_key", settleKey);
+        .or(`idempotency_key.eq.${settleKey},idempotency_key.like.${settleKey}:*`);
       return;
     }
 
@@ -585,15 +760,16 @@ async function createReconciliationRecord(
 ): Promise<void> {
   if (!supabaseAdmin) return;
   try {
-    await supabaseAdmin.from("billing_reconciliations").insert({
+    const { error } = await supabaseAdmin.from("billing_reconciliations").insert({
       idempotency_key: ctx.idempotencyKey,
       agent_instance_id: ctx.agentInstanceId,
       credits_expected: credits,
       reason,
-      error_message: errorMessage,
+      error_message: reservationId ? `reservation=${reservationId}; ${errorMessage}` : errorMessage,
       status: "pending",
       created_at: new Date().toISOString(),
     });
+    if (error) console.error(`[agent-billing] FATAL: Could not create reconciliation record for ${ctx.idempotencyKey}: ${error.message}`);
   } catch (err) {
     console.error(`[agent-billing] FATAL: Could not create reconciliation record: ${err}`);
   }

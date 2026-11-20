@@ -2003,6 +2003,15 @@ export async function callLLMWithTools(
      * Observer errors are swallowed: reporting must never break the call.
      */
     onRoutePlan?: (summary: RoutePlanSummary) => void;
+    /**
+     * Reply-text observer (D4 text channel): invoked with the serving
+     * attempt's reply text as it is produced. The tool-calling adapters
+     * are non-streaming today, so this fires once per successful attempt
+     * with that attempt's completed text segment — the floor; a future
+     * streaming adapter forwards deltas through the same callback.
+     * Observer errors are swallowed: reporting must never break the call.
+     */
+    onText?: (text: string) => void;
   },
 ): Promise<LLMToolCallResponse> {
   const requirements: RouteRequirements = {
@@ -2312,6 +2321,16 @@ export async function callLLMWithTools(
           failover: failures.map((f) => `${f.provider}/${f.model}`),
           metadata: options?.evalMetadata ?? {},
         });
+        // D4 text channel: hand the step's reply text to the observer
+        // as it is produced, so the agent loop can stream it to the
+        // client instead of the answer arriving whole at run end.
+        if (options?.onText && normalized.text) {
+          try {
+            options.onText(normalized.text);
+          } catch {
+            // A broken observer must never break the call.
+          }
+        }
         return normalized;
       } catch (err) {
         const latencyMs = Date.now() - t0;

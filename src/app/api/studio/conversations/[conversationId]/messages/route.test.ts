@@ -540,6 +540,43 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
     );
   });
 
+  it("keeps the request alive until the billing settlement promise resolves", async () => {
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(parseAgentSelection).mockReturnValue({ kind: "instance", id: "inst-1" } as any);
+    vi.mocked(resolveRuntimeAgent).mockResolvedValue({
+      ok: true,
+      agent: { agentInstanceId: "inst-1", agentId: "agent-1", agentVersionId: "ver-1", model: "test-model", memoryNamespace: "ns-1" },
+    } as any);
+    vi.mocked(reserveCredits).mockResolvedValue({ ok: true, runId: "run-1", reservedCredits: 10, reservationId: "res-1" } as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: true,
+      status: "preview_ready",
+      previewUrl: "https://preview.example.com",
+      productionUrl: null,
+      finalText: "Built a page.",
+      agentLoopResult: { stepsUsed: 1, toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true, paths: ["index.html"] }], workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true }, cancelled: false, pendingApproval: null },
+      cancelled: false,
+      totalDurationMs: 1,
+    } as any);
+    let finishSettlement!: () => void;
+    const settlementGate = new Promise<void>((resolve) => { finishSettlement = resolve; });
+    vi.mocked(settleRun).mockImplementation(async () => {
+      await settlementGate;
+      return { ok: true, billingStatus: "confirmed", creditsCharged: 2, creditsRefunded: 8 } as any;
+    });
+
+    const response = await POST(makeRequest({ agentInstanceId: "inst-1" }), { params: Promise.resolve({ conversationId: "conv-123" }) });
+    let streamEnded = false;
+    const stream = readSSE(response).then((value) => { streamEnded = true; return value; });
+    await vi.waitFor(() => expect(settleRun).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(streamEnded).toBe(false);
+
+    finishSettlement();
+    const events = await stream;
+    expect(events.done).toBe(true);
+  });
+
   it("persists a pending approval when the transport disconnects mid-run", async () => {
     vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
     vi.mocked(createPausedRun).mockResolvedValue({ id: "paused-1" } as any);
