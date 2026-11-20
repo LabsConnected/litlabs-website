@@ -470,7 +470,9 @@ test.describe("LiTT Studio mobile visual evidence", () => {
       // Expand, verify image + full text, collapse again.
       await page.getByRole("button", { name: "Show more" }).first().click();
       await expect(page.getByRole("button", { name: "Show less" }).first()).toBeVisible();
-      await expect(page.locator('img[alt="Generated hero mockup"]')).toBeVisible();
+      const heroImage = page.locator('img[alt="Generated hero mockup"]');
+      await heroImage.scrollIntoViewIfNeeded();
+      await expect(heroImage).toBeVisible();
       await shot(page, `${width}-long-answer-expanded`);
       await page.getByRole("button", { name: "Show less" }).first().click();
 
