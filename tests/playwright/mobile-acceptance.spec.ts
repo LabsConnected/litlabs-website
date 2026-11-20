@@ -536,22 +536,16 @@ test.describe("LiTT Studio mobile visual evidence", () => {
         }
       });
       try {
+        // The fetch itself is proven fast (probe Image() + fetch() 200 in
+        // diagnostics); on a memory-pressured dev runner the element's own
+        // load can be queued behind compile/API traffic for tens of seconds,
+        // so allow a generous window rather than nudging src repeatedly
+        // (each re-assert aborts the in-flight fetch and restarts it).
         await expect
-          .poll(
-            async () => {
-              // Re-nudge only when the previous attempt settled without a
-              // decode (complete && naturalWidth 0); a pending fetch is left
-              // alone so we don't keep aborting it.
-              return heroImage.evaluate((el: HTMLImageElement) => {
-                if (el.naturalWidth === 0 && el.complete) {
-                  const base = el.src.split("?")[0];
-                  el.src = `${base}?evidence=${Date.now()}`;
-                }
-                return el.naturalWidth;
-              });
-            },
-            { timeout: 30_000, intervals: [500, 1000, 2000] },
-          )
+          .poll(() => heroImage.evaluate((el: HTMLImageElement) => el.naturalWidth), {
+            timeout: 90_000,
+            intervals: [1000, 2000, 5000],
+          })
           .toBeGreaterThan(0);
       } catch (err) {
         const { writeFileSync } = await import("fs");
