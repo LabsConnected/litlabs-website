@@ -61,6 +61,7 @@ function mockChains(opts: {
 }) {
   const creditLedgerUpdate = vi.fn().mockReturnValue({
     eq: vi.fn().mockResolvedValue({ error: null }),
+    or: vi.fn().mockResolvedValue({ error: null }),
   });
   mockFrom.mockImplementation((table: string) => {
     if (table === "agent_runs") {
@@ -100,7 +101,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   emitUsageEventMock.mockResolvedValue({ status: "ok", usageEventId: "ue-settle-1" });
   mockRpc.mockResolvedValue({
-    data: { success: true, settled_amount: 42, released_amount: 58 },
+    // Mirror the settle_bits RETURNS TABLE row, including its outcome reason.
+    data: [{ success: true, settled_amount: 42, released_amount: 58, reason: "settled" }],
     error: null,
   });
 });
@@ -158,12 +160,16 @@ describe("settleRun canonical metering (P0)", () => {
     expect(emitUsageEventMock).not.toHaveBeenCalled();
     // ...but the ledger debit is linked to the existing event.
     expect(creditLedgerUpdate).toHaveBeenCalledWith({ usage_event_id: "ue-existing" });
-    expect(creditLedgerUpdate().eq).toHaveBeenCalledWith("idempotency_key", SETTLE_KEY);
+    // Bucket-allocated settle debits use '<key>:<bucket>' rows, so the stamp
+    // matches the bare key and any suffixed children.
+    expect(creditLedgerUpdate().or).toHaveBeenCalledWith(
+      `idempotency_key.eq.${SETTLE_KEY},idempotency_key.like.${SETTLE_KEY}:*`,
+    );
   });
 
   it("emits a non-billable event for a failed run with no prior billable event", async () => {
     mockChains({ existingUsageEvent: null });
-    mockRpc.mockResolvedValue({ error: null });
+    mockRpc.mockResolvedValue({ data: [{ success: true, released_amount: 100, reason: "released" }], error: null });
 
     const result = await settleRun(
       RUN_ID,
