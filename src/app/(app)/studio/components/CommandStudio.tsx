@@ -53,7 +53,7 @@ import StudioRightRail, { type StudioRailTab } from "./StudioRightRail";
 import { ApprovalCard } from "./ApprovalCard";
 import MissionCards from "./MissionCards";
 import PersistentMusicPlayer from "./PersistentMusicPlayer";
-import { MobileCommandNav, type MobileStudioSurface } from "./CommandStudioNav";
+import MobileStudioTopBar from "./MobileStudioTopBar";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
@@ -1199,42 +1199,41 @@ function CommandStudioContent() {
     }
   }, [contextDrawerTab]);
 
-  // Mobile is a work-surface dock over the same conversation, execution,
-  // preview, file, and activity state used by desktop. Switching a surface
-  // never creates a second runtime or stops the active mission.
-  const handleMobileSurface = useCallback((surface: MobileStudioSurface) => {
+  // Back to chat — the phone top bar's way home from any tool surface
+  // (mobile layout card, 2026-11-19). Also used by the Tools sheet's
+  // "Back to chat" row.
+  const openMobileChat = useCallback(() => {
+    setMobileToolsOpen(false);
     setMobileBuildOpen(false);
-    if (surface === "chat") {
-      setMobileToolsOpen(false);
-      setLittActiveTab("chat");
-      setMobileLittOpen(true);
-      return;
-    }
-    if (surface === "activity") {
-      setMobileToolsOpen(false);
-      setLittActiveTab("live");
-      setMobileLittOpen(true);
-      return;
-    }
-    if (surface === "preview") {
-      setMobileLittOpen(false);
-      setMobileToolsOpen(false);
-      setContextDrawerOpen(false);
-      setDestination("studio");
-      setStudioMode("preview");
-      return;
-    }
-    if (surface === "files") {
-      setMobileLittOpen(false);
-      setMobileToolsOpen(false);
-      setContextDrawerTab("files");
-      setContextDrawerOpen(true);
-      return;
-    }
+    // A full-screen tool surface (the mobile dock) must release when
+    // the user goes Back to chat — one surface at a time.
+    setDockOpen(false);
     setLittActiveTab("chat");
     setMobileLittOpen(true);
-    setMobileToolsOpen(true);
   }, []);
+
+  // Label shown beside Back to chat while a tool surface owns the phone
+  // screen — truthful surface names only.
+  const mobileSurfaceLabel = (() => {
+    if (dockOpen) {
+      return (
+        { activity: "Activity", terminal: "Terminal", inspector: "Inspector", media: "Media" }[dockTab] ??
+        "Tools"
+      );
+    }
+    if (destination === "create") {
+      return { image: "Image", video: "Video", audio: "Audio", music: "Music", environment: "Environment", game: "Game" }[createMode] ?? "Create";
+    }
+    if (destination !== "studio") return destination === "assets" ? "Assets" : destination === "agents" ? "Agents" : destination === "missions" ? "Missions" : "More";
+    switch (studioMode) {
+      case "preview": return "Static View";
+      case "code": return "Code";
+      case "files": return "Canvas";
+      case "media": return "Media";
+      case "design": return "Design";
+      default: return "Workspace";
+    }
+  })();
 
   // Derived booleans for downstream components (must be after state declarations)
   // Activity is an OPEN action. It always opens the bottom dock on the
@@ -1457,10 +1456,6 @@ function CommandStudioContent() {
 
   // Files panel state is now managed by the Context Drawer (Phase C2).
   // The old filesPanelOpen state has been replaced by contextDrawerOpen + contextDrawerTab.
-
-  const handleSelectDestination = useCallback((dest: StudioDestination) => {
-    setDestination(dest);
-  }, []);
 
   // New-project dialog state lives up here (not with the other project
   // creation logic below) because the conversation controller references
@@ -2825,6 +2820,16 @@ function CommandStudioContent() {
     assistantText: "",
   });
 
+  // New Chat from the phone top bar / Tools menu — opens the chat sheet
+  // on a fresh conversation (declared after `conversation` exists).
+  const startNewMobileChat = useCallback(() => {
+    setMobileToolsOpen(false);
+    setMobileBuildOpen(false);
+    setLittActiveTab("chat");
+    setMobileLittOpen(true);
+    void conversation.createConversation({ forceNew: true });
+  }, [conversation]);
+
   const handleLiveTranscript = useCallback(async (role: "user" | "assistant", text: string) => {
     if (!text.trim()) return;
 
@@ -2992,19 +2997,6 @@ function CommandStudioContent() {
     },
     [studioMode, studioShellActive, openStageSurface],
   );
-  const mobileSurface: MobileStudioSurface | null = mobileToolsOpen
-    ? "more"
-    : mobileLittOpen
-      // The open LiTT sheet IS the Chat surface — its internal tabs
-      // (Chat / Live) switch inside it. The phone dock is exactly
-      // Chat · Preview · Files · More (Finish Spec, Larry 2026-11-14);
-      // Activity has no dock entry anymore.
-      ? "chat"
-      : contextDrawerOpen && contextDrawerTab === "files"
-        ? "files"
-        : isPreview
-          ? "preview"
-          : null;
   // Canvas-first 2-zone layout: exactly one primary workspace surface at a
   // time. The live preview is the Preview workspace tab — never a second
   // column beside the workspace.
@@ -3969,7 +3961,32 @@ function CommandStudioContent() {
           backgroundImage: "radial-gradient(ellipse 80% 50% at 50% -20%, rgba(23,122,54,0.05), transparent)",
         }}
       >
-        {/* One compact header — replaces AutonomicLoopBanner + StudioTopBar */}
+        {/* One compact header — replaces AutonomicLoopBanner + StudioTopBar.
+            Desktop/laptop keep the full CommandStudioHeader; the phone
+            (<lg, the mobile viewport tier) gets the slim chat-first top
+            bar instead — project name + New Chat + one menu button, with
+            Back to chat while a tool surface is open (layout card,
+            2026-11-19). */}
+        {isMobileLitt ? (
+          <MobileStudioTopBar
+            projectId={capabilities.projectId}
+            projectName={capabilities.projectName}
+            onProjectSelect={handleSelectProject}
+            onCreateProject={openProjectNameDialog}
+            onDeleteProject={handleDeleteProject}
+            onProjectRenamed={(projectId, name) => {
+              if (capabilities.projectId !== projectId) return;
+              refreshCapabilities();
+              window.dispatchEvent(new CustomEvent("studio:project-renamed", { detail: { projectId, name } }));
+            }}
+            chatOpen={mobileLittOpen}
+            surfaceLabel={mobileSurfaceLabel}
+            onBackToChat={openMobileChat}
+            onNewChat={startNewMobileChat}
+            onOpenMenu={() => setMobileToolsOpen(true)}
+            busy={conversation.busy}
+          />
+        ) : (
         <CommandStudioHeader
           onPreviewAction={handlePreview}
           onToggleDockAction={studioShellActive ? undefined : handleToggleDock}
@@ -4023,6 +4040,7 @@ function CommandStudioContent() {
           }
           onReconnectWorkspaceAction={handlePrepareWorkspace}
         />
+        )}
 
         {/* Export result toast — reports the server's real outcome. */}
         {exportJob.status !== "idle" && (
@@ -4395,9 +4413,27 @@ function CommandStudioContent() {
                 StudioDrawer and the desktop ContextDrawer: Activity |
                 Files | Terminal | Inspector | Media. The terminal stays
                 mounted (display:none when inactive) so the PTY survives
-                tab switches and auto-connect keeps working. */}
+                tab switches and auto-connect keeps working.
+                Mobile (2026-11-19 card): the dock is the full-screen
+                tool surface — a fixed overlay below the slim top bar so
+                Back to chat stays reachable; in-flow it keeps its
+                desktop bottom-panel geometry. */}
+            <div
+              className={
+                isMobileLitt && dockOpen
+                  ? "fixed inset-x-0 bottom-0 z-[10040] flex flex-col"
+                  : "contents"
+              }
+              style={
+                isMobileLitt && dockOpen
+                  ? { top: "var(--studio-header-h, 3.5rem)", backgroundColor: "var(--studio-surface)" }
+                  : undefined
+              }
+              data-testid={isMobileLitt && dockOpen ? "mobile-dock-overlay" : undefined}
+            >
             <StudioDock
               open={dockOpen}
+              fill={isMobileLitt}
               activeTab={dockTab}
               onTabChange={setDockTab}
               onClose={() => setDockOpen(false)}
@@ -4466,6 +4502,7 @@ function CommandStudioContent() {
               }
               mediaContent={<MediaUtilityDock />}
             />
+            </div>
           </main>
 
           {/* Right rail — the Regular layout's third column (mockup
@@ -4553,113 +4590,16 @@ function CommandStudioContent() {
         {/* Persistent music player — survives tool switches while audio plays */}
         <PersistentMusicPlayer />
 
-        {/* Mobile work-surface dock — Chat / Preview / Files / Activity / More.
-            All surfaces operate on the same mission, conversation, preview,
-            browser, and execution stores as desktop. */}
-        <MobileCommandNav
-          active={destination}
-          onSelect={handleSelectDestination}
-          surface={mobileSurface}
-          onSelectSurface={handleMobileSurface}
-        />
+        {/* Mobile work-surface dock — RETIRED on the phone by the
+            2026-11-19 chat-first layout card: Chat · Static View · Files ·
+            More are now behind the slim top bar's menu, and tool surfaces
+            return via Back to chat. MobileCommandNav remains for
+            reference/tests but is no longer mounted on the mobile tier. */}
 
-        {/* Mobile LiTT FAB trigger (<1024px) — Phase C2.1. Secondary
-            affordance now: the Chat|Canvas segmented switcher above is the
-            primary fast path. The sheet reuses the exact same
-            littChatContent / littLiveContent used by the desktop rail —
-            never both at once. Hidden while the dock, context drawer,
-            canvas overlay, or live voice overlay is open: at z-[10015]
-            the FAB would float over their scrims and cover tool action
-            buttons. */}
-        {/* Mobile Chat|Canvas fast switcher — canvas-first 2-zone layout.
-            One primary surface dominates at a time on mobile; this compact
-            segmented control is the primary fast path between Chat and
-            Canvas, always thumb-reachable just above the bottom nav on the
-            canvas view. Both surfaces stay mounted and toggle via
-            visibility/display (same pattern as LiTTPanel's display:none
-            collapse), so SSE connections, scroll position, and unsent
-            composer drafts survive switching. Hidden while the dock,
-            context drawer, canvas overlay, or live voice overlay owns the
-            screen (same gate as the FAB trigger below). The segmented
-            control is a tablist: the active segment marks the visible
-            surface; tapping the other surface switches to it. */}
-        {isMobileLitt && !mobileLittOpen && !dockOpen && !contextDrawerOpen && !canvasOpen && !livePanelOpen && (
-          <div
-            className="fixed left-1/2 z-[10015] flex -translate-x-1/2 items-center gap-0.5 rounded-full border p-1 shadow-lg"
-            style={{
-              bottom: "calc(var(--studio-mobile-bottom-h) + env(safe-area-inset-bottom) + 12px)",
-              backgroundColor: "var(--studio-surface)",
-              borderColor: "var(--studio-border-strong)",
-              backdropFilter: "blur(12px)",
-            }}
-            role="tablist"
-            aria-label="Switch between chat and canvas"
-            data-testid="mobile-surface-switcher"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={false}
-              onClick={() => setMobileLittOpen(true)}
-              className="min-h-[40px] rounded-full px-4 text-[12px] font-bold transition active:scale-95"
-              style={{ color: "var(--text-muted)" }}
-              data-testid="mobile-switch-chat"
-            >
-              Chat
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={true}
-              className="min-h-[40px] rounded-full bg-accent/15 px-4 text-[12px] font-bold text-accent transition"
-              data-testid="mobile-switch-canvas"
-            >
-              Canvas
-            </button>
-          </div>
-        )}
-        {isMobileLitt && !mobileLittOpen && !dockOpen && !contextDrawerOpen && !canvasOpen && !livePanelOpen && (
-          <button
-            type="button"
-            onClick={() => setMobileLittOpen(true)}
-            className="fixed z-[10015] grid h-11 w-11 place-items-center rounded-full border shadow-lg transition active:scale-95"
-            style={{
-              right: 12,
-              bottom: "calc(var(--studio-mobile-bottom-h) + env(safe-area-inset-bottom) + 12px)",
-              backgroundColor: "var(--studio-surface)",
-              borderColor: "var(--studio-border-strong)",
-              color: "var(--litt-primary)",
-              backdropFilter: "blur(12px)",
-            }}
-            aria-label={conversation.busy ? "LiTT is working — open chat" : "Ask LiTT to build"}
-            title={conversation.busy ? "LiTT is working" : "Ask LiTT to build"}
-            data-testid="litt-mobile-trigger"
-          >
-            <span
-              className="flex h-6 w-6 items-center justify-center rounded-md text-[11px] font-black"
-              style={{
-                background: "linear-gradient(135deg, rgba(23,122,54,0.22), rgba(23,122,54,0.08))",
-              }}
-              aria-hidden
-            >
-              L
-            </span>
-            {/* Running indicator — when the chat sheet is closed mid-run,
-                this dot is the only signal that LiTT is still working.
-                Real state only: bound to conversation.busy, not a timer. */}
-            {conversation.busy && (
-              <span
-                className="absolute -right-0.5 -top-0.5 h-3 w-3 animate-pulse rounded-full border-2"
-                style={{
-                  backgroundColor: "var(--litt-primary)",
-                  borderColor: "var(--studio-surface)",
-                }}
-                data-testid="litt-mobile-busy-dot"
-                aria-hidden
-              />
-            )}
-          </button>
-        )}
+        {/* Mobile floating Chat|Canvas switcher + LiTT FAB — RETIRED by
+            the 2026-11-19 chat-first layout card ("nothing floats"). The
+            slim top bar's Back to chat / menu own those affordances now;
+            a busy run is signalled by the top bar's working dot. */}
         {/* Mobile Chat surface — stays MOUNTED on the mobile tier and
             toggles via display (same pattern as LiTTPanel's display:none
             collapse), so SSE connections, scroll position, and unsent
@@ -4685,6 +4625,7 @@ function CommandStudioContent() {
               projectName={capabilities.projectName}
               branch={capabilities.activeBranch}
               onOpenTools={() => setMobileToolsOpen(true)}
+              onNewChat={startNewMobileChat}
             />
           </div>
         )}
@@ -4703,7 +4644,7 @@ function CommandStudioContent() {
         )}
         {/* Mobile density redesign: Tools sheet — Code, Canvas, Preview,
             Files, Terminal, Activity in one place. */}
-        {isMobileLitt && mobileLittOpen && mobileToolsOpen && (
+        {isMobileLitt && mobileToolsOpen && (
           <MobileBottomSheet
             open={mobileToolsOpen}
             onClose={() => setMobileToolsOpen(false)}
@@ -4711,6 +4652,8 @@ function CommandStudioContent() {
             testId="mobile-tools-dialog"
           >
             <MobileToolsSheet
+              onOpenChat={openMobileChat}
+              onNewChat={startNewMobileChat}
               onOpenCode={openMobileTool(() => { setDestination("studio"); setStudioMode("code"); })}
               onOpenCanvas={openMobileTool(() => { setDestination("studio"); setStudioMode("files"); })}
               onOpenPreview={openMobileTool(handlePreview)}
@@ -4747,7 +4690,7 @@ function CommandStudioContent() {
       {/* Canvas overlay — opens when a canvas action is executed from chat */}
       {canvasOpen && (
         <aside
-          className="fixed z-[10009] flex flex-col overflow-hidden border shadow-2xl md:bottom-0 md:right-0 md:top-[calc(var(--studio-header-h)+4px)] md:w-full md:max-w-[520px] md:border-l bottom-[calc(var(--studio-mobile-bottom-h)+env(safe-area-inset-bottom))] left-0 right-0 top-auto h-[55dvh] rounded-t-2xl border-t"
+          className="fixed z-[10009] flex flex-col overflow-hidden border shadow-2xl md:bottom-0 md:right-0 md:top-[calc(var(--studio-header-h)+4px)] md:w-full md:max-w-[520px] md:border-l bottom-[env(safe-area-inset-bottom)] left-0 right-0 top-auto h-[55dvh] rounded-t-2xl border-t"
           style={{
             backgroundColor: "var(--studio-elevated)",
             borderColor: "var(--studio-border-strong)",

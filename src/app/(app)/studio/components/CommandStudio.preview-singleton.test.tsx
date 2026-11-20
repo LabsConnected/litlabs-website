@@ -547,41 +547,32 @@ describe("CommandStudio — canvas-first 2-zone layout", () => {
     expect(screen.getByTestId("studio-center-workspace")).toBeTruthy();
   });
 
-  it("mobile Chat|Canvas switcher toggles surfaces without unmounting chat", async () => {
+  it("mobile tool surfaces toggle without unmounting chat", async () => {
     globalThis.__TEST_VIEWPORT_WIDTH__ = 390;
     window.innerWidth = 390;
     const { user } = await renderCommandStudio();
     await settle();
 
-    // Studio enters with the LiTT chat surface open; closing it reaches the
-    // canvas view this test toggles from. Chat is never unmounted.
+    // Chat-first layout (2026-11-19 card): the chat sheet is the home
+    // surface on entry and stays mounted (display-toggled) while tool
+    // surfaces take over — drafts, SSE connections, scroll survive.
     const mount = screen.getByTestId("litt-mobile-sheet-mount");
     expect(mount.style.display).toBe("");
     expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
-    await user.click(screen.getByTestId("litt-mobile-sheet-close"));
-    await settle();
 
-    // The segmented switcher is the primary fast path on the canvas view.
-    expect(screen.getByTestId("mobile-surface-switcher")).toBeTruthy();
-    expect(screen.getByTestId("mobile-switch-chat")).toBeTruthy();
-    expect(screen.getByTestId("mobile-switch-canvas")).toBeTruthy();
-
-    // Chat surface is mounted but hidden — never unmounted while switching.
-    expect(mount.style.display).toBe("none");
-
-    // Tap Chat — the sheet becomes visible; the composer instance is the
-    // same one (state, drafts, and SSE connections survive).
-    await user.click(screen.getByTestId("mobile-switch-chat"));
-    await settle();
-    expect(screen.getByTestId("litt-mobile-sheet-mount").style.display).toBe("");
-    expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
-
-    // Close the sheet — back on canvas, chat still mounted (hidden).
-    await user.click(screen.getByTestId("litt-mobile-sheet-close"));
+    // Menu → Preview: the tool surface takes the phone, chat hides.
+    await user.click(screen.getByTestId("mobile-studio-menu"));
+    await waitFor(() => expect(screen.getByTestId("mobile-tools-dialog")).toBeTruthy());
+    await user.click(screen.getByTestId("mobile-tool-preview"));
     await settle();
     expect(screen.getByTestId("litt-mobile-sheet-mount").style.display).toBe("none");
     expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
-    expect(screen.getByTestId("mobile-surface-switcher")).toBeTruthy();
+
+    // Back to chat — the same composer instance returns.
+    await user.click(screen.getByTestId("mobile-back-to-chat"));
+    await settle();
+    expect(screen.getByTestId("litt-mobile-sheet-mount").style.display).toBe("");
+    expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
   });
 
   it("does NOT show a Done completion card when the run pauses for approval", async () => {
