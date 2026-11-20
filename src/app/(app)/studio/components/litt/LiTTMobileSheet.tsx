@@ -77,12 +77,24 @@ export default function LiTTMobileSheet({
   // Chat-first mobile layout (2026-11-19 card): the bottom work-surface
   // dock is retired on the phone — the sheet owns the full height down
   // to the safe area, staying pinned above the on-screen keyboard.
-  const bottomOffset = MOBILE_BOTTOM_NAV_H + safeBottom + bottomInset;
+  //
+  // Mobile gap fix (Larry, 2026-11-20): the sheet must span the VISUAL
+  // viewport, not the layout viewport. When the Android keyboard opens,
+  // Chrome scrolls the visual viewport over the layout viewport to keep
+  // the focused composer visible, so vv.offsetTop grows > 0. A sheet
+  // anchored at layout top:0 with height vv.height then ends
+  // offsetTop pixels ABOVE the visual viewport's bottom edge, leaving a
+  // band of dimmed backdrop + underlying workspace (media cards) showing
+  // between the composer and the keyboard. Anchor the sheet's top at
+  // vv.offsetTop so its bottom edge lands exactly on the visual
+  // viewport's bottom edge — flush above the keyboard, nothing behind
+  // or below the composer.
+  const topOffset = Math.max(0, Math.round(vv.offsetTop));
   const MIN_SHEET_HEIGHT = 150;
-  // Full-screen sheet: spans from the top of the viewport down to the
-  // bottom offset (safe area + keyboard inset), so it still stays
-  // pinned above the on-screen keyboard.
-  const rawSheetHeight = Math.round(vv.height) + bottomInset - bottomOffset;
+  // While the keyboard is open it covers the bottom safe area, so the
+  // safe-area inset is only subtracted when the keyboard is closed.
+  const rawSheetHeight =
+    Math.round(vv.height) + MOBILE_BOTTOM_NAV_H - (bottomInset > 0 ? 0 : safeBottom);
   // Never let the sheet render at (near-)0px — a bad viewport reading
   // should degrade to "small but usable", not "invisible/unusable".
   const sheetHeight = Math.max(MIN_SHEET_HEIGHT, rawSheetHeight);
@@ -135,9 +147,9 @@ export default function LiTTMobileSheet({
         data-testid="litt-mobile-backdrop"
       />
       <div
-        className="fixed inset-x-0 top-0 z-[10021] flex min-h-0 min-w-0 flex-col overflow-hidden border-t"
+        className="fixed inset-x-0 z-[10021] flex min-h-0 min-w-0 flex-col overflow-hidden border-t"
         style={{
-          top: "0px",
+          top: `${topOffset}px`,
           height: `${sheetHeight}px`,
           backgroundColor: "var(--studio-surface)",
           borderColor: "var(--studio-border)",

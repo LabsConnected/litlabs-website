@@ -97,6 +97,30 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
     expect(screen.getByText("I'm ready to help.")).toBeTruthy();
   });
 
+  it("renders no avatar/logo image on assistant rows — the LITT text label is the only identifier (Larry, 2026-11-20)", () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "Hello", createdAt: Date.now() },
+      { role: "assistant", content: "I'm ready to help.", createdAt: Date.now() },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+      />,
+    );
+    const assistantRow = screen.getByTestId("assistant-message");
+    // The old robot logo (litt-avatar-64.webp) hanging over the row's
+    // left edge is gone entirely — no <img> anywhere in the row.
+    expect(assistantRow.querySelector("img")).toBeNull();
+    expect(assistantRow.innerHTML).not.toContain("litt-avatar");
+    // The text label still identifies the speaker.
+    expect(assistantRow.textContent).toContain("LiTT");
+    // The user's own avatar is untouched.
+    expect(screen.getByTestId("user-avatar")).toBeTruthy();
+  });
+
   it("renders completion summary with explicit mutation categories and recovery feedback", () => {
     render(
       <StudioTranscript
