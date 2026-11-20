@@ -4415,18 +4415,21 @@ function CommandStudioContent() {
                 mounted (display:none when inactive) so the PTY survives
                 tab switches and auto-connect keeps working.
                 Mobile (2026-11-19 card): the dock is the full-screen
-                tool surface — a fixed overlay below the slim top bar so
-                Back to chat stays reachable; in-flow it keeps its
-                desktop bottom-panel geometry. */}
+                tool surface — an overlay bounded by the studio body so
+                Back to chat in the slim top bar stays reachable; in-flow
+                it keeps its desktop bottom-panel geometry. */}
             <div
               className={
                 isMobileLitt && dockOpen
-                  ? "fixed inset-x-0 bottom-0 z-[10040] flex flex-col"
+                  ? // Absolute (not fixed) so the overlay is bounded by
+                    // data-studio-body — it starts BELOW the slim top bar
+                    // (and the global banner) instead of covering them.
+                    "absolute inset-0 z-[10040] flex flex-col"
                   : "contents"
               }
               style={
                 isMobileLitt && dockOpen
-                  ? { top: "var(--studio-header-h, 3.5rem)", backgroundColor: "var(--studio-surface)" }
+                  ? { backgroundColor: "var(--studio-surface)" }
                   : undefined
               }
               data-testid={isMobileLitt && dockOpen ? "mobile-dock-overlay" : undefined}
