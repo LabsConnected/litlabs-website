@@ -28,9 +28,6 @@ import {
 } from "@/lib/studio/completion-evidence";
 import {
   copyToClipboard,
-  downloadTextFile,
-  conversationToPlainText,
-  conversationToMarkdown,
   markdownToPlainText,
 } from "@/lib/studio/message-copy";
 
@@ -606,7 +603,6 @@ export default function StudioTranscript({
   onUndoCompletion,
   onContinueCompletion,
   onOpenPreview,
-  overflowDownloads = false,
   ptyUsable = false,
 }: {
   messages: ChatMessage[];
@@ -622,12 +618,6 @@ export default function StudioTranscript({
    *  board's Preview panel. Absent outside the board shell — the card
    *  then renders without the button rather than a dead control. */
   onOpenPreview?: () => void;
-  /**
-   * When true, the Download .txt / .md pills collapse into a single "⋯"
-   * overflow button that opens a small popover. Used on mobile to save
-   * vertical space. Desktop keeps the two pills.
-   */
-  overflowDownloads?: boolean;
   /**
    * True when the interactive PTY is usable right now. Sourced from the
    * canonical runtime truth (useProjectRuntime's terminal.usable) by the
@@ -650,7 +640,6 @@ export default function StudioTranscript({
   const [copiedKind, setCopiedKind] = useState<"text" | "markdown" | null>(null);
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
   const [replyTarget, setReplyTarget] = useState<ChatMessage | null>(null);
-  const [overflowOpen, setOverflowOpen] = useState(false);
   // Tap-revealed timestamp (Kimi wiring item 3): hover reveals via the
   // group class; touch has no hover, so a tap pins one message's time.
   const [revealedTimestampId, setRevealedTimestampId] = useState<string | null>(null);
@@ -762,18 +751,6 @@ export default function StudioTranscript({
     }
   }, []);
 
-  const handleDownloadTxt = useCallback(() => {
-    const content = conversationToPlainText(messages, agentMeta.displayName);
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-    downloadTextFile(`litt-conversation-${stamp}.txt`, content);
-  }, [messages, agentMeta.displayName]);
-
-  const handleDownloadMd = useCallback(() => {
-    const content = conversationToMarkdown(messages, agentMeta.displayName);
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-    downloadTextFile(`litt-conversation-${stamp}.md`, content, "text/markdown");
-  }, [messages, agentMeta.displayName]);
-
   const handlePin = useCallback((message: ChatMessage) => {
     const id = message.id ?? "";
     if (!id) return;
@@ -806,7 +783,6 @@ export default function StudioTranscript({
     window.dispatchEvent(new CustomEvent("studio:branch-from", { detail: { id: message.id, content: message.content } }));
   }, []);
 
-  const hasDownloadableMessages = messages.some((m) => m.content?.trim());
   const completedMutationCount = completion
     ? completion.changes.added + completion.changes.modified + completion.changes.deleted + completion.changes.renamed
     : 0;
@@ -1219,98 +1195,13 @@ export default function StudioTranscript({
             </div>
           </div>
         )}
-        {hasDownloadableMessages && !busy && (
-          overflowDownloads ? (
-            <div
-              className="relative flex items-center justify-center pt-2"
-              onKeyDown={(e) => { if (e.key === "Escape") setOverflowOpen(false); }}
-            >
-              {overflowOpen && (
-                <button
-                  type="button"
-                  className="fixed inset-0 z-10 cursor-default"
-                  style={{ background: "transparent" }}
-                  onClick={() => setOverflowOpen(false)}
-                  aria-label="Close conversation options"
-                  tabIndex={-1}
-                />
-              )}
-              <button
-                type="button"
-                onClick={() => setOverflowOpen((v) => !v)}
-                className="rounded-lg border px-2.5 py-1 text-[9px] font-bold transition hover:opacity-80"
-                style={{ borderColor: "var(--studio-border)", color: "var(--text-muted)" }}
-                aria-label="Conversation options"
-                aria-expanded={overflowOpen}
-                aria-haspopup="menu"
-                data-testid="transcript-overflow"
-              >
-                ⋯
-              </button>
-              {overflowOpen && (
-                <div
-                  role="menu"
-                  aria-label="Conversation options"
-                  className="absolute bottom-full z-20 mb-1 flex min-w-36 flex-col overflow-hidden rounded-2xl border"
-                  style={{
-                    backgroundColor: "var(--studio-elevated)",
-                    borderColor: "var(--studio-border-strong)",
-                  }}
-                >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => { setOverflowOpen(false); handleDownloadTxt(); }}
-                    className="px-3 py-2 text-left text-[11px] font-bold hover:bg-white/5"
-                    style={{ color: "var(--text-main)" }}
-                    aria-label="Download conversation as text"
-                    title="Download as .txt"
-                    data-testid="download-txt"
-                  >
-                    Download .txt
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => { setOverflowOpen(false); handleDownloadMd(); }}
-                    className="px-3 py-2 text-left text-[11px] font-bold hover:bg-white/5"
-                    style={{ color: "var(--text-main)" }}
-                    aria-label="Download conversation as Markdown"
-                    title="Download as .md"
-                    data-testid="download-md"
-                  >
-                    Download .md
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-          <div className="flex items-center justify-center gap-3 pt-2">
-            <button
-              type="button"
-              onClick={handleDownloadTxt}
-              className="rounded-lg border px-2.5 py-1 text-[9px] font-bold transition hover:opacity-80"
-              style={{ borderColor: "var(--studio-border)", color: "var(--text-muted)" }}
-              aria-label="Download conversation as text"
-              title="Download as .txt"
-              data-testid="download-txt"
-            >
-              Download .txt
-            </button>
-            <button
-              type="button"
-              onClick={handleDownloadMd}
-              className="rounded-lg border px-2.5 py-1 text-[9px] font-bold transition hover:opacity-80"
-              style={{ borderColor: "var(--studio-border)", color: "var(--text-muted)" }}
-              aria-label="Download conversation as Markdown"
-              title="Download as .md"
-              data-testid="download-md"
-            >
-              Download .md
-            </button>
-          </div>
-          )
-        )}
+        {/* REMOVED (chat-bar cleanup, Larry 2026-11-20): the floating
+            "⋯" conversation-options button (and its desktop Download
+            .txt / .md pills) that sat at the end of the transcript,
+            hovering over the chat on the phone. The chat view holds
+            nothing extra — conversation export stays reachable from
+            the chat header menu (Conversation menu → Export) and the
+            mobile Tools sheet (Export chat). */}
       </div>
       {/* "New messages" pill (Kimi wiring item 3): sticky to the
           scroll viewport's bottom while the user is reading history

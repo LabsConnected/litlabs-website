@@ -176,19 +176,13 @@ describe("LiTTMobileSheet (real component)", () => {
       expect(sheet.style.backgroundColor).not.toContain("0d0916");
     });
 
-    it("renders the build status slot in the sheet chrome when provided", () => {
-      renderSheet({
-        buildStatusSlot: <button type="button" data-testid="build-status-control">Build status</button>,
-      });
-      const slot = screen.getByTestId("litt-mobile-build-status-slot");
-      expect(slot).toContainElement(screen.getByTestId("build-status-control"));
-      // Chrome, not content: the slot is outside the sheet's content panels.
-      expect(screen.getByTestId("litt-mobile-sheet-content")).not.toContainElement(slot);
-    });
-
-    it("omits the build status row when no slot is provided", () => {
+    it("renders no build status strip in the sheet chrome (chat-bar cleanup, 2026-11-20)", () => {
+      // The "Idle LiTT · ACT" strip that sat under the project name is
+      // gone — the chat screen holds nothing extra. Run status lives in
+      // the Build status sheet, opened from the Tools sheet.
       renderSheet();
       expect(screen.queryByTestId("litt-mobile-build-status-slot")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("mobile-build-status")).not.toBeInTheDocument();
     });
 
     it("falls back to the LiTT label when no project name is provided", () => {
