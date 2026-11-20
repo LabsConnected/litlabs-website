@@ -493,17 +493,37 @@ test.describe("LiTT Studio mobile visual evidence", () => {
           const diag = await heroImage.evaluate((el: HTMLImageElement) => {
             const r = el.getBoundingClientRect();
             const cs = getComputedStyle(el);
+            const ancestors: Array<{ testid?: string; display: string; visibility: string }> = [];
+            let node: HTMLElement | null = el.parentElement;
+            while (node && ancestors.length < 12) {
+              const ncs = getComputedStyle(node);
+              ancestors.push({
+                testid: node.getAttribute("data-testid") ?? undefined,
+                display: ncs.display,
+                visibility: ncs.visibility,
+              });
+              node = node.parentElement;
+            }
             return {
               complete: el.complete,
               naturalWidth: el.naturalWidth,
               currentSrc: el.currentSrc,
+              src: el.getAttribute("src"),
               rect: { x: r.x, y: r.y, w: r.width, h: r.height },
               display: cs.display,
               visibility: cs.visibility,
+              ancestors,
               perfEntries: performance.getEntriesByName(el.currentSrc || el.src).length,
             };
           });
-          writeFileSync(`test-results/img-diag-${width}.json`, JSON.stringify(diag, null, 2));
+          const count = await page
+            .getByTestId("litt-mobile-sheet")
+            .locator('img[alt="Generated hero mockup"]')
+            .count();
+          writeFileSync(
+            `test-results/img-diag-${width}.json`,
+            JSON.stringify({ count, ...diag }, null, 2),
+          );
           return false;
         });
       expect(imgLoaded, "hero image should finish loading").toBe(true);
