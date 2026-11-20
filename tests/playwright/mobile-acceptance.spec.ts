@@ -533,7 +533,7 @@ test.describe("LiTT Studio mobile visual evidence", () => {
           .toBeGreaterThan(0);
       } catch (err) {
         const { writeFileSync } = await import("fs");
-        const diag = await heroImage.evaluate((el: HTMLImageElement) => {
+        const diag = await heroImage.evaluate(async (el: HTMLImageElement) => {
           const chain: string[] = [];
           let node: HTMLElement | null = el;
           while (node && chain.length < 12) {
@@ -543,9 +543,18 @@ test.describe("LiTT Studio mobile visual evidence", () => {
             );
             node = node.parentElement;
           }
+          const probe = new Image();
+          probe.src = el.src;
+          const fetchStatus = await fetch(el.src, { cache: "no-store" })
+            .then((r) => `${r.status} ${r.headers.get("content-type")}`)
+            .catch((e) => `fetch-error:${e instanceof Error ? e.message : e}`);
           return JSON.stringify(
             {
               src: el.currentSrc || el.src,
+              loading: el.loading,
+              decoding: el.decoding,
+              fetchStatus,
+              probeComplete: probe.complete,
               complete: el.complete,
               naturalWidth: el.naturalWidth,
               naturalHeight: el.naturalHeight,
