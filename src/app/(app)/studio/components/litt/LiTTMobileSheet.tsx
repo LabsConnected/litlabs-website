@@ -31,12 +31,6 @@ export interface LiTTMobileSheetProps {
   filesContent?: ReactNode;
   /** Optional approval UI rendered full-width at the top of the sheet, above the tabs */
   approvalSlot?: ReactNode;
-  /** Build status control (MobileBuildStatusBar) rendered in the sheet's
-   *  header chrome, under the tab row. Clean-open (Larry, 2026-11-13):
-   *  the opener lives here — in the sheet's own layout flow, on light
-   *  tokens — never as a dark bar over the chat transcript. When omitted,
-   *  no build status row renders. */
-  buildStatusSlot?: ReactNode;
   /** Project context for the slim second header row (mobile density redesign) */
   projectName?: string | null;
   branch?: string | null;
@@ -57,7 +51,6 @@ export default function LiTTMobileSheet({
   liveContent,
   filesContent,
   approvalSlot,
-  buildStatusSlot,
   projectName,
   branch,
   onOpenTools,
@@ -287,18 +280,10 @@ export default function LiTTMobileSheet({
           </div>
         )}
 
-        {buildStatusSlot && (
-          <div
-            className="shrink-0 border-b px-2 py-1.5"
-            style={{
-              borderColor: "var(--studio-border)",
-              backgroundColor: "var(--studio-surface)",
-            }}
-            data-testid="litt-mobile-build-status-slot"
-          >
-            {buildStatusSlot}
-          </div>
-        )}
+        {/* Chat-bar cleanup (Larry, 2026-11-20): no build-status strip
+            in the sheet header — the chat screen holds nothing extra.
+            Run status lives in the Build status sheet, opened from the
+            Tools sheet's "Build status" row. */}
 
         <div
           ref={contentRef}

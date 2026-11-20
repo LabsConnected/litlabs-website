@@ -2,6 +2,7 @@
 
 import { terminalHealthOf } from "@/lib/studio/terminal-health";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { Image as ImageIcon, LoaderCircle, Music, RefreshCw, Trash2, Video, X } from "lucide-react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
@@ -57,6 +58,7 @@ import MissionCards from "./MissionCards";
 import PersistentMusicPlayer from "./PersistentMusicPlayer";
 import MobileStudioTopBar from "./MobileStudioTopBar";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
+import UnifiedSelectorPopover, { type SelectorAnchorRect } from "./UnifiedSelector";
 import LiTEmptyState from "./LiTEmptyState";
 import StudioTranscript from "./StudioTranscript";
 import RunChangesPanel from "./RunChangesPanel";
@@ -68,7 +70,6 @@ import type { LiTTTab } from "./LiTTPanel";
 import ProjectDecisionPrompt from "./ProjectDecisionPrompt";
 import WorktabBar from "./WorktabBar";
 import LiTTMobileSheet from "./litt/LiTTMobileSheet";
-import MobileBuildStatusBar from "./litt/MobileBuildStatus";
 import MobileToolsSheet from "./litt/MobileToolsSheet";
 import MobileBottomSheet from "./sheets/MobileBottomSheet";
 import MobileDiagOverlay from "./MobileDiagOverlay";
@@ -277,10 +278,12 @@ function CommandStudioContent() {
     [runtimeFeedFreshness, runtimeState],
   );
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
+  const selectModel = useStudioModelStore((s) => s.selectModel);
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
   const executionMode = useStudioAgentStore((s) => s.executionMode);
   const setExecutionMode = useStudioAgentStore((s) => s.setExecutionMode);
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
+  const setActiveAgent = useStudioAgentStore((s) => s.setActiveAgent);
   // Truthful health for the selected model — LiTT-routed models resolve to
   // the whole-chain "Auto" roll-up (incl. the local Ollama tail), explicit
   // provider picks to that provider's own health.
@@ -1043,6 +1046,35 @@ function CommandStudioContent() {
   // render only while the mobile chat sheet is open (see mounts below).
   const [mobileBuildOpen, setMobileBuildOpen] = useState(false);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+
+  // Unified assistant + model selector (chat-bar cleanup, Larry
+  // 2026-11-20): the selector's trigger left the composer row — the
+  // composer row is text box, + (add), mic, and one clear send button.
+  // The selector opens on demand from the chat header menu (desktop
+  // Conversation menu → "Assistant & model") and the mobile Tools
+  // sheet; CommandStudio owns the open state and renders the popover
+  // portaled, anchored to the composer (on narrow viewports the
+  // popover renders as a bottom sheet and the anchor is unused).
+  const [selectorOpen, setSelectorOpen] = useState(false);
+  const [selectorRect, setSelectorRect] = useState<SelectorAnchorRect | null>(null);
+  const openSelector = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const composerEl = document.querySelector("[data-testid='studio-command-composer']");
+    const rect = composerEl?.getBoundingClientRect();
+    setSelectorRect(
+      rect
+        ? { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height }
+        : {
+            top: window.innerHeight - 96,
+            bottom: window.innerHeight,
+            left: 16,
+            right: window.innerWidth - 16,
+            width: Math.max(0, window.innerWidth - 32),
+            height: 96,
+          },
+    );
+    setSelectorOpen(true);
+  }, []);
 
   // Workspace-first focus: selecting a real work surface collapses the large
   // welcome/chat panel to the compact rail. Chat stays mounted and one click
@@ -3211,13 +3243,13 @@ function CommandStudioContent() {
           The Plan workspace tab's live summary, folded into collapsible
           cards: mission · checkpoints · next actions. All data comes from
           the same stores as the plan surface; no fabricated content.
-          Mobile (<1024px): the card stack is replaced by the single
-          MobileBuildStatusBar control; the full cards live in the Build
-          sheet. Clean-open (Larry, 2026-11-13): that control is NOT
-          rendered here anymore — the old dark bar pinned above the
-          transcript sat over the first message. It now renders in the
-          LiTTMobileSheet header chrome (buildStatusSlot below), light
-          and in the sheet's own layout flow. */}
+          Mobile (<1024px): the card stack is replaced by the Build
+          status sheet (MissionCards), opened from the Tools sheet's
+          "Build status" row. Chat-bar cleanup (Larry, 2026-11-20): the
+          old MobileBuildStatusBar strip ("Idle LiTT · ACT") that sat in
+          the LiTTMobileSheet header under the project name is REMOVED —
+          run status lives in the Jobs/Build-status surfaces only, never
+          as a permanent strip in the Chat view. */}
       <StudioWorkSurface
         messages={conversation.messages}
         conversationId={conversation.selectedConversationId ?? null}
@@ -3232,7 +3264,6 @@ function CommandStudioContent() {
         completion={completion}
         onDismissCompletion={() => setCompletion(null)}
         onUndoCompletion={handleUndoCompletion}
-        overflowDownloads={isMobileLitt}
         suppressEmptyState={
           isOnboardingComplete(userId, activeProjectId) || Boolean(composerValue.trim())
         }
@@ -4035,6 +4066,7 @@ function CommandStudioContent() {
           lastRunFailed={lastRunFailed}
           executionMode={executionMode}
           onExecutionModeChange={setExecutionMode}
+          onOpenSelectorAction={openSelector}
           // The crossbreed switch shows only where the choice exists:
           // the desktop Studio destination (mobile keeps its sheet/nav
           // model; other destinations have no layout to switch).
@@ -4632,9 +4664,6 @@ function CommandStudioContent() {
               chatContent={littChatContent}
               liveContent={littLiveContent}
               filesContent={projectFilesContent}
-              buildStatusSlot={(
-                <MobileBuildStatusBar open={mobileBuildOpen} onOpen={() => setMobileBuildOpen(true)} />
-              )}
               projectName={capabilities.projectName}
               branch={capabilities.activeBranch}
               onOpenTools={() => setMobileToolsOpen(true)}
@@ -4667,6 +4696,11 @@ function CommandStudioContent() {
             <MobileToolsSheet
               onOpenChat={openMobileChat}
               onNewChat={startNewMobileChat}
+              onExportChat={() => { conversation.exportConversation(); setMobileToolsOpen(false); }}
+              onOpenSelector={() => { setMobileToolsOpen(false); openSelector(); }}
+              onOpenBuildStatus={() => { setMobileToolsOpen(false); setMobileBuildOpen(true); }}
+              executionMode={executionMode}
+              onExecutionModeChange={setExecutionMode}
               onOpenCode={openMobileTool(() => { setDestination("studio"); setStudioMode("code"); })}
               onOpenCanvas={openMobileTool(() => { setDestination("studio"); setStudioMode("files"); })}
               onOpenPreview={openMobileTool(handlePreview)}
@@ -4687,6 +4721,22 @@ function CommandStudioContent() {
             />
           </MobileBottomSheet>
         )}
+        {/* Unified assistant + model selector (chat-bar cleanup,
+            2026-11-20): opened on demand from the chat header menu and
+            the mobile Tools sheet; anchored to the composer. */}
+        {selectorOpen && selectorRect &&
+          createPortal(
+            <UnifiedSelectorPopover
+              rect={selectorRect}
+              activeAgentId={conversation.activeAgentId ?? activeAgentId}
+              selectedModelId={selectedModel.id}
+              providerHealth={providerHealth}
+              onClose={() => setSelectorOpen(false)}
+              onAgentSelect={(agentId) => setActiveAgent(agentId)}
+              onModelSelect={selectModel}
+            />,
+            document.body,
+          )}
         {/* TEMPORARY: real-phone diagnostic HUD — opt-in only (?mobileDiag=1),
             remove once mobile Studio is confirmed working end-to-end on device. */}
         {isMobileLitt && isMobileDiagEnabled(searchParams) && <MobileDiagOverlay />}
@@ -5215,7 +5265,6 @@ function StudioWorkSurface({
   onUndoCompletion,
   onContinueCompletion,
   onOpenPreview,
-  overflowDownloads = false,
   ptyUsable = false,
   suppressEmptyState = false,
 }: {
@@ -5234,7 +5283,6 @@ function StudioWorkSurface({
   onUndoCompletion?: () => void;
   onContinueCompletion?: () => void;
   onOpenPreview?: () => void;
-  overflowDownloads?: boolean;
   /** Canonical runtime truth: is the interactive PTY usable right now. */
   ptyUsable?: boolean;
   suppressEmptyState?: boolean;
@@ -5296,7 +5344,6 @@ function StudioWorkSurface({
           onUndoCompletion={onUndoCompletion}
           onContinueCompletion={onContinueCompletion}
           onOpenPreview={onOpenPreview}
-          overflowDownloads={overflowDownloads}
           // Canonical runtime truth — the ONLY consumer path for PTY
           // usability outside useProjectRuntime itself.
           ptyUsable={ptyUsable}
