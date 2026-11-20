@@ -843,7 +843,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
           // produced one; otherwise surface the (sanitized) failure detail.
           finalText:
             r.modelFailureText ??
-            `The model could not complete the request: ${r.modelFailed}`,
+            "The AI model could not complete the request. Your project and completed work are preserved — try again shortly.",
           error: r.modelFailed,
           repairAttempts: r.buildFixResult?.repairAttempts ?? 0,
           runtimeRepairAttempts,
@@ -994,7 +994,11 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
         const qualityOk = agentResult.qualityLoop
           ? agentResult.qualityLoop.verdict.ok
           : true;
-        const mediaSuccess = mediaAnswered && qualityOk;
+        // A tool's own success flag is not proof the artifact persisted:
+        // a verified-unchanged workspace contradicts it, so the run must
+        // not settle as completed on self-report alone.
+        const mediaPersisted = agentResult.workspaceChange?.status !== "unchanged";
+        const mediaSuccess = mediaAnswered && qualityOk && mediaPersisted;
         emitStep(
           progress,
           steps,
@@ -1009,7 +1013,9 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
             agentResult.finalText ||
             (mediaSuccess
               ? "Media generation complete."
-              : "The media generation could not be completed."),
+              : mediaAnswered && !mediaPersisted
+                ? "The media tool reported success, but no file change was verified in the workspace — the result may not have been saved. Check Media and Files before retrying."
+                : "The media generation could not be completed."),
           ...(mediaSuccess ? {} : { error: "MEDIA_NOT_COMPLETED" }),
           repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
           runtimeRepairAttempts,
@@ -1182,7 +1188,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
         return baseResult({
           finalText:
             repairResult.modelFailureText ??
-            `The model could not complete the repair: ${repairResult.modelFailed}`,
+            "The AI model could not complete the repair. Your project and completed work are preserved — try again shortly.",
           error: repairResult.modelFailed,
           repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
           runtimeRepairAttempts,
@@ -1219,14 +1225,14 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
         return baseResult({
           finalText:
             `I need your approval to continue: ${pausedApproval.reason} ` +
-            `(Preview could not be started: ${error})`,
+            `(The preview could not be started — see Activity for details.)`,
           pendingApproval: pausedApproval,
           repairAttempts: agentResult.buildFixResult?.repairAttempts ?? 0,
           runtimeRepairAttempts,
         });
       }
       return baseResult({
-        finalText: `The preview could not be started after ${runtimeRepairAttempts} repair attempts. ${error}`,
+        finalText: `The preview could not be started after ${runtimeRepairAttempts} repair attempts. The technical detail is in the run's activity log.`,
         error,
         runtimeRepairAttempts,
       });
@@ -1390,7 +1396,9 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
 
     const message = err instanceof Error ? err.message : String(err);
     return baseResult({
-      finalText: `Launch failed: ${message}`,
+      finalText:
+        "The launch hit an unexpected error and could not finish. " +
+        "Your project and completed work are preserved — please try again.",
       error: message,
     });
   }
