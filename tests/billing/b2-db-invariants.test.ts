@@ -380,9 +380,10 @@ describe.skipIf(!hasDb)("B2 DB invariants — reserve/settle/release", () => {
     expect(res.rows[0].settled_amount).toBe(7);
 
     // Verify the ledger entry references the reservation.
-    // settle_bits appends ':settle' to the idempotency key for the ledger entry.
+    // settle_bits allocates debits per bucket: '<key>:settle' legacy rows or
+    // '<key>:settle:<bucket>' bucket-allocated rows.
     const ledger = await client.query(
-      `SELECT reference_type, reference_id FROM public.credit_ledger WHERE idempotency_key = '${settleKey}:settle'`
+      `SELECT reference_type, reference_id FROM public.credit_ledger WHERE idempotency_key LIKE '${settleKey}:settle%'`
     );
     expect(ledger.rows.length).toBeGreaterThan(0);
     expect(ledger.rows[0].reference_id).toBe(resId);

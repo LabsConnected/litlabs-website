@@ -76,13 +76,18 @@ export async function POST(
     return NextResponse.json({ error: "Failed to cancel run" }, { status: 500 });
   }
 
-  // Refund reserved credits via the credit ledger
+  // Refund charged credits via the credit ledger. refund_credits is
+  // idempotent per run, so retries cannot double-credit.
+  let refundStatus: "refunded" | "failed" | "none" = "none";
   if (run.credits_charged > 0) {
-    await supabaseAdmin.rpc("refund_credits", {
-      p_user_id: user.id,
+    const { error: refundError } = await supabaseAdmin.rpc("refund_credits", {
+      p_run_id: runId,
       p_credits: run.credits_charged,
-      p_reason: "Run cancelled by user",
     });
+    refundStatus = refundError ? "failed" : "refunded";
+    if (refundError) {
+      console.error(`[cancel-run] refund_credits failed for run ${runId}: ${refundError.message}`);
+    }
   }
 
   // Cancel any pending steps
@@ -98,7 +103,7 @@ export async function POST(
     event_type: "error",
     event_category: "info",
     description: `Run ${runId} cancelled by user`,
-    metadata: { runId, refundedCredits: run.credits_charged },
+    metadata: { runId, refundedCredits: refundStatus === "refunded" ? run.credits_charged : 0, refundStatus },
     related_id: runId,
     related_type: "agent_run",
   });
@@ -106,6 +111,7 @@ export async function POST(
   return NextResponse.json({
     runId,
     status: "cancelled",
-    refundedCredits: run.credits_charged,
+    refundedCredits: refundStatus === "refunded" ? run.credits_charged : 0,
+    refundStatus,
   });
 }
