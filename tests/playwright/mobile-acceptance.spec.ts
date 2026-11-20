@@ -343,6 +343,11 @@ test.describe("LiTT Studio mobile visual evidence", () => {
       updatedAt: now(),
     });
     await page.route("**/api/studio/**", async (route) => {
+      const { appendFileSync } = await import("fs");
+      appendFileSync(
+        "test-results/evidence-route.log",
+        `${new Date().toISOString()} ${route.request().method()} ${route.request().url()}\n`,
+      );
       const url = route.request().url();
       const method = route.request().method();
       if (method === "POST" && url.endsWith("/api/studio/conversations")) {
@@ -457,6 +462,15 @@ test.describe("LiTT Studio mobile visual evidence", () => {
   for (const width of [360, 390, 768]) {
     test(`evidence at ${width}px — long chat, collapsed answer, image, snag+retry, keyboard`, async ({ page }) => {
       await page.setViewportSize({ width, height: 844 });
+      const { appendFileSync } = await import("fs");
+      page.on("console", (msg) => {
+        if (msg.type() === "error" || msg.type() === "warning") {
+          appendFileSync("test-results/evidence-console.log", `${msg.type()}: ${msg.text()}\n`);
+        }
+      });
+      page.on("pageerror", (err) => {
+        appendFileSync("test-results/evidence-console.log", `pageerror: ${err.message}\n`);
+      });
       await mockMessageSequence(page);
 
       const response = await page.goto("/studio", { waitUntil: "domcontentloaded", timeout: 90_000 });
