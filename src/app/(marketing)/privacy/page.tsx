@@ -16,7 +16,7 @@ export default function PrivacyPage() {
       className="litt-legal min-h-screen pb-20 font-mono text-xs"
       style={{ backgroundColor: "var(--bg-color)", color: "var(--text-color)" }}
     >
-      <div className="max-w-3xl mx-auto px-4 py-12">
+      <div className="max-w-3xl mx-auto px-4 pb-12 pt-28">
         <div
           className="lit-box p-6 mb-8"
           style={{

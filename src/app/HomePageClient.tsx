@@ -609,7 +609,7 @@ function SectionHeading({
   );
 }
 
-export function CapabilityGrid() {
+export function CapabilityGrid({ showIntro = true }: { showIntro?: boolean }) {
   return (
     <section id="what-we-do" className="litt-section relative overflow-hidden">
       <div className="litt-grid-fade pointer-events-none absolute inset-0 opacity-40" />
@@ -636,11 +636,13 @@ export function CapabilityGrid() {
           </div>
         </div>
 
-        <SectionHeading
-          eyebrow="One workspace, the whole creative loop"
-          title={<>Everything between <span className="litt-gradient-text">idea and done.</span></>}
-          copy="LiTTree combines planning, engineering, creative production, project memory, and launch control—so the work stays connected from the first prompt to the final result."
-        />
+        {showIntro ? (
+          <SectionHeading
+            eyebrow="One workspace, the whole creative loop"
+            title={<>Everything between <span className="litt-gradient-text">idea and done.</span></>}
+            copy="LiTTree combines planning, engineering, creative production, project memory, and launch control—so the work stays connected from the first prompt to the final result."
+          />
+        ) : null}
 
         <div className="mt-12 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {CAPABILITIES.map((capability, index) => {
