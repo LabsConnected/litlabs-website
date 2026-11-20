@@ -107,7 +107,31 @@ export function collectFailureContributors(
 export function deliverableSucceeded(input: RunSettlementInput): boolean {
   const mutationLanded = input.toolCalls.some((c) => c.success && c.mutating);
   if (!mutationLanded) return false;
+  // A verified-unchanged workspace contradicts the success flags: the
+  // claimed mutation never persisted, so "complete" would be a false claim.
+  if (input.workspaceChange?.status === "unchanged") return false;
   return input.qualityVerdictOk === null || input.qualityVerdictOk === true;
+}
+
+/**
+ * Deterministic closing summary built from verified execution evidence.
+ * Used when the model's own summary call failed, so the user still gets
+ * the facts (what completed, which files the diff confirmed) without a
+ * provider error dump. Never asserts more than the evidence supports:
+ * file names only appear when the workspace diff actually reported them.
+ */
+function describeVerifiedWork(input: RunSettlementInput): string {
+  const mutations = input.toolCalls.filter((c) => c.success && c.mutating);
+  const files = input.workspaceChange?.files ?? [];
+  const fileClause =
+    files.length > 0
+      ? ` Verified changes: ${files.slice(0, 5).join(", ")}${files.length > 5 ? ` (+${files.length - 5} more)` : ""}.`
+      : "";
+  const persistedClause =
+    input.workspaceChange?.status === "changed"
+      ? " The workspace diff confirms the changes persisted."
+      : "";
+  return `${mutations.length} workspace change(s) completed successfully.${fileClause}${persistedClause}`;
 }
 
 export function settleRunOutcome(input: RunSettlementInput): RunSettlement {
@@ -122,8 +146,9 @@ export function settleRunOutcome(input: RunSettlementInput): RunSettlement {
       outcome: "completed",
       completedWithWarning:
         `The requested work is complete — the changes were made${gateClause}. ` +
+        `${describeVerifiedWork(input)} ` +
         `The only step that failed was the closing summary: the AI model call for the final reply ` +
-        `could not complete (${input.modelFailed}), so this run ends without a written summary. ` +
+        `could not complete, so this run ends without a written summary. ` +
         `The completed work is in the project and is not affected.`,
       failureContributors,
     };

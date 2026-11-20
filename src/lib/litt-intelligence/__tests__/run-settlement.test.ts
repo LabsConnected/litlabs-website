@@ -140,3 +140,34 @@ describe("settleRunOutcome — the upgrade is narrow", () => {
     ]);
   });
 });
+
+describe("settleRunOutcome — user-facing honesty (2026-11-19 incident)", () => {
+  it("never leaks the raw provider error into the closing text", () => {
+    const s = settleRunOutcome(PROOF_INPUT);
+    expect(s.completedWithWarning).toBeDefined();
+    expect(s.completedWithWarning).not.toContain("gemini-2.5-flash");
+    expect(s.completedWithWarning).not.toContain("http_429");
+    expect(s.completedWithWarning).not.toContain("openrouter");
+    // The technical detail is preserved for logs/debug via contributors.
+    expect(s.failureContributors).toContainEqual({ kind: "model_routes", detail: ROUTES_FAILURE });
+  });
+
+  it("includes a deterministic evidence summary instead of only the warning", () => {
+    const s = settleRunOutcome({
+      ...PROOF_INPUT,
+      workspaceChange: { status: "changed", files: ["public/assets/images/bike.png", "index.html"] },
+    });
+    expect(s.completedWithWarning).toMatch(/1 workspace change\(s\) completed successfully/);
+    expect(s.completedWithWarning).toContain("bike.png");
+    expect(s.completedWithWarning).toContain("workspace diff confirms");
+  });
+
+  it("a verified-unchanged workspace can NOT settle as complete", () => {
+    const s = settleRunOutcome({
+      ...PROOF_INPUT,
+      workspaceChange: { status: "unchanged" },
+    });
+    expect(s.outcome).toBe("failed");
+    expect(s.completedWithWarning).toBeUndefined();
+  });
+});
