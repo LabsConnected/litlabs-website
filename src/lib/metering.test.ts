@@ -26,6 +26,7 @@ function makeQueryChain(table: string) {
   });
   chain.select = vi.fn(() => chain);
   chain.eq = vi.fn(() => chain);
+  chain.or = vi.fn(() => chain);
   chain.single = vi.fn(async () => ({
     data: { usage_event_id: "evt-123" },
     error: null,

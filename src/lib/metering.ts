@@ -324,12 +324,16 @@ export async function emitUsageEvent(
       );
     }
 
-    // 3. Link the ledger debit, when this event backs a charge.
+    // 3. Link the ledger debit, when this event backs a charge. Bucket-
+    //    allocated debits store '<key>:<bucket>' children, so match the key
+    //    itself and any suffixed rows.
     if (input.ledgerIdempotencyKey) {
       const { error: stampErr } = await admin
         .from("credit_ledger")
         .update({ usage_event_id: usageEventId })
-        .eq("idempotency_key", input.ledgerIdempotencyKey);
+        .or(
+          `idempotency_key.eq.${input.ledgerIdempotencyKey},idempotency_key.like.${input.ledgerIdempotencyKey}:*`,
+        );
       if (stampErr) {
         console.error(
           `[metering] ledger stamp failed for ${input.ledgerIdempotencyKey}:`,

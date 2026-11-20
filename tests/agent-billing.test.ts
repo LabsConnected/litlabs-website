@@ -37,7 +37,7 @@ const baseCtx = {
 };
 
 // Helper: mock from("users").select("id").eq("clerk_id", ...).maybeSingle()
-function mockUserFound(userId = "user-uuid") {
+function mockUserFound(userId = "user-uuid", existingReservationId?: string) {
   mockFrom.mockImplementation((table: string) => {
     if (table === "billing_reconciliations") {
       return { insert: vi.fn().mockReturnValue({}) };
@@ -50,6 +50,14 @@ function mockUserFound(userId = "user-uuid") {
           }),
         }),
       };
+    }
+    if (table === "credit_reservations" && existingReservationId) {
+      return { select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({ maybeSingle: vi.fn().mockResolvedValue({
+          data: { id: existingReservationId, status: "reserved", reserved_amount: 10, settled_amount: 0, idempotency_key: baseCtx.idempotencyKey },
+          error: null,
+        }) }),
+      }) };
     }
     // agent_runs
     return {
@@ -253,7 +261,7 @@ describe("reserveCredits — canonical reserve_bits flow", () => {
   });
 
   it("handles idempotent retry (already_reserved)", async () => {
-    mockUserFound();
+    mockUserFound("user-uuid", "res-existing");
     mockRpc.mockResolvedValue({
       data: {
         success: true,
@@ -481,7 +489,7 @@ describe("PostgREST row-shape — RETURNS TABLE arrives as an array", () => {
   });
 
   it("reserveCredits honors already_reserved from array-shaped rpc data", async () => {
-    mockUserFound();
+    mockUserFound("user-uuid", "res-arr-2");
     mockRpc.mockResolvedValue({
       data: [{ success: false, reservation_id: "res-arr-2", reason: "already_reserved" }],
       error: null,
