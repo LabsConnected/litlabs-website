@@ -31,6 +31,22 @@
  * timeout pinned to the sandbox's session lifetime: the SDK defaults
  * each of them to 60 seconds, which would kill a shell one minute
  * after it opens. See {@link E2bSandboxProvider.connectTerminal}.
+ *
+ * Provisioning fix (2026-11-19): two disciplines keep a terminal
+ * restart from turning into a full cold re-provision. (1) get()
+ * RE-ADOPTS a sandbox this process has never seen: the registry is
+ * in-memory, so after a restart every persisted binding looked dead
+ * and boot reconcile deleted it, forcing a serialized create+mirror
+ * of the whole tree. A registry miss now connects by id and recovers
+ * the sandbox's identity from the metadata create() tagged it with,
+ * failing closed (null) whenever the identity cannot be proven.
+ * (2) Every awaited SDK call carries a per-call REQUEST DEADLINE
+ * ({@link withRequestDeadline}): the adapter previously set none,
+ * so one stalled call among the mirror's thousands of sequential
+ * files calls wedged the workspace lock chain and every queued
+ * ensure timed out behind it. A deadline rejection frees the lock;
+ * the underlying call is never cancelled and its late settle is
+ * consumed by the race.
  */
 
 import { randomBytes } from "crypto";
@@ -116,6 +132,73 @@ export interface E2bCommandResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+}
+
+// ─── Per-call request deadlines (provisioning fix) ──────────────────
+
+/** Default deadline for one files / metadata / lifecycle SDK call. */
+export const E2B_REQUEST_TIMEOUT_MS = 30_000;
+/**
+ * Default deadline for the structural SDK calls (client.create /
+ * client.connect): heavier than a files call, so they get the same
+ * bound the codebase already uses for E2B structural operations
+ * (HEALTH_PROBE_TIMEOUT_MS, PREVIEW_RECREATION_DESTROY_TIMEOUT_MS).
+ */
+export const E2B_CREATE_REQUEST_TIMEOUT_MS = 120_000;
+/**
+ * Grace added on top of a command's own timeoutMs for its request
+ * deadline: the command's budget governs the work; the deadline only
+ * has to outlive it, never cut it (the 900 s install path depends on
+ * this — a flat bound would kill installs mid-flight).
+ */
+export const E2B_COMMAND_DEADLINE_GRACE_MS = 30_000;
+
+/**
+ * A provider request that did not settle inside its deadline. The
+ * caller (a lock holder, an ensure chain) is freed to fail and the
+ * workspace lock moves on; the sandbox operation itself may still
+ * complete server-side, and later calls reconcile from the truth.
+ */
+export class E2bRequestTimeoutError extends Error {
+  readonly code = "E2B_REQUEST_TIMEOUT" as const;
+  readonly label: string;
+  readonly timeoutMs: number;
+  constructor(label: string, timeoutMs: number) {
+    super(`E2B request "${label}" did not settle within ${timeoutMs} ms`);
+    this.name = "E2bRequestTimeoutError";
+    this.label = label;
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
+ * Race `promise` against a request deadline. Same discipline as the
+ * preview path's settleWithin: the promise is never cancelled — a
+ * promise cannot be — it keeps running detached, and the race's own
+ * handlers consume its eventual settle, so a late rejection is never
+ * an unhandled rejection. The timer is unref'd: a pending deadline
+ * must not keep the process alive on its own.
+ */
+async function withRequestDeadline<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new E2bRequestTimeoutError(label, timeoutMs)),
+          timeoutMs,
+        );
+        if (typeof timer.unref === "function") timer.unref();
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 // ─── PTY adapter (terminal bridge) ──────────────────────────────────
@@ -206,6 +289,14 @@ export interface E2bSandboxHandle {
    * the provider falls back to its own tracked lifetime.
    */
   getExpiry?(): Promise<number | null>;
+  /**
+   * The metadata the sandbox was created with (the littree_*
+   * identity tags), or null when the handle cannot report it.
+   * Optional for the same reason as getExpiry — but re-adoption
+   * (provider get() after a process restart) REQUIRES it: a handle
+   * that cannot prove the sandbox's identity is never adopted.
+   */
+  getMetadata?(): Promise<Record<string, string> | null>;
   setTimeout(timeoutMs: number): Promise<void>;
   /** Pause preserves disk + memory state; used for stop(). */
   pause(): Promise<boolean>;
@@ -328,7 +419,10 @@ interface E2bSdkSandboxLike {
   kill(): Promise<boolean>;
   isRunning(): Promise<boolean>;
   /** Server-reported sandbox info; endAt is the real expiration. */
-  getInfo(): Promise<{ endAt: Date | string }>;
+  getInfo(): Promise<{
+    endAt: Date | string;
+    metadata?: Record<string, string>;
+  }>;
 }
 
 function mapSdkEntry(entry: E2bSdkEntryLike): E2bFileEntry {
@@ -434,6 +528,18 @@ function wrapSdkSandbox(sbx: E2bSdkSandboxLike): E2bSandboxHandle {
         return null;
       }
     },
+    async getMetadata() {
+      // The create-time metadata (the littree_* identity tags),
+      // from the same getInfo surface as getExpiry. Any failure —
+      // or an absent metadata field on an older server response —
+      // yields null, and re-adoption fails closed on it.
+      try {
+        const info = await sbx.getInfo();
+        return info.metadata ?? null;
+      } catch {
+        return null;
+      }
+    },
     setTimeout: (ms) => sbx.setTimeout(ms),
     pause: () => sbx.pause(),
     kill: () => sbx.kill(),
@@ -519,6 +625,16 @@ export interface E2bSandboxProviderOptions {
   client?: E2bClient;
   /** Clock injection (tests). */
   now?: () => number;
+  /**
+   * Per-call deadline for files / metadata / lifecycle requests
+   * (tests inject ~50 ms). Defaults to E2B_REQUEST_TIMEOUT_MS.
+   */
+  requestTimeoutMs?: number;
+  /**
+   * Per-call deadline for client.create / client.connect (tests
+   * inject ~50 ms). Defaults to E2B_CREATE_REQUEST_TIMEOUT_MS.
+   */
+  createRequestTimeoutMs?: number;
 }
 
 interface RegistryEntry {
@@ -586,6 +702,8 @@ export class E2bSandboxProvider implements SandboxProvider {
   private readonly client: E2bClient;
   private readonly templateId: string;
   private readonly now: () => number;
+  private readonly requestTimeoutMs: number;
+  private readonly createRequestTimeoutMs: number;
   private readonly registry = new Map<string, RegistryEntry>();
 
   constructor(options: E2bSandboxProviderOptions) {
@@ -595,6 +713,19 @@ export class E2bSandboxProvider implements SandboxProvider {
     this.client = options.client ?? createDefaultE2bClient(options.apiKey);
     this.templateId = options.templateId ?? DEFAULT_E2B_TEMPLATE_ID;
     this.now = options.now ?? Date.now;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? E2B_REQUEST_TIMEOUT_MS;
+    this.createRequestTimeoutMs =
+      options.createRequestTimeoutMs ?? E2B_CREATE_REQUEST_TIMEOUT_MS;
+  }
+
+  /** One files / metadata / lifecycle call, deadline-bounded. */
+  private deadline<T>(promise: Promise<T>, label: string): Promise<T> {
+    return withRequestDeadline(promise, this.requestTimeoutMs, label);
+  }
+
+  /** One structural call (client.create / client.connect), deadline-bounded. */
+  private createDeadline<T>(promise: Promise<T>, label: string): Promise<T> {
+    return withRequestDeadline(promise, this.createRequestTimeoutMs, label);
   }
 
   private isoNow(): string {
@@ -637,26 +768,29 @@ export class E2bSandboxProvider implements SandboxProvider {
     // the clock on activity, so an actively used sandbox never
     // reaches even this bound.
     const createTimeoutMs = clampSandboxTimeoutMs(limits.maxSessionMinutes * 60_000);
-    const handle = await this.client.create({
-      template: this.templateId,
-      timeoutMs: createTimeoutMs,
-      envs: createEnv,
-      metadata: {
-        littree_user_id: input.userId,
-        littree_project_id: input.projectId,
-        littree_workspace_id: input.workspaceId,
-      },
-      cpuCount: limits.cpuVcpus,
-      memoryMB: limits.memoryMB,
-      // Every sandbox this provider creates — canary and real
-      // workspaces alike — gets the metadata egress deny rule. This
-      // create() is the single funnel, so the rule cannot drift
-      // between what the canary certifies and what workspaces run.
-      // Public traffic is OFF for the same reason (design note §3.2):
-      // a sandbox URL is worthless without its traffic access token,
-      // which never leaves the terminal process.
-      network: { denyOut: [...SANDBOX_EGRESS_DENY_OUT], allowPublicTraffic: false },
-    });
+    const handle = await this.createDeadline(
+      this.client.create({
+        template: this.templateId,
+        timeoutMs: createTimeoutMs,
+        envs: createEnv,
+        metadata: {
+          littree_user_id: input.userId,
+          littree_project_id: input.projectId,
+          littree_workspace_id: input.workspaceId,
+        },
+        cpuCount: limits.cpuVcpus,
+        memoryMB: limits.memoryMB,
+        // Every sandbox this provider creates — canary and real
+        // workspaces alike — gets the metadata egress deny rule. This
+        // create() is the single funnel, so the rule cannot drift
+        // between what the canary certifies and what workspaces run.
+        // Public traffic is OFF for the same reason (design note §3.2):
+        // a sandbox URL is worthless without its traffic access token,
+        // which never leaves the terminal process.
+        network: { denyOut: [...SANDBOX_EGRESS_DENY_OUT], allowPublicTraffic: false },
+      }),
+      "create",
+    );
 
     const env = composeSandboxEnv({
       userId: input.userId,
@@ -693,7 +827,7 @@ export class E2bSandboxProvider implements SandboxProvider {
 
   async get(sandboxId: string): Promise<SandboxInstance | null> {
     const entry = this.registry.get(sandboxId);
-    if (!entry) return null;
+    if (!entry) return this.adopt(sandboxId);
     // Liveness is verified against E2B, not just the in-process
     // registry: a sandbox E2B killed (timeout, host failure) stays in
     // this Map forever otherwise, and every caller of get() — the
@@ -712,7 +846,7 @@ export class E2bSandboxProvider implements SandboxProvider {
     if (entry.instance.state === "running") {
       let running = false;
       try {
-        running = await entry.handle.isRunning();
+        running = await this.deadline(entry.handle.isRunning(), "isRunning");
       } catch {
         running = false;
       }
@@ -724,6 +858,94 @@ export class E2bSandboxProvider implements SandboxProvider {
     return { ...entry.instance };
   }
 
+  /**
+   * Re-adopt a sandbox this process has never seen (provisioning
+   * fix): the registry is in-memory, so after a terminal-process
+   * restart every persisted binding pointed at a sandbox get() had
+   * never heard of, boot reconcile deleted the binding as "not
+   * found", and the next ensure paid a full cold create+mirror —
+   * serialized behind the workspace lock against a settle bound
+   * sized for an uncontended run, so preview, terminal, and prepare
+   * ensures timed out in the queue (2026-11-19 provisioning
+   * diagnosis). Adoption connects by id and recovers the sandbox's
+   * identity from the metadata create() tagged it with.
+   *
+   * FAIL CLOSED, always: an id E2B refuses to connect, a handle
+   * that cannot report metadata, or metadata missing ANY of the
+   * three littree_* identity fields yields null — the caller takes
+   * its existing recreate path, exactly as if the sandbox were
+   * gone. A sandbox adopted with mismatched identity (possible only
+   * if the metadata itself lies) is still caught downstream: the
+   * executor re-verifies identity against the workspace descriptor
+   * on every ensure and destroys mismatches.
+   *
+   * Resource limits cannot be recovered from E2B (they were never
+   * more than records here — the template defines real sizing), so
+   * an adopted instance carries the contract defaults; the executor
+   * reads only identity and state from it. Created-at is likewise
+   * unrecoverable and reads as the adoption time.
+   */
+  private async adopt(sandboxId: string): Promise<SandboxInstance | null> {
+    let handle: E2bSandboxHandle;
+    try {
+      handle = await this.createDeadline(
+        this.client.connect(sandboxId),
+        "connect (adopt)",
+      );
+    } catch {
+      // Gone (or unreachable) at E2B: the designed null.
+      return null;
+    }
+    if (!handle.getMetadata) return null;
+    let metadata: Record<string, string> | null;
+    try {
+      metadata = await this.deadline(handle.getMetadata(), "getMetadata (adopt)");
+    } catch {
+      return null;
+    }
+    const userId = metadata?.littree_user_id;
+    const projectId = metadata?.littree_project_id;
+    const workspaceId = metadata?.littree_workspace_id;
+    if (!userId || !projectId || !workspaceId) return null;
+
+    let running = false;
+    try {
+      running = await this.deadline(handle.isRunning(), "isRunning (adopt)");
+    } catch {
+      return null;
+    }
+
+    const env = composeSandboxEnv({
+      userId,
+      projectId,
+      workspaceId,
+      sandboxId,
+    });
+    const nowIso = this.isoNow();
+    const instance: SandboxInstance = {
+      sandboxId,
+      workspaceId,
+      userId,
+      projectId,
+      state: running ? "running" : "stopped",
+      limits: { ...DEFAULT_SANDBOX_LIMITS },
+      createdAt: nowIso,
+      startedAt: running ? nowIso : null,
+      lastActiveAt: nowIso,
+      stoppedAt: running ? null : nowIso,
+      failureReason: null,
+      provider: this.name,
+      endpoint: null,
+    };
+    let expiresAtMs: number | null = null;
+    if (handle.getExpiry) {
+      expiresAtMs = await this.deadline(handle.getExpiry(), "getExpiry (adopt)")
+        .catch(() => null);
+    }
+    this.registry.set(sandboxId, { instance, handle, env, expiresAtMs });
+    return { ...instance };
+  }
+
   private entry(sandboxId: string): RegistryEntry {
     const entry = this.registry.get(sandboxId);
     if (!entry) throw new SandboxNotFoundError(sandboxId);
@@ -733,11 +955,14 @@ export class E2bSandboxProvider implements SandboxProvider {
   async start(sandboxId: string): Promise<void> {
     const entry = this.entry(sandboxId);
     // Sandbox.connect auto-resumes a paused sandbox.
-    entry.handle = await this.client.connect(sandboxId);
+    entry.handle = await this.createDeadline(
+      this.client.connect(sandboxId),
+      "connect (start)",
+    );
     const startTimeoutMs = clampSandboxTimeoutMs(
       entry.instance.limits.maxSessionMinutes * 60_000,
     );
-    await entry.handle.setTimeout(startTimeoutMs);
+    await this.deadline(entry.handle.setTimeout(startTimeoutMs), "setTimeout (start)");
     entry.expiresAtMs = this.now() + startTimeoutMs;
     entry.instance.state = "running";
     entry.instance.startedAt = this.isoNow();
@@ -749,7 +974,7 @@ export class E2bSandboxProvider implements SandboxProvider {
     const entry = this.entry(sandboxId);
     // pause() snapshots the sandbox (disk preserved) — the contract's
     // "stop preserves disk" semantics.
-    await entry.handle.pause();
+    await this.deadline(entry.handle.pause(), "pause");
     entry.instance.state = "stopped";
     entry.instance.stoppedAt = this.isoNow();
   }
@@ -758,7 +983,7 @@ export class E2bSandboxProvider implements SandboxProvider {
     const entry = this.registry.get(sandboxId);
     if (!entry) return; // destroying a gone sandbox is a no-op
     this.registry.delete(sandboxId);
-    await entry.handle.kill();
+    await this.deadline(entry.handle.kill(), "kill");
   }
 
   /**
@@ -796,17 +1021,23 @@ export class E2bSandboxProvider implements SandboxProvider {
     // execute()'s pattern: an actively used sandbox never reaches
     // its kill bound mid-session. Best effort — a truly dead sandbox
     // fails the create below with the SDK's own error.
-    await entry.handle
-      .setTimeout(clampSandboxTimeoutMs(entry.instance.limits.maxSessionMinutes * 60_000))
-      .catch(() => {});
-    const pty = await entry.handle.createPty({
-      cols: attach.cols,
-      rows: attach.rows,
-      onData: attach.onData,
-      timeoutMs: attach.timeoutMs,
-      envs: attach.envs,
-      cwd: "/workspace",
-    });
+    await this.deadline(
+      entry.handle.setTimeout(
+        clampSandboxTimeoutMs(entry.instance.limits.maxSessionMinutes * 60_000),
+      ),
+      "setTimeout (connectTerminal)",
+    ).catch(() => {});
+    const pty = await this.deadline(
+      entry.handle.createPty({
+        cols: attach.cols,
+        rows: attach.rows,
+        onData: attach.onData,
+        timeoutMs: attach.timeoutMs,
+        envs: attach.envs,
+        cwd: "/workspace",
+      }),
+      "createPty",
+    );
     return attach.finish(pty);
   }
 
@@ -839,13 +1070,19 @@ export class E2bSandboxProvider implements SandboxProvider {
       );
     }
     const attach = this.preparePtyAttach(entry, options);
-    await entry.handle
-      .setTimeout(clampSandboxTimeoutMs(entry.instance.limits.maxSessionMinutes * 60_000))
-      .catch(() => {});
-    const pty = await entry.handle.connectPty(pid, {
-      onData: attach.onData,
-      timeoutMs: attach.timeoutMs,
-    });
+    await this.deadline(
+      entry.handle.setTimeout(
+        clampSandboxTimeoutMs(entry.instance.limits.maxSessionMinutes * 60_000),
+      ),
+      "setTimeout (reattachTerminal)",
+    ).catch(() => {});
+    const pty = await this.deadline(
+      entry.handle.connectPty(pid, {
+        onData: attach.onData,
+        timeoutMs: attach.timeoutMs,
+      }),
+      "connectPty",
+    );
     return attach.finish(pty);
   }
 
@@ -1026,20 +1263,31 @@ export class E2bSandboxProvider implements SandboxProvider {
     const activityTimeoutMs = clampSandboxTimeoutMs(
       entry.instance.limits.maxSessionMinutes * 60_000,
     );
-    await entry.handle
-      .setTimeout(activityTimeoutMs)
+    await this.deadline(
+      entry.handle.setTimeout(activityTimeoutMs),
+      "setTimeout (execute)",
+    )
       .then(() => {
         entry.expiresAtMs = this.now() + activityTimeoutMs;
       })
       .catch(() => {});
     const startedMs = this.now();
-    const result = await entry.handle.runCommand(input.command, {
-      cwd: input.cwd ?? "/workspace",
-      timeoutMs: input.timeoutMs ?? 60_000,
-      stdin: input.stdin,
-      envs,
-      user: input.user,
-    });
+    // The request deadline outlives the command's own budget by the
+    // grace constant — it exists to unwedge a stalled transport,
+    // never to cut a long command (the 900 s install runs through
+    // here).
+    const commandTimeoutMs = input.timeoutMs ?? 60_000;
+    const result = await withRequestDeadline(
+      entry.handle.runCommand(input.command, {
+        cwd: input.cwd ?? "/workspace",
+        timeoutMs: input.timeoutMs ?? 60_000,
+        stdin: input.stdin,
+        envs,
+        user: input.user,
+      }),
+      commandTimeoutMs + E2B_COMMAND_DEADLINE_GRACE_MS,
+      "runCommand",
+    );
     entry.instance.lastActiveAt = this.isoNow();
     return {
       exitCode: result.exitCode,
@@ -1100,7 +1348,8 @@ export class E2bSandboxProvider implements SandboxProvider {
    */
   private async resolveExpiryMs(entry: RegistryEntry): Promise<number | null> {
     if (entry.handle.getExpiry) {
-      const reported = await entry.handle.getExpiry().catch(() => null);
+      const reported = await this.deadline(entry.handle.getExpiry(), "getExpiry")
+        .catch(() => null);
       if (reported != null) {
         entry.expiresAtMs = reported;
         return reported;
@@ -1113,7 +1362,7 @@ export class E2bSandboxProvider implements SandboxProvider {
   async extendTimeout(sandboxId: string, timeoutMs: number): Promise<void> {
     const entry = this.entry(sandboxId);
     const clampedMs = clampSandboxTimeoutMs(timeoutMs);
-    await entry.handle.setTimeout(clampedMs);
+    await this.deadline(entry.handle.setTimeout(clampedMs), "setTimeout (extendTimeout)");
     entry.expiresAtMs = this.now() + clampedMs;
     entry.instance.lastActiveAt = this.isoNow();
   }
@@ -1127,22 +1376,22 @@ export class E2bSandboxProvider implements SandboxProvider {
   readonly fileTransfer: SandboxFileTransfer = {
     readFile: async (sandboxId, path) => {
       const entry = this.entry(sandboxId);
-      return entry.handle.readFileBytes(path);
+      return this.deadline(entry.handle.readFileBytes(path), "readFileBytes");
     },
     writeFile: async (sandboxId, path, data) => {
       const entry = this.entry(sandboxId);
-      await entry.handle.writeFileBytes(path, data);
+      await this.deadline(entry.handle.writeFileBytes(path, data), "writeFileBytes");
     },
     listDir: async (sandboxId, path) => {
       const entry = this.entry(sandboxId);
-      const entries = await entry.handle.listDir(path);
+      const entries = await this.deadline(entry.handle.listDir(path), "listDir");
       return entries.map((e) => toTransferEntry(path, e));
     },
     listTree: async (sandboxId, path) => {
       const entry = this.entry(sandboxId);
       const out: SandboxFileEntry[] = [];
       const walk = async (dir: string): Promise<void> => {
-        const entries = await entry.handle.listDir(dir);
+        const entries = await this.deadline(entry.handle.listDir(dir), "listDir (tree)");
         for (const e of entries) {
           out.push(toTransferEntry(path, e));
           if (out.length > MAX_LIST_TREE_ENTRIES) {
@@ -1158,15 +1407,15 @@ export class E2bSandboxProvider implements SandboxProvider {
     },
     removePath: async (sandboxId, path) => {
       const entry = this.entry(sandboxId);
-      await entry.handle.removePath(path);
+      await this.deadline(entry.handle.removePath(path), "removePath");
     },
     makeDir: async (sandboxId, path) => {
       const entry = this.entry(sandboxId);
-      await entry.handle.makeDir(path);
+      await this.deadline(entry.handle.makeDir(path), "makeDir");
     },
     renamePath: async (sandboxId, oldPath, newPath) => {
       const entry = this.entry(sandboxId);
-      await entry.handle.renamePath(oldPath, newPath);
+      await this.deadline(entry.handle.renamePath(oldPath, newPath), "renamePath");
     },
   };
 

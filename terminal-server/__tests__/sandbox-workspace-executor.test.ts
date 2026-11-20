@@ -865,3 +865,157 @@ describe("terminal wrappers (terminal bridge §2.5)", () => {
     expect(provider.calls.create).toBe(0);
   });
 });
+
+/**
+ * Provisioning fix (2026-11-19): preview, terminal, and prepare
+ * ensures for one workspace join a single in-flight provision
+ * instead of serializing cold provisions behind the workspace lock;
+ * the lock-acquired signal fires only once the lock is actually
+ * held (the terminal manager arms its settle bound from it); and a
+ * lock wait over a second is logged.
+ */
+describe("ensure flights and the lock signal (provisioning fix)", () => {
+  it("concurrent preview and terminal ensures share one flight: exactly one create, no second ensure pass", async () => {
+    const provider = new FakeSandboxProvider();
+    const executor = executorFor(provider);
+    const ws = seedDescriptor("proj-flight-join");
+
+    // Hold the create open so both ensures are genuinely in flight
+    // at once, and count provider.get calls: a serialized second
+    // ensure would take ensureSandboxLocked's resume branch and
+    // probe the binding (one get); a joined flight never re-ensures.
+    let releaseCreate!: () => void;
+    const createGate = new Promise<void>((res) => { releaseCreate = res; });
+    let createEntered = false;
+    const originalCreate = provider.create.bind(provider);
+    provider.create = async (input) => {
+      createEntered = true;
+      await createGate;
+      return originalCreate(input);
+    };
+    let getCalls = 0;
+    const originalGet = provider.get.bind(provider);
+    provider.get = async (id) => {
+      getCalls += 1;
+      return originalGet(id);
+    };
+
+    const previewPromise = executor.ensureSandboxForPreview(ws);
+    const terminalPromise = executor.ensureSandboxForTerminal(ws);
+    const enteredDeadline = Date.now() + 15_000;
+    while (!createEntered && Date.now() < enteredDeadline) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(createEntered).toBe(true);
+    releaseCreate();
+
+    const [preview, terminal] = await Promise.all([previewPromise, terminalPromise]);
+    expect(preview?.sandboxId).toBeTruthy();
+    expect(terminal?.sandboxId).toBe(preview?.sandboxId);
+    expect(provider.calls.create).toBe(1);
+    expect(getCalls).toBe(0);
+  });
+
+  it("a terminal ensure joins the flight a prepare registered instead of ensuring again", async () => {
+    const provider = new FakeSandboxProvider();
+    const executor = executorFor(provider);
+    const ws = seedDescriptor("proj-flight-prepare");
+
+    // Block prepare's in-sandbox clone so prepare stays in flight
+    // (holding the lock) after its ensure has completed.
+    let releaseClone!: () => void;
+    const cloneGate = new Promise<void>((res) => { releaseClone = res; });
+    let cloneEntered = false;
+    const originalExecute = provider.execute.bind(provider);
+    provider.execute = async (id, input) => {
+      if (input.command.includes("clone")) {
+        cloneEntered = true;
+        await cloneGate;
+      }
+      return originalExecute(id, input);
+    };
+    let getCalls = 0;
+    const originalGet = provider.get.bind(provider);
+    provider.get = async (id) => {
+      getCalls += 1;
+      return originalGet(id);
+    };
+
+    const preparePromise = executor.prepareRepoWorkspace({
+      userId: OWNER,
+      projectId: "proj-flight-prepare",
+      installationId: 42,
+      owner: "acme",
+      repo: "site",
+      branch: "main",
+      workspaceRoot: volumeParent,
+      existingRoot: ws.root,
+      existingWorkspaceId: ws.workspaceId,
+      githubToken: TOKEN,
+    });
+    const enteredDeadline = Date.now() + 15_000;
+    while (!cloneEntered && Date.now() < enteredDeadline) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(cloneEntered).toBe(true);
+
+    // Prepare's ensure already landed the sandbox and registered
+    // the flight: the terminal ensure joins it (its own flush still
+    // queues behind prepare's lock turn) rather than ensuring again.
+    const terminalPromise = executor.ensureSandboxForTerminal(ws);
+    releaseClone();
+
+    const [prepared, ensured] = await Promise.all([preparePromise, terminalPromise]);
+    expect(prepared.sandbox?.sandboxId).toBeTruthy();
+    expect(ensured?.sandboxId).toBe(prepared.sandbox?.sandboxId);
+    expect(provider.calls.create).toBe(1);
+    expect(getCalls).toBe(0);
+  });
+
+  it("onLockAcquired fires only after a held lock is released, never while queued", async () => {
+    const provider = new FakeSandboxProvider();
+    const executor = executorFor(provider);
+    const ws = seedDescriptor("proj-lock-signal");
+
+    let hookFired = false;
+    let ensuredPromise!: Promise<{ sandboxId: string } | null>;
+    await executor.withWorkspaceLock(ws, async () => {
+      ensuredPromise = executor.ensureSandboxForTerminal(ws, {
+        onLockAcquired: () => {
+          hookFired = true;
+        },
+      });
+      // The ensure is queued behind THIS lock: its hook must stay
+      // unfired for as long as the lock is held by someone else.
+      await new Promise((r) => setTimeout(r, 25));
+      expect(hookFired).toBe(false);
+    });
+
+    const ensured = await ensuredPromise;
+    expect(hookFired).toBe(true);
+    expect(ensured?.sandboxId).toBeTruthy();
+  });
+
+  it("logs the lock wait when an operation queues behind a held lock for over a second", async () => {
+    const provider = new FakeSandboxProvider();
+    const logs: string[] = [];
+    const executor = new SandboxWorkspaceExecutor({
+      provider,
+      gate: gateFor(provider),
+      templateId: "fake-template",
+      log: (m) => logs.push(m),
+    });
+    const ws = seedDescriptor("proj-lock-wait-log");
+
+    let ensuredPromise!: Promise<{ sandboxId: string } | null>;
+    await executor.withWorkspaceLock(ws, async () => {
+      ensuredPromise = executor.ensureSandboxForTerminal(ws);
+      await new Promise((r) => setTimeout(r, 1_100));
+    });
+    await ensuredPromise;
+
+    const line = logs.find((l) => l.includes("lock workspace=ws-proj-lock-wait-log"));
+    expect(line).toBeDefined();
+    expect(line).toMatch(/acquired after \d{4,}ms wait/);
+  });
+});

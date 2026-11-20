@@ -31,6 +31,16 @@
  * never sync to the volume; platform-issued commands pin it through
  * per-command env because the composed base env still carries the
  * Phase 1 HOME default.
+ *
+ * Provisioning fix (2026-11-19): preview, terminal, and prepare
+ * ensures for one workspace JOIN a single in-flight provision (the
+ * ensure flight map) instead of serializing three cold provisions
+ * behind the workspace lock — after a terminal restart cleared the
+ * provider's bindings, that serialization is what timed every
+ * ensure out in the lock queue. Callers can also observe the moment
+ * the lock is actually acquired (EnsureSandboxOptions.onLockAcquired)
+ * so a settle bound can charge only the locked work, never the
+ * queue wait; the wait itself is logged when it exceeds a second.
  */
 
 import { existsSync, mkdirSync, readFileSync } from "fs";
@@ -169,6 +179,22 @@ export interface ForwardFileChange {
   newRelPath?: string;
 }
 
+export interface EnsureSandboxOptions {
+  /**
+   * Fired once, at the moment the workspace lock is held and the
+   * locked ensure begins — never while the ensure is still queued
+   * behind another operation. The terminal session manager arms its
+   * provisioning settle bound from this signal so lock-queue wait
+   * is not charged against the bound (provisioning fix: the 480 s
+   * bound wrapped the queue wait as well as the work, so a contended
+   * cold provision always "timed out" before it started). Only the
+   * ensure that STARTS a flight fires it; a caller that joins an
+   * in-flight ensure is bounded by the flight's own settle, which
+   * resolves its promise directly.
+   */
+  onLockAcquired?: () => void;
+}
+
 export class SandboxWorkspaceExecutor {
   private readonly provider: SandboxProvider;
   private readonly gate: SandboxExecGate;
@@ -179,6 +205,15 @@ export class SandboxWorkspaceExecutor {
   private readonly locks = new Map<string, Promise<void>>();
   /** workspaceId -> sandbox manifest as of the last completed sync. */
   private readonly manifests = new Map<string, SyncManifest>();
+  /**
+   * workspaceId -> the in-flight ensure (provisioning fix). Preview,
+   * terminal, and prepare ensures for the same workspace join the
+   * registered flight instead of each queueing a full cold provision
+   * behind the lock; the flight resolves with the sandbox id as soon
+   * as the locked ensure lands it (prepare registers its ensure
+   * before its clone work, which is not part of the flight).
+   */
+  private readonly ensureFlights = new Map<string, Promise<{ sandboxId: string }>>();
 
   constructor(deps: SandboxWorkspaceExecutorDeps) {
     this.provider = deps.provider;
@@ -198,6 +233,10 @@ export class SandboxWorkspaceExecutor {
   /**
    * Serialize fn on the workspace's chain. The chain itself never
    * rejects, so one failed operation cannot wedge the workspace.
+   * A wait of a second or more is logged (provisioning fix): the
+   * queue wait was previously invisible, so a contended ensure's
+   * settle timeout fired with no evidence that the work had never
+   * started.
    */
   private async withLock<T>(workspaceId: string, fn: () => Promise<T>): Promise<T> {
     const prior = this.locks.get(workspaceId) ?? Promise.resolve();
@@ -209,12 +248,122 @@ export class SandboxWorkspaceExecutor {
       workspaceId,
       prior.then(() => current),
     );
+    const waitStartedAt = Date.now();
     await prior;
+    const waitedMs = Date.now() - waitStartedAt;
+    if (waitedMs >= 1_000) {
+      this.log(
+        `[sandbox-lifecycle] lock workspace=${workspaceId} acquired after ${waitedMs}ms wait`,
+      );
+    }
     try {
       return await fn();
     } finally {
       release();
     }
+  }
+
+  // ─── Ensure flights (provisioning fix) ──────────────────────────
+
+  /**
+   * The locked ensure + loud pending-forward flush that preview and
+   * terminal ensures are made of (the starter's flight body).
+   */
+  private async ensureAndFlushLocked(
+    descriptor: WorkspaceDescriptor,
+  ): Promise<{ sandboxId: string }> {
+    const ws = this.fresh(descriptor);
+    const { sandboxId } = await this.ensureSandboxLocked(ws, { bootstrap: "mirror" });
+    await this.flushPendingForwardLocked(ws, sandboxId);
+    return { sandboxId };
+  }
+
+  /** A joiner's own flush: the same locked flush, on its own lock turn. */
+  private async flushPendingForward(
+    descriptor: WorkspaceDescriptor,
+    sandboxId: string,
+  ): Promise<void> {
+    await this.withLock(descriptor.workspaceId, async () => {
+      await this.flushPendingForwardLocked(this.fresh(descriptor), sandboxId);
+    });
+  }
+
+  /**
+   * Join the workspace's in-flight ensure or start it with `starter`.
+   * The starter's promise IS the flight: it is registered before it
+   * can settle, and forgotten (identity-checked) when it settles, so
+   * a settled flight is never deleted from under a newer one. A
+   * joiner awaits the same promise — a rejection fans out to every
+   * joiner — and then runs its own flush under a short lock
+   * acquisition: a no-op when the starter already flushed, and the
+   * real flush when the starter was prepare, whose flight carries
+   * the ensure but no flush.
+   */
+  private joinOrStartEnsureFlight(
+    descriptor: WorkspaceDescriptor,
+    starter: () => Promise<{ sandboxId: string }>,
+  ): Promise<{ sandboxId: string }> {
+    const workspaceId = descriptor.workspaceId;
+    const existing = this.ensureFlights.get(workspaceId);
+    if (existing) {
+      return existing.then(async ({ sandboxId }) => {
+        await this.flushPendingForward(descriptor, sandboxId);
+        return { sandboxId };
+      });
+    }
+    const flight = starter();
+    this.ensureFlights.set(workspaceId, flight);
+    const forget = () => {
+      if (this.ensureFlights.get(workspaceId) === flight) {
+        this.ensureFlights.delete(workspaceId);
+      }
+    };
+    flight.then(forget, forget);
+    return flight;
+  }
+
+  /**
+   * Register prepare's in-lock ensure as the workspace's flight (the
+   * caller is already inside withLock, so no second lock is taken).
+   * Returns the flight's controls, or null when a flight is already
+   * registered — prepare then simply runs its own ensure under the
+   * lock as before. The flight settles with the ensure alone:
+   * prepare's clone/sync work afterwards is NOT part of it, so a
+   * joining preview/terminal ensure is released as soon as the
+   * sandbox exists (its own flush still queues behind prepare's
+   * lock turn, preserving serialization). The flight's lifetime is
+   * prepare's whole lock turn — the caller forgets it (identity-
+   * checked) when that turn ends — because a joiner arriving
+   * mid-prepare must find it; forgetting at ensure-settle would
+   * leave only a microtask-wide join window.
+   */
+  private registerPrepareFlight(workspaceId: string): {
+    resolve: (value: { sandboxId: string }) => void;
+    reject: (err: unknown) => void;
+    forget: () => void;
+  } | null {
+    if (this.ensureFlights.has(workspaceId)) return null;
+    let resolve!: (value: { sandboxId: string }) => void;
+    let reject!: (err: unknown) => void;
+    const flight = new Promise<{ sandboxId: string }>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    this.ensureFlights.set(workspaceId, flight);
+    // Mark the flight handled even if nobody ever joins it: an
+    // ensure failure with no joiner must not surface as an
+    // unhandled rejection. Joiners still observe the rejection
+    // through their own .then on the same promise.
+    flight.then(
+      () => {},
+      () => {},
+    );
+    const forget = () => {
+      if (this.ensureFlights.get(workspaceId) === flight) {
+        this.ensureFlights.delete(workspaceId);
+      }
+    };
+    return { resolve, reject, forget };
   }
 
   // ─── Binding helpers ────────────────────────────────────────────
@@ -587,7 +736,19 @@ export class SandboxWorkspaceExecutor {
       : managedWorkspaceRoot(input.workspaceRoot, input.userId, input.projectId);
     const workspaceId = input.existingWorkspaceId || managedWorkspaceId(input.projectId);
 
-    return this.withLock(workspaceId, async () => {
+    // The flight this prepare registers for its ensure (provisioning
+    // fix): forgotten when the prepare's lock turn ends, so ensures
+    // arriving anywhere during the prepare can join it. (Boxed: the
+    // assignment happens inside the lock closure.)
+    const flightBox: {
+      current: {
+        resolve: (value: { sandboxId: string }) => void;
+        reject: (err: unknown) => void;
+        forget: () => void;
+      } | null;
+    } = { current: null };
+    try {
+      return await this.withLock(workspaceId, async () => {
       mkdirSync(root, { recursive: true });
       const volumeHasGit = existsSync(join(root, ".git"));
 
@@ -605,10 +766,23 @@ export class SandboxWorkspaceExecutor {
       descriptor.branch = input.branch;
       if (!existing) upsertWorkspaceDescriptor(descriptor);
 
-      // 3. Create or resume the sandbox + binding.
-      const { sandboxId } = await this.ensureSandboxLocked(descriptor, {
-        bootstrap: volumeHasGit ? "mirror" : "none",
-      });
+      // 3. Create or resume the sandbox + binding. The ensure is
+      // registered as the workspace's flight first (provisioning
+      // fix): a preview or terminal ensure that arrives while this
+      // prepare provisions joins it instead of queueing a second
+      // cold provision behind the lock.
+      const prepareFlight = this.registerPrepareFlight(workspaceId);
+      flightBox.current = prepareFlight;
+      let sandboxId: string;
+      try {
+        ({ sandboxId } = await this.ensureSandboxLocked(descriptor, {
+          bootstrap: volumeHasGit ? "mirror" : "none",
+        }));
+      } catch (err) {
+        prepareFlight?.reject(err);
+        throw err;
+      }
+      prepareFlight?.resolve({ sandboxId });
 
       try {
         let commitSha: string;
@@ -692,7 +866,10 @@ export class SandboxWorkspaceExecutor {
       }, 0);
 
       return descriptor;
-    });
+      });
+    } finally {
+      flightBox.current?.forget();
+    }
   }
 
   /**
@@ -861,19 +1038,23 @@ export class SandboxWorkspaceExecutor {
   /**
    * Ensure a live sandbox for a preview start: gate-checked, locked,
    * mirrored, pending-forward flushed (loudly). Returns null when
-   * the gate is closed so the caller keeps the host path.
+   * the gate is closed so the caller keeps the host path. Joins the
+   * workspace's in-flight ensure when one is already provisioning
+   * (provisioning fix) — the gate check above stays per-caller and
+   * runs before the join.
    */
   async ensureSandboxForPreview(
     descriptorIn: WorkspaceDescriptor,
+    options?: EnsureSandboxOptions,
   ): Promise<{ sandboxId: string } | null> {
     if (!this.isAvailableFor(descriptorIn.userId)) return null;
     const descriptor = this.fresh(descriptorIn);
-    return this.withLock(descriptor.workspaceId, async () => {
-      const ws = this.fresh(descriptor);
-      const { sandboxId } = await this.ensureSandboxLocked(ws, { bootstrap: "mirror" });
-      await this.flushPendingForwardLocked(ws, sandboxId);
-      return { sandboxId };
-    });
+    return this.joinOrStartEnsureFlight(descriptor, () =>
+      this.withLock(descriptor.workspaceId, async () => {
+        options?.onLockAcquired?.();
+        return this.ensureAndFlushLocked(descriptor);
+      }),
+    );
   }
 
   /** Run fn under the workspace lock (preview start/stop share it). */
@@ -893,19 +1074,23 @@ export class SandboxWorkspaceExecutor {
    * flush as a preview start — the shell must land in the ONE sandbox
    * exec and preview already use, with the volume's latest state in
    * it. Returns null when the gate is closed so the caller keeps the
-   * fail-closed refusal; never falls back to a host shell.
+   * fail-closed refusal; never falls back to a host shell. Joins the
+   * workspace's in-flight ensure when one is already provisioning
+   * (provisioning fix) — the gate check above stays per-caller and
+   * runs before the join.
    */
   async ensureSandboxForTerminal(
     descriptorIn: WorkspaceDescriptor,
+    options?: EnsureSandboxOptions,
   ): Promise<{ sandboxId: string } | null> {
     if (!this.isAvailableFor(descriptorIn.userId)) return null;
     const descriptor = this.fresh(descriptorIn);
-    return this.withLock(descriptor.workspaceId, async () => {
-      const ws = this.fresh(descriptor);
-      const { sandboxId } = await this.ensureSandboxLocked(ws, { bootstrap: "mirror" });
-      await this.flushPendingForwardLocked(ws, sandboxId);
-      return { sandboxId };
-    });
+    return this.joinOrStartEnsureFlight(descriptor, () =>
+      this.withLock(descriptor.workspaceId, async () => {
+        options?.onLockAcquired?.();
+        return this.ensureAndFlushLocked(descriptor);
+      }),
+    );
   }
 
   /**
