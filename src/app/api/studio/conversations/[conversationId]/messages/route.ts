@@ -988,6 +988,23 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   let reservationId: string | null = null;
   let actionRun: ActionRun | null = null;
   let actionContext: ActionExecutionContext | null = null;
+  const finishAgentBilling = async (billingResult: Parameters<typeof settleRun>[1]): Promise<void> => {
+    if (!agentRunId) return;
+    try {
+      const outcome = await settleRun(agentRunId, billingResult, reservedCredits, reservationId);
+      if (!outcome.ok) {
+        studioLog("message:billing_unconfirmed", {
+          billingRunId: agentRunId,
+          billingStatus: outcome.billingStatus,
+        });
+      }
+    } catch (error) {
+      studioLog("message:billing_settle_exception", {
+        billingRunId: agentRunId,
+        errorClass: error instanceof Error ? error.name : "unknown",
+      });
+    }
+  };
   if (runtimeAgent?.agentInstanceId && clerkId) {
     // Estimate the maximum cost: per-run fee + estimated tokens
     const estimatedTokens = Math.ceil(finalPrompt.length / 4) + 2048; // prompt + max output
@@ -1093,13 +1110,13 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       });
       await updateMessageStatus(assistantMessage.id, userId, "failed", safeMessage);
       if (agentRunId) {
-        settleRun(agentRunId, {
+        await finishAgentBilling({
           inputTokens: 0,
           outputTokens: 0,
           actualCredits: 0,
           status: "failed",
           error: "ACTION_RUNTIME_UNAVAILABLE",
-        }, reservedCredits, reservationId).catch(() => {});
+        });
       }
       return false;
     }
@@ -1729,7 +1746,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           const actualCredits = runtimeAgent
             ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
             : 0;
-          settleRun(agentRunId, {
+          await finishAgentBilling({
             inputTokens: Math.ceil(finalPrompt.length / 4),
             outputTokens: Math.ceil(assistantText.length / 4),
             actualCredits,
@@ -1738,8 +1755,6 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               : finalMessageStatus === "cancelled"
                 ? "cancelled"
                 : "failed",
-          }, reservedCredits, reservationId).catch(() => {
-            // Best-effort settlement — must not leak unhandled rejection
           });
         }
 
@@ -2001,13 +2016,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
             const actualCredits = runtimeAgent
               ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
               : 0;
-            settleRun(agentRunId, {
+            await finishAgentBilling({
               inputTokens: Math.ceil(finalPrompt.length / 4),
               outputTokens: Math.ceil(assistantText.length / 4),
               actualCredits,
               status: cancelledV1 ? "cancelled" : v1Failed ? "failed" : "completed",
-            }, reservedCredits, reservationId).catch(() => {
-              // Best-effort settlement — must not leak unhandled rejection
             });
           }
 
@@ -2161,14 +2174,12 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           }
         }
         if (agentRunId) {
-          settleRun(agentRunId, {
+          await finishAgentBilling({
             inputTokens: 0,
             outputTokens: 0,
             actualCredits: 0,
             status: cancelledBySignal ? "cancelled" : "failed",
             ...(cancelledBySignal ? {} : { error: errorMsg }),
-          }, reservedCredits, reservationId).catch(() => {
-            // Best-effort settlement on failure — must not leak unhandled rejection
           });
         }
         studioLog(cancelledBySignal ? "message:cancelled" : "message:failed", {
