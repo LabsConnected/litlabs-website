@@ -278,7 +278,11 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
         onRegenerateAction={onRegenerate}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    // Two Retry affordances exist (persistent mobile button + hover
+    // toolbar); both must target the failed turn.
+    for (const btn of screen.getAllByRole("button", { name: /retry/i })) {
+      fireEvent.click(btn);
+    }
     expect(onRegenerate).toHaveBeenCalledWith("assistant-failed");
   });
 
@@ -304,7 +308,9 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    for (const btn of screen.getAllByRole("button", { name: /retry/i })) {
+      fireEvent.click(btn);
+    }
     expect(onRegenerate).toHaveBeenCalledWith("assistant-1");
   });
 
@@ -450,20 +456,19 @@ describe("StudioTranscript — truthful work log", () => {
   });
 });
 
-describe("StudioTranscript — overflowDownloads (mobile density redesign)", () => {
+describe("StudioTranscript — no floating downloads in the chat view (chat-bar cleanup, 2026-11-20)", () => {
   const downloadable: ChatMessage[] = [
     { role: "user", content: "Hello", createdAt: Date.now() },
     { role: "assistant", content: "Hi there.", createdAt: Date.now() },
   ];
 
-  function renderTranscript(overflowDownloads?: boolean) {
+  function renderTranscript() {
     return render(
       <StudioTranscript
         messages={downloadable}
         busy={false}
         activeAgentId={"litt" as AgentId}
         onRouteToolAction={vi.fn()}
-        overflowDownloads={overflowDownloads}
       />,
     );
   }
@@ -472,46 +477,16 @@ describe("StudioTranscript — overflowDownloads (mobile density redesign)", () 
     downloadTextFileMock.mockClear();
   });
 
-  it("collapses the download pills into a single overflow button when enabled", () => {
-    renderTranscript(true);
-    const overflow = screen.getByTestId("transcript-overflow");
-    expect(overflow).toBeInTheDocument();
-    expect(overflow).toHaveAttribute("aria-expanded", "false");
-    // The pills stay hidden until the overflow menu opens.
-    expect(screen.queryByTestId("download-txt")).toBeNull();
-    expect(screen.queryByTestId("download-md")).toBeNull();
-  });
-
-  it("opens the overflow menu with both downloads and wires the original handlers", () => {
-    renderTranscript(true);
-    fireEvent.click(screen.getByTestId("transcript-overflow"));
-
-    expect(screen.getByTestId("transcript-overflow")).toHaveAttribute("aria-expanded", "true");
-    const txt = screen.getByTestId("download-txt");
-    const md = screen.getByTestId("download-md");
-    expect(txt).toBeInTheDocument();
-    expect(md).toBeInTheDocument();
-
-    fireEvent.click(txt);
-    expect(downloadTextFileMock).toHaveBeenCalledTimes(1);
-    expect(downloadTextFileMock.mock.calls[0][0]).toMatch(/\.txt$/);
-    // Choosing an option closes the menu.
-    expect(screen.queryByTestId("download-txt")).toBeNull();
-    expect(screen.queryByTestId("download-md")).toBeNull();
-  });
-
-  it("keeps the two download pills directly visible on desktop (default)", () => {
+  it("renders no floating ⋯ button and no download pills over the chat", () => {
     renderTranscript();
+    // Larry's complaint: the circle "…" hovering over the chat is gone,
+    // and so are the desktop Download .txt / .md pills — the chat view
+    // holds nothing extra. Export lives in the chat header menu and the
+    // mobile Tools sheet.
     expect(screen.queryByTestId("transcript-overflow")).toBeNull();
-
-    const txt = screen.getByTestId("download-txt");
-    const md = screen.getByTestId("download-md");
-    expect(txt).toBeInTheDocument();
-    expect(md).toBeInTheDocument();
-
-    fireEvent.click(md);
-    expect(downloadTextFileMock).toHaveBeenCalledTimes(1);
-    expect(downloadTextFileMock.mock.calls[0][0]).toMatch(/\.md$/);
+    expect(screen.queryByTestId("download-txt")).toBeNull();
+    expect(screen.queryByTestId("download-md")).toBeNull();
+    expect(downloadTextFileMock).not.toHaveBeenCalled();
   });
 });
 
@@ -794,7 +769,7 @@ describe("StudioTranscript — chronological rendering", () => {
     const exploringIdx = rendered.findIndex((t) =>
       t.includes("Exploring the project structure"),
     );
-    const failedIdx = rendered.findIndex((t) => t.includes("The run failed"));
+    const failedIdx = rendered.findIndex((t) => t.includes("We hit a snag, try again"));
     expect(exploringIdx).toBeGreaterThanOrEqual(0);
     expect(failedIdx).toBeGreaterThan(exploringIdx);
   });
@@ -849,5 +824,72 @@ describe("StudioTranscript — Signature chat surfaces (chat beauty, 2026-11-11)
 
     const prose = screen.getByText("I'm ready to help.").closest(".prose") as HTMLElement;
     expect(prose.className).not.toContain("prose-invert");
+  });
+});
+
+describe("StudioTranscript — mobile Show more", () => {
+  const LONG = "A".repeat(700);
+
+  it("shows a Show more control for assistant messages over 600 chars", () => {
+    const messages: ChatMessage[] = [
+      { id: "a1", role: "assistant", content: LONG, status: "completed", createdAt: Date.now() },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /show more/i })).toBeInTheDocument();
+  });
+
+  it("does not show Show more for short assistant messages", () => {
+    const messages: ChatMessage[] = [
+      { id: "a1", role: "assistant", content: "Short reply.", status: "completed", createdAt: Date.now() },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /show more/i })).toBeNull();
+  });
+
+  it("toggles to Show less and back", () => {
+    const messages: ChatMessage[] = [
+      { id: "a1", role: "assistant", content: LONG, status: "completed", createdAt: Date.now() },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /show more/i }));
+    expect(screen.getByRole("button", { name: /show less/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /show less/i }));
+    expect(screen.getByRole("button", { name: /show more/i })).toBeInTheDocument();
+  });
+
+  it("never collapses a streaming assistant message", () => {
+    const messages: ChatMessage[] = [
+      { id: "a1", role: "assistant", content: LONG, status: "streaming", createdAt: Date.now() },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={true}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /show more/i })).toBeNull();
   });
 });

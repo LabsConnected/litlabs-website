@@ -51,6 +51,9 @@ export interface StudioDockProps {
   onToggle: () => void;
   /** Controlled height in px (default 320) */
   height?: number;
+  /** Fill the parent box instead of sizing to `height` — used by the
+      mobile full-screen tool surface (2026-11-19 layout card). */
+  fill?: boolean;
   onHeightChange: (h: number) => void;
   activityContent: ReactNode;
   /** Keep mounted always (PTY stays alive) — rendered with display:none when inactive */
@@ -93,6 +96,7 @@ export default function StudioDock({
   onClose,
   onToggle,
   height = DOCK_DEFAULT,
+  fill = false,
   onHeightChange,
   activityContent,
   terminalContent,
@@ -235,9 +239,11 @@ export default function StudioDock({
   const effectiveHeight =
     view === "collapsed"
       ? COLLAPSED_HEIGHT
-      : view === "maximized"
-        ? "calc(100dvh - 120px)"
-        : height;
+      : fill
+        ? "100%"
+        : view === "maximized"
+          ? "calc(100dvh - 120px)"
+          : height;
 
   const contents: Record<StudioDockTab, ReactNode> = {
     activity: activityContent,
@@ -280,8 +286,9 @@ export default function StudioDock({
       onPointerUp={onHandlePointerUp}
       onPointerCancel={onHandlePointerUp}
     >
-      {/* Resize handle — only visible when expanded */}
-      {view !== "collapsed" && (
+      {/* Resize handle — only visible when expanded and not fill-mode
+          (the mobile full-screen surface has nothing to resize). */}
+      {!fill && view !== "collapsed" && (
         <div
           data-resize-grip="true"
           className="group flex shrink-0 cursor-row-resize items-center justify-center py-0.5 transition hover:bg-black/5"

@@ -305,6 +305,7 @@ vi.mock("../hooks/useCanonicalConversation", () => ({
     reportSendError: convState.reportSendError,
     conversations: [],
     loading: false,
+    createConversation: vi.fn(async () => {}),
   }),
 }));
 
@@ -412,7 +413,7 @@ async function renderMobileCommandStudio() {
   const view = render(<CommandStudio />);
 
   await waitFor(() => {
-    if (!screen.queryByTestId("litt-mobile-trigger") && !screen.queryByRole("navigation", { name: "Studio navigation" })) {
+    if (!screen.queryByTestId("mobile-studio-topbar") && !screen.queryByTestId("litt-mobile-sheet")) {
       throw new Error("Mobile Studio surface has not mounted");
     }
   });
@@ -420,17 +421,14 @@ async function renderMobileCommandStudio() {
   return { user, ...view };
 }
 
-function mobileNav() {
-  return screen.getByRole("navigation", { name: "Studio navigation" });
-}
-
-function centerWorkspace() {
-  return screen.getByTestId("studio-center-workspace");
-}
-
-describe("MobileCommandNav — shared work surfaces", () => {
+// Chat-first mobile layout (2026-11-19 card): the phone shows a slim top
+// bar (project name + New Chat + menu), the chat sheet as home, and every
+// other surface behind the menu with a Back to chat — no bottom dock,
+// no floating switcher/FAB.
+describe("MobileStudioTopBar — chat-first surfaces", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
     sendMock.mockResolvedValue({ accepted: true });
     capState.projectId = "project-1";
     capState.projectName = "Test Project";
@@ -452,42 +450,58 @@ describe("MobileCommandNav — shared work surfaces", () => {
     });
   });
 
-  it("renders work surfaces instead of desktop destinations", async () => {
+  it("renders the slim top bar with project name, New Chat, and one menu — no bottom dock", async () => {
     await renderMobileCommandStudio();
-    const nav = within(mobileNav());
-    for (const label of ["Chat", "Static View", "Files", "More"]) {
-      expect(nav.getByLabelText(label), `${label} surface should be present`).toBeTruthy();
-    }
-    // Activity is not a bottom-nav entry — it lives inside More (the
-    // Tools sheet) and in its own board panel (Finish Spec, 2026-11-14).
-    expect(nav.queryByLabelText("Activity")).toBeNull();
-    expect(nav.queryByLabelText("Agents")).toBeNull();
-    expect(nav.queryByLabelText("Missions")).toBeNull();
+    const bar = screen.getByTestId("mobile-studio-topbar");
+    expect(within(bar).getByTestId("mobile-new-chat")).toBeTruthy();
+    expect(within(bar).getByTestId("mobile-studio-menu")).toBeTruthy();
+    // The retired bottom dock and floating affordances must not render.
+    expect(screen.queryByRole("navigation", { name: "Studio navigation" })).toBeNull();
+    expect(screen.queryByTestId("mobile-surface-switcher")).toBeNull();
+    expect(screen.queryByTestId("litt-mobile-trigger")).toBeNull();
   });
 
-  it("keeps the real preview as the primary workspace surface", async () => {
+  it("opens chat as the home sheet by default", async () => {
     await renderMobileCommandStudio();
     await waitFor(() => {
-      expect(centerWorkspace().querySelector("[data-testid='studio-preview-panel']")).toBeTruthy();
+      expect(screen.getByTestId("litt-mobile-sheet")).toBeTruthy();
     });
+    expect(screen.getByTestId("litt-mobile-chat-panel")).toHaveAttribute("data-active", "true");
+    // Chat home shows the slim top bar inside the sheet — no tab rows.
+    expect(screen.getByTestId("litt-mobile-topbar")).toBeTruthy();
+    expect(screen.queryByTestId("litt-mobile-tab-live")).toBeNull();
   });
 
-  it("marks the active work surface with aria-current", async () => {
+  it("menu opens the tools sheet with Back to chat and surface entries", async () => {
     const { user } = await renderMobileCommandStudio();
-    const preview = within(mobileNav()).getByLabelText("Static View");
-    expect(preview.getAttribute("aria-current")).toBe("page");
-    await user.click(within(mobileNav()).getByLabelText("Files"));
+    await user.click(screen.getByTestId("mobile-studio-menu"));
     await waitFor(() => {
-      expect(within(mobileNav()).getByLabelText("Files").getAttribute("aria-current")).toBe("page");
+      expect(screen.getByTestId("mobile-tools-dialog")).toBeTruthy();
     });
+    const sheet = screen.getByTestId("mobile-tools-sheet");
+    expect(within(sheet).getByTestId("mobile-tool-chat")).toBeTruthy();
+    expect(within(sheet).getByTestId("mobile-tool-preview")).toBeTruthy();
+    expect(within(sheet).getByTestId("mobile-tool-code")).toBeTruthy();
+    expect(within(sheet).getByTestId("mobile-tool-terminal")).toBeTruthy();
   });
 
-  it("opens Chat through the LiTT sheet and Files through the context drawer", async () => {
+  it("a tool surface closes chat and Back to chat returns", async () => {
     const { user } = await renderMobileCommandStudio();
-    await user.click(within(mobileNav()).getByLabelText("Chat"));
-    await waitFor(() => expect(screen.getByTestId("litt-mobile-sheet")).toBeTruthy());
-    await user.click(within(mobileNav()).getByLabelText("Files"));
-    await waitFor(() => expect(screen.getByTestId("context-files-panel")).toBeTruthy());
+    await waitFor(() => {
+      expect(screen.getByTestId("litt-mobile-sheet-mount")).not.toHaveStyle({ display: "none" });
+    });
+    await user.click(screen.getByTestId("mobile-studio-menu"));
+    await waitFor(() => expect(screen.getByTestId("mobile-tools-dialog")).toBeTruthy());
+    await user.click(within(screen.getByTestId("mobile-tools-sheet")).getByTestId("mobile-tool-preview"));
+    await waitFor(() => {
+      expect(screen.getByTestId("litt-mobile-sheet-mount")).toHaveStyle({ display: "none" });
+    });
+    // Tool surface owns the phone: top bar leads with Back to chat.
+    const back = await screen.findByTestId("mobile-back-to-chat");
+    await user.click(back);
+    await waitFor(() => {
+      expect(screen.getByTestId("litt-mobile-sheet-mount")).not.toHaveStyle({ display: "none" });
+    });
   });
 });
 

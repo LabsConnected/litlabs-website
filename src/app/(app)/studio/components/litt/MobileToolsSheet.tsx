@@ -14,7 +14,7 @@
  */
 
 import type { ComponentType, CSSProperties } from "react";
-import { Activity, Film, FolderOpen, Hammer, Image as ImageIcon, Layout, Mic, Music, Play, Plug, Settings as SettingsIcon, Terminal, Plus, X } from "lucide-react";
+import { Activity, Bot, Download, Film, FolderOpen, Gauge, Hammer, Image as ImageIcon, Layout, MessageSquare, Mic, Music, Play, Plug, Settings as SettingsIcon, Terminal, Plus, X } from "lucide-react";
 import type { StudioTask } from "@/lib/studio/task-types";
 
 const ACCENT = "var(--color-accent)";
@@ -22,6 +22,25 @@ const CARD_BORDER = "rgba(255,255,255,0.07)";
 const TOOLS_BG = "color-mix(in srgb, var(--color-accent) 7%, transparent)";
 
 export interface MobileToolsSheetProps {
+  /** Returns to the chat surface — the phone menu's way back (layout card). */
+  onOpenChat?: () => void;
+  /** Starts a fresh conversation from inside the menu. */
+  onNewChat?: () => void;
+  /** Exports the current conversation (chat-bar cleanup, 2026-11-20:
+   *  the transcript's floating "⋯" download button is gone; export
+   *  lives here and in the desktop Conversation menu). */
+  onExportChat?: () => void;
+  /** Opens the unified assistant + model selector (chat-bar cleanup,
+   *  2026-11-20: its trigger left the composer row; the selector opens
+   *  on demand from this menu). */
+  onOpenSelector?: () => void;
+  /** Opens the Build status sheet (MissionCards) — the run-status home
+   *  on mobile now that the status strip is out of the chat header. */
+  onOpenBuildStatus?: () => void;
+  /** Execution mode (PLAN/ACT/AUTO) — displayed and switchable here,
+   *  in the chat's menu, instead of a permanent strip in the chat. */
+  executionMode?: "plan" | "act" | "auto";
+  onExecutionModeChange?: (mode: "plan" | "act" | "auto") => void;
   onOpenCode: () => void;
   onOpenCanvas: () => void;
   onOpenPreview: () => void;
@@ -243,6 +262,103 @@ function CreateTileButton({
 export default function MobileToolsSheet(props: MobileToolsSheetProps) {
   return (
     <div data-testid="mobile-tools-sheet" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {(props.onOpenChat || props.onNewChat || props.onExportChat) && (
+        <>
+          <SectionHeader>Chat</SectionHeader>
+          {props.onOpenChat && (
+            <ToolRowButton
+              id="chat"
+              label="Back to chat"
+              description="Return to the conversation"
+              icon={MessageSquare}
+              onClick={props.onOpenChat}
+            />
+          )}
+          {props.onNewChat && (
+            <ToolRowButton
+              id="new-chat"
+              label="New chat"
+              description="Start a fresh conversation"
+              icon={Plus}
+              onClick={props.onNewChat}
+            />
+          )}
+          {props.onExportChat && (
+            <ToolRowButton
+              id="export-chat"
+              label="Export chat"
+              description="Download this conversation"
+              icon={Download}
+              onClick={props.onExportChat}
+            />
+          )}
+        </>
+      )}
+      {(props.onOpenSelector || (props.executionMode && props.onExecutionModeChange)) && (
+        <>
+          <SectionHeader>Assistant</SectionHeader>
+          {props.onOpenSelector && (
+            <ToolRowButton
+              id="selector"
+              label="Assistant & model"
+              description="Choose the assistant and model"
+              icon={Bot}
+              onClick={props.onOpenSelector}
+            />
+          )}
+          {props.executionMode && props.onExecutionModeChange && (
+            <div
+              role="group"
+              aria-label="Execution mode"
+              data-testid="mobile-execution-mode"
+              style={{
+                display: "flex",
+                gap: 6,
+                padding: 6,
+                borderRadius: 12,
+                border: `1px solid ${CARD_BORDER}`,
+                backgroundColor: TOOLS_BG,
+              }}
+            >
+              {(
+                [
+                  { id: "plan", label: "PLAN" },
+                  { id: "act", label: "ACT" },
+                  { id: "auto", label: "AUTO" },
+                ] as const
+              ).map((m) => {
+                const isActive = m.id === props.executionMode;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => props.onExecutionModeChange?.(m.id)}
+                    aria-pressed={isActive}
+                    data-testid={`mobile-execution-mode-${m.id}`}
+                    style={{
+                      flex: 1,
+                      minHeight: 44,
+                      borderRadius: 8,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      color: isActive ? "var(--text-main)" : "var(--text-muted)",
+                      backgroundColor: isActive
+                        ? "color-mix(in srgb, var(--color-accent) 14%, transparent)"
+                        : "transparent",
+                      boxShadow: isActive
+                        ? "inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent)"
+                        : "none",
+                    }}
+                  >
+                    {m.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
       {props.tasks && props.tasks.length > 0 && (
         <>
           <SectionHeader>Tasks</SectionHeader>
@@ -311,6 +427,15 @@ export default function MobileToolsSheet(props: MobileToolsSheetProps) {
         ))}
       </div>
       <SectionHeader>Build</SectionHeader>
+      {props.onOpenBuildStatus && (
+        <ToolRowButton
+          id="build-status"
+          label="Build status"
+          description="Mission, checkpoints, and run status"
+          icon={Gauge}
+          onClick={props.onOpenBuildStatus}
+        />
+      )}
       {TOOL_ROWS.map((row) => (
         <ToolRowButton
           key={row.id}

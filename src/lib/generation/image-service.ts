@@ -21,7 +21,7 @@
 
 import "server-only";
 
-
+import { createHash } from "node:crypto";
 import { getCreditBalances, adjustWalletBalance } from "@/lib/wallet-ledger";
 import { isBillingExempt, getActiveSimulation } from "@/lib/owner";
 import { GoogleGenAI, Modality } from "@google/genai";
@@ -1295,7 +1295,10 @@ export async function generateImage(
   deps: ImageServiceDeps = defaultDeps,
 ): Promise<ImageGenerationResult> {
   const startTime = Date.now();
-  const requestId = ctx.requestId || crypto.randomUUID();
+  // `let`: the idempotency claim below may re-scope this to a
+  // prompt-derived id when the caller's id already holds a completed
+  // job for a DIFFERENT prompt (see §3).
+  let requestId = ctx.requestId || crypto.randomUUID();
   const fail = (
     code: ImageGenerationFailure["code"],
     error: string,
@@ -1375,7 +1378,36 @@ export async function generateImage(
   const internalUserId = await deps.resolveInternalUserId(userId);
   let job: GenerationJob | null = null;
   if (internalUserId) {
-    const existing = await deps.getJobByRequestId(internalUserId, requestId);
+    let existing = await deps.getJobByRequestId(internalUserId, requestId);
+    if (
+      existing &&
+      existing.status === "completed" &&
+      existing.prompt.trim() !== prompt
+    ) {
+      // PROMPT-MISMATCH GUARD (2026-11-20 live defect): a completed job
+      // under the caller's requestId belongs to a DIFFERENT request —
+      // the agent path derives its requestId from the approved
+      // operation's identity alone (`approval:<pausedRunId>`), so a
+      // second, different generation inside one approved run (or a
+      // re-approved run) collided with the first one's completed job
+      // and REPLAYED its image: "Make a pic of bike" returned a
+      // previous portrait. Replay is only ever valid for the SAME
+      // prompt. Re-scope this call to a prompt-derived id: an identical
+      // retry of THIS prompt still replays (same derived id, no double
+      // generation, no double debit), a different prompt generates
+      // fresh under its own id.
+      requestId = `${requestId}~${createHash("sha256").update(prompt).digest("hex").slice(0, 12)}`;
+      console.info(
+        `[image-service] REPLAY_SKIPPED_PROMPT_MISMATCH rescoped requestId=${requestId}`,
+      );
+      const scoped = await deps.getJobByRequestId(internalUserId, requestId);
+      existing =
+        scoped && scoped.prompt.trim() === prompt
+          ? scoped
+          : scoped && scoped.status !== "completed"
+            ? scoped
+            : null;
+    }
     if (existing) {
       if (existing.status === "completed") {
         console.info(
@@ -1426,19 +1458,25 @@ export async function generateImage(
         // a job row (no replay protection, but the debit stays idempotent).
         const raced = await deps.getJobByRequestId(internalUserId, requestId);
         if (raced) {
-          if (raced.status === "completed") {
+          if (raced.status === "completed" && raced.prompt.trim() === prompt) {
             return replayCompletedJob(raced, requestId, startTime);
           }
-          if (isInFlight(raced.status)) {
+          if (raced.status === "completed") {
+            // Completed for a different prompt — never replay it (see
+            // the prompt-mismatch guard above). Proceed without a job
+            // row; the debit stays idempotent on the scoped requestId.
+            job = null;
+          } else if (isInFlight(raced.status)) {
             return fail(
               "DUPLICATE_IN_FLIGHT",
               "A generation for this operation is already in progress",
               true,
               raced.provider as MediaProviderId,
             );
+          } else {
+            await deps.setJobStatus(raced.id, "processing");
+            job = { ...raced, status: "processing" as GenerationStatus };
           }
-          await deps.setJobStatus(raced.id, "processing");
-          job = { ...raced, status: "processing" as GenerationStatus };
         }
       }
     }

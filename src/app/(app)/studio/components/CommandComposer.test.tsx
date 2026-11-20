@@ -282,7 +282,7 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     expect(screen.getByRole("button", { name: /send message/i }).className).toContain("h-11");
   });
 
-  it("shows the active model picker without an execution-mode dropdown", () => {
+  it("shows no model picker and no execution-mode dropdown in the composer row (chat-bar cleanup, 2026-11-20)", () => {
     const onSend = vi.fn();
     render(
       <CommandComposer
@@ -293,11 +293,14 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: /execution mode/i })).toBeNull();
-    // Model picker is a button with aria-label "Select assistant and model"
-    expect(screen.getByRole("button", { name: /select assistant and model/i })).toBeTruthy();
+    // Larry's clean bar: the round assistant/model selector button left
+    // the composer row — the selector opens from the chat header menu
+    // and the mobile Tools sheet instead (see UnifiedSelector.test.tsx).
+    expect(screen.queryByRole("button", { name: /select assistant and model/i })).toBeNull();
+    expect(screen.queryByTestId("unified-selector-trigger")).toBeNull();
   });
 
-  it("renders an agent selector with model picker", () => {
+  it("renders the clean composer row: text box, attach, mic, send", () => {
     render(
       <CommandComposer
         value=""
@@ -307,9 +310,10 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
       />,
     );
 
-    // Unified assistant + model picker is present (popover only opens on click)
-    expect(screen.getByRole("button", { name: /select assistant and model/i })).toBeTruthy();
-    // The popover dialog is not open until clicked
+    expect(screen.getByRole("textbox", { name: /message input/i })).toBeTruthy();
+    expect(screen.getByLabelText("Attach files, media, or links")).toBeTruthy();
+    expect(screen.getByTestId("studio-send-button")).toBeTruthy();
+    // No selector dialog can open from the composer anymore.
     expect(screen.queryByRole("dialog", { name: /select assistant and model/i })).toBeNull();
   });
 

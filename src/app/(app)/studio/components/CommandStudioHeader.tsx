@@ -21,6 +21,7 @@ import {
 import {
   Eye,
   Rocket,
+  Bot,
   CircleAlert,
   CircleCheck,
   CircleDot,
@@ -89,6 +90,7 @@ export default function CommandStudioHeader({
   onDeleteChatAction,
   onRenameChatAction,
   onExportChatAction,
+  onOpenSelectorAction,
   onExportProjectAction,
   exportBusy = false,
   hasConversation,
@@ -148,6 +150,12 @@ export default function CommandStudioHeader({
   /** Execution mode — shown as a segmented PLAN/ACT/AUTO control. */
   executionMode?: StudioTopBarMode;
   onExecutionModeChange?: (mode: StudioTopBarMode) => void;
+  /**
+   * Opens the unified assistant + model selector (chat-bar cleanup,
+   * 2026-11-20: its trigger left the composer row; the selector opens
+   * on demand from this Conversation menu, CommandStudio owns it).
+   */
+  onOpenSelectorAction?: () => void;
   /**
    * The crossbreed layout switch (Amendment 8): the effective Studio
    * layout. Rendered as a Board | Regular segmented control in the
@@ -562,6 +570,7 @@ export default function CommandStudioHeader({
             onDeleteChatAction={onDeleteChatAction}
             onRenameChatAction={onRenameChatAction}
             onExportChatAction={onExportChatAction}
+            onOpenSelectorAction={onOpenSelectorAction}
             onExportProjectAction={onExportProjectAction}
             exportBusy={exportBusy}
             onOpenDockTabAction={onOpenDockTabAction}
@@ -805,6 +814,7 @@ function OverflowMenu({
   onDeleteChatAction,
   onRenameChatAction,
   onExportChatAction,
+  onOpenSelectorAction,
   onExportProjectAction,
   exportBusy = false,
   onOpenDockTabAction,
@@ -823,6 +833,7 @@ function OverflowMenu({
   onDeleteChatAction?: () => void;
   onRenameChatAction?: () => void;
   onExportChatAction?: () => void;
+  onOpenSelectorAction?: () => void;
   onExportProjectAction?: () => void;
   exportBusy?: boolean;
   onOpenDockTabAction?: (tab: StudioTopBarDockTab) => void;
@@ -909,6 +920,18 @@ function OverflowMenu({
         <Download size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
         Export
       </button>
+      {onOpenSelectorAction && (
+        <button
+          type="button"
+          onClick={() => { onClose(); onOpenSelectorAction(); }}
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-black/5"
+          style={{ color: "var(--text-primary)" }}
+          data-testid="header-open-selector"
+        >
+          <Bot size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
+          Assistant &amp; model
+        </button>
+      )}
       <div className="h-px mx-3" style={{ backgroundColor: "var(--border-color)" }} />
       <button
         type="button"

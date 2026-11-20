@@ -43,7 +43,7 @@ import { getTerminalUrl } from "../lib/auth/auth-config.js";
 import { ApprovalBridge } from "../ink/approval-bridge.js";
 import * as readline from "node:readline/promises";
 
-const EXACT_ANSWER_RE = /^\s*(?:reply|respond|answer|say)\s+with\s+exactly\s*(?::\s*|["'])(.+?)["']?\s*$/i;
+const EXACT_ANSWER_RE = /^\s*(?:reply|respond|answer|say)\s+(?:with\s+)?exactly(?:\s*:\s*|\s+)(.+?)\s*$/i;
 const PROJECT_EVIDENCE_RE = /\b(project|repo|repository|file|path|git|build|test|check|code|command|tool|read|write|edit|search|status|diff|log|package)\b/i;
 
 /**

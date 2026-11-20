@@ -80,8 +80,11 @@ describe("image.generate agent handler (service-direct)", () => {
     expect(ctx).toMatchObject({
       userId: "user_abc",
       projectId: "proj_1",
-      requestId: "approval:run_123",
     });
+    // The operation identity is prompt-scoped (2026-11-20): same
+    // operation + same prompt replays; a different prompt in the same
+    // run must not collide with this generation's completed job.
+    expect(ctx.requestId).toMatch(/^approval:run_123:[0-9a-f]{12}$/);
     expect(input).toMatchObject({
       prompt: "a sunny dog park",
       format: "image",

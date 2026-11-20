@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { MessageSquare, Activity, FolderOpen, Component, Wrench, X } from "lucide-react";
+import { Activity, FolderOpen, Component, Menu, Plus } from "lucide-react";
 import { useVisualViewport } from "../../hooks/useVisualViewport";
 import { mobileDiag } from "../../lib/mobileDiagnostics";
 import type { LiTTTab } from "../LiTTPanel";
@@ -31,20 +31,17 @@ export interface LiTTMobileSheetProps {
   filesContent?: ReactNode;
   /** Optional approval UI rendered full-width at the top of the sheet, above the tabs */
   approvalSlot?: ReactNode;
-  /** Build status control (MobileBuildStatusBar) rendered in the sheet's
-   *  header chrome, under the tab row. Clean-open (Larry, 2026-11-13):
-   *  the opener lives here — in the sheet's own layout flow, on light
-   *  tokens — never as a dark bar over the chat transcript. When omitted,
-   *  no build status row renders. */
-  buildStatusSlot?: ReactNode;
   /** Project context for the slim second header row (mobile density redesign) */
   projectName?: string | null;
   branch?: string | null;
   /** Opens the Tools sheet; when omitted, no tools button renders */
   onOpenTools?: () => void;
+  /** Starts a fresh conversation; rendered as a New Chat button in the
+   *  slim top bar while the Chat tab is showing (mobile layout card). */
+  onNewChat?: () => void;
 }
 
-const MOBILE_BOTTOM_NAV_H = 62;
+const MOBILE_BOTTOM_NAV_H = 0;
 
 export default function LiTTMobileSheet({
   activeTab,
@@ -54,10 +51,10 @@ export default function LiTTMobileSheet({
   liveContent,
   filesContent,
   approvalSlot,
-  buildStatusSlot,
   projectName,
   branch,
   onOpenTools,
+  onNewChat,
 }: LiTTMobileSheetProps) {
   const vv = useVisualViewport();
   const contentRef = useRef<HTMLDivElement>(null);
@@ -77,11 +74,14 @@ export default function LiTTMobileSheet({
   }, []);
 
   const bottomInset = Math.max(0, Math.round(vv.bottomInset));
+  // Chat-first mobile layout (2026-11-19 card): the bottom work-surface
+  // dock is retired on the phone — the sheet owns the full height down
+  // to the safe area, staying pinned above the on-screen keyboard.
   const bottomOffset = MOBILE_BOTTOM_NAV_H + safeBottom + bottomInset;
   const MIN_SHEET_HEIGHT = 150;
   // Full-screen sheet: spans from the top of the viewport down to the
-  // bottom offset (mobile nav + safe area + keyboard inset), so it still
-  // stays pinned above the on-screen keyboard.
+  // bottom offset (safe area + keyboard inset), so it still stays
+  // pinned above the on-screen keyboard.
   const rawSheetHeight = Math.round(vv.height) + bottomInset - bottomOffset;
   // Never let the sheet render at (near-)0px — a bad viewport reading
   // should degrade to "small but usable", not "invisible/unusable".
@@ -147,149 +147,143 @@ export default function LiTTMobileSheet({
         aria-label="LiTT assistant"
         aria-modal="true"
       >
-        <div
-          className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full"
-          style={{ backgroundColor: "var(--studio-border-strong)" }}
-          aria-hidden
-        />
-
         {approvalSlot && (
           <div className="w-full shrink-0" data-testid="litt-mobile-approval-slot">
             {approvalSlot}
           </div>
         )}
 
+        {/* Slim top bar (mobile layout card, 2026-11-19): project name on
+            the left, New Chat + one menu button on the right — no rows of
+            icons. Chat is the home surface, so the Chat tab shows none of
+            the sub-surface tabs; they appear only while a sub-surface
+            (Live / Files / Components) is open, with a Back to chat. */}
         <div
-          className="flex shrink-0 items-center gap-0.5 border-b px-2 py-1.5"
+          className="flex shrink-0 items-center gap-1 border-b px-2 py-1"
           style={{
             borderColor: "var(--studio-border)",
             backgroundColor: "var(--studio-surface)",
           }}
+          data-testid="litt-mobile-topbar"
         >
-          <div
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg"
-            style={{
-              background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 20%, transparent), color-mix(in srgb, var(--color-accent) 8%, transparent))",
-              border: "1px solid var(--studio-border-strong)",
-            }}
-            aria-hidden
-          >
-            <span className="text-[9px] font-black text-accent">L</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => onTabChange("chat")}
-            className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
-            style={{
-              color: activeTab === "chat" ? "var(--color-accent)" : "var(--text-muted)",
-              backgroundColor: activeTab === "chat" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
-            }}
-            aria-pressed={activeTab === "chat"}
-            data-testid="litt-mobile-tab-chat"
-          >
-            <MessageSquare size={12} className="pointer-events-none" />
-            Chat
-          </button>
-          <button
-            type="button"
-            onClick={() => onTabChange("live")}
-            className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
-            style={{
-              color: activeTab === "live" ? "var(--color-accent)" : "var(--text-muted)",
-              backgroundColor: activeTab === "live" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
-            }}
-            aria-pressed={activeTab === "live"}
-            data-testid="litt-mobile-tab-live"
-          >
-            <Activity size={12} className="pointer-events-none" />
-            Activity
-          </button>
-          {filesContent ? (
-            <>
-              <button
-                type="button"
-                onClick={() => onTabChange("files")}
-                className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
-                style={{
-                  color: activeTab === "files" ? "var(--color-accent)" : "var(--text-muted)",
-                  backgroundColor: activeTab === "files" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
-                }}
-                aria-pressed={activeTab === "files"}
-                data-testid="litt-mobile-tab-files"
-              >
-                <FolderOpen size={12} className="pointer-events-none" />
-                Files
-              </button>
-              <button
-                type="button"
-                onClick={() => onTabChange("components")}
-                className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
-                style={{
-                  color: activeTab === "components" ? "var(--color-accent)" : "var(--text-muted)",
-                  backgroundColor: activeTab === "components" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
-                }}
-                aria-pressed={activeTab === "components"}
-                data-testid="litt-mobile-tab-components"
-              >
-                <Component size={12} className="pointer-events-none" />
-                Components
-              </button>
-            </>
-          ) : null}
+          {activeTab === "chat" ? (
+            <span
+              className="min-w-0 flex-1 truncate px-1 text-[12px] font-bold"
+              style={{ color: "var(--text-primary)" }}
+              data-testid="litt-mobile-project-name"
+            >
+              {projectName ?? "LiTT"}
+              {projectName && branch ? " · " : null}
+              {branch}
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onTabChange("chat")}
+              className="flex min-h-11 shrink-0 items-center gap-1 rounded-lg px-2 text-[12px] font-bold transition active:scale-95"
+              style={{ color: "var(--litt-primary)" }}
+              aria-label="Back to chat"
+              data-testid="litt-mobile-back-to-chat"
+            >
+              <span aria-hidden>‹</span>
+              <span className="pointer-events-none">Chat</span>
+            </button>
+          )}
           <div className="flex-1" />
+          {activeTab === "chat" && onNewChat && (
+            <button
+              type="button"
+              onClick={onNewChat}
+              className="flex min-h-11 shrink-0 items-center gap-1 rounded-lg border px-2.5 text-[11px] font-bold transition active:scale-95"
+              style={{
+                borderColor: "color-mix(in srgb, var(--litt-primary) 40%, transparent)",
+                color: "var(--litt-primary)",
+                backgroundColor: "color-mix(in srgb, var(--litt-primary) 8%, transparent)",
+              }}
+              aria-label="New chat"
+              data-testid="litt-mobile-new-chat"
+            >
+              <Plus size={14} className="pointer-events-none" aria-hidden />
+              <span className="pointer-events-none">New Chat</span>
+            </button>
+          )}
           {onOpenTools && (
             <button
               type="button"
               onClick={onOpenTools}
-              className="grid h-9 w-9 place-items-center rounded-md transition hover:bg-black/5"
-              style={{ color: "var(--text-muted)" }}
-              aria-label="Open tools"
+              className="grid min-h-11 min-w-11 shrink-0 place-items-center rounded-lg transition hover:bg-black/5"
+              style={{ color: "var(--text-secondary)" }}
+              aria-label="Menu"
               data-testid="litt-mobile-tools-button"
             >
-              <Wrench size={16} className="pointer-events-none" />
+              <Menu size={20} className="pointer-events-none" aria-hidden />
             </button>
           )}
-          <button
-            type="button"
-            onClick={onClose}
-            className="grid h-9 w-9 place-items-center rounded-md transition hover:bg-black/5"
-            style={{ color: "var(--text-muted)" }}
-            aria-label="Close LiTT"
-            data-testid="litt-mobile-sheet-close"
-          >
-            <X size={16} className="pointer-events-none" />
-          </button>
         </div>
 
-        {buildStatusSlot && (
+        {/* Sub-surface tabs — only while a non-chat tab is open, so the
+            chat home stays free of icon rows. */}
+        {activeTab !== "chat" && (
           <div
-            className="shrink-0 border-b px-2 py-1.5"
+            className="flex shrink-0 items-center gap-0.5 border-b px-2 py-1"
             style={{
               borderColor: "var(--studio-border)",
               backgroundColor: "var(--studio-surface)",
             }}
-            data-testid="litt-mobile-build-status-slot"
           >
-            {buildStatusSlot}
+            <button
+              type="button"
+              onClick={() => onTabChange("live")}
+              className="flex min-h-11 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+              style={{
+                color: activeTab === "live" ? "var(--color-accent)" : "var(--text-muted)",
+                backgroundColor: activeTab === "live" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
+              }}
+              aria-pressed={activeTab === "live"}
+              data-testid="litt-mobile-tab-live"
+            >
+              <Activity size={12} className="pointer-events-none" />
+              Activity
+            </button>
+            {filesContent ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onTabChange("files")}
+                  className="flex min-h-11 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+                  style={{
+                    color: activeTab === "files" ? "var(--color-accent)" : "var(--text-muted)",
+                    backgroundColor: activeTab === "files" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
+                  }}
+                  aria-pressed={activeTab === "files"}
+                  data-testid="litt-mobile-tab-files"
+                >
+                  <FolderOpen size={12} className="pointer-events-none" />
+                  Files
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onTabChange("components")}
+                  className="flex min-h-11 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+                  style={{
+                    color: activeTab === "components" ? "var(--color-accent)" : "var(--text-muted)",
+                    backgroundColor: activeTab === "components" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
+                  }}
+                  aria-pressed={activeTab === "components"}
+                  data-testid="litt-mobile-tab-components"
+                >
+                  <Component size={12} className="pointer-events-none" />
+                  Components
+                </button>
+              </>
+            ) : null}
           </div>
         )}
 
-        {(projectName || branch) && (
-          <div
-            className="flex shrink-0 items-center border-b px-3 py-1"
-            style={{ borderColor: "var(--studio-border)" }}
-            data-testid="litt-mobile-context"
-          >
-            <span
-              className="min-w-0 truncate text-[10px] font-medium"
-              style={{ color: "var(--text-muted)" }}
-            >
-              {projectName}
-              {projectName && branch ? " · " : null}
-              {branch}
-            </span>
-          </div>
-        )}
+        {/* Chat-bar cleanup (Larry, 2026-11-20): no build-status strip
+            in the sheet header — the chat screen holds nothing extra.
+            Run status lives in the Build status sheet, opened from the
+            Tools sheet's "Build status" row. */}
 
         <div
           ref={contentRef}

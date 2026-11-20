@@ -55,9 +55,13 @@ describe("settleRunOutcome — the proof's fact pattern", () => {
     const s = settleRunOutcome(PROOF_INPUT);
     expect(s.outcome).toBe("completed");
     expect(s.completedWithWarning).toBeDefined();
-    // The text says the work completed and names the step that failed.
-    expect(s.completedWithWarning).toMatch(/requested work is complete/i);
-    expect(s.completedWithWarning).toMatch(/closing summary/i);
+    // Larry's bar (2026-11-20): the visible text is a short completion
+    // line only — no internal steps, no run narration. The step that
+    // failed is named in the record (contributors), not in the chat.
+    expect(s.completedWithWarning).toMatch(/request is complete/i);
+    expect(s.completedWithWarning).not.toMatch(/closing summary/i);
+    expect(s.completedWithWarning).not.toMatch(/quality gate/i);
+    expect(s.completedWithWarning).not.toMatch(/workspace change/i);
     expect(s.completedWithWarning).not.toMatch(/couldn't complete this request/i);
   });
 
@@ -138,5 +142,40 @@ describe("settleRunOutcome — the upgrade is narrow", () => {
     expect(s.failureContributors).toEqual([
       { kind: "model_routes", detail: ROUTES_FAILURE },
     ]);
+  });
+});
+
+describe("settleRunOutcome — user-facing honesty (2026-11-19 incident)", () => {
+  it("never leaks the raw provider error into the closing text", () => {
+    const s = settleRunOutcome(PROOF_INPUT);
+    expect(s.completedWithWarning).toBeDefined();
+    expect(s.completedWithWarning).not.toContain("gemini-2.5-flash");
+    expect(s.completedWithWarning).not.toContain("http_429");
+    expect(s.completedWithWarning).not.toContain("openrouter");
+    // The technical detail is preserved for logs/debug via contributors.
+    expect(s.failureContributors).toContainEqual({ kind: "model_routes", detail: ROUTES_FAILURE });
+  });
+
+  it("keeps verified-work detail OUT of the user text (record only)", () => {
+    const s = settleRunOutcome({
+      ...PROOF_INPUT,
+      workspaceChange: { status: "changed", files: ["public/assets/images/bike.png", "index.html"] },
+    });
+    // No file lists, diff claims, or change counts in the chat text —
+    // a media request must not be framed as a code change. The
+    // evidence stays available to the run record via the settlement
+    // inputs/contributors, not via the visible message.
+    expect(s.completedWithWarning).not.toContain("bike.png");
+    expect(s.completedWithWarning).not.toContain("workspace diff");
+    expect(s.completedWithWarning).not.toMatch(/workspace change\(s\)/);
+  });
+
+  it("a verified-unchanged workspace can NOT settle as complete", () => {
+    const s = settleRunOutcome({
+      ...PROOF_INPUT,
+      workspaceChange: { status: "unchanged" },
+    });
+    expect(s.outcome).toBe("failed");
+    expect(s.completedWithWarning).toBeUndefined();
   });
 });
