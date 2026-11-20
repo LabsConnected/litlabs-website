@@ -58,8 +58,15 @@ export type StudioTopBarMode = "plan" | "act" | "auto";
 export type StudioTopBarDockTab = "activity" | "terminal" | "inspector" | "media";
 
 const MODE_META: { id: StudioTopBarMode; label: string; desc: string; color: string; tint: string; border: string }[] = [
-  { id: "plan", label: "PLAN", desc: "Inspect and explain; do not change files", color: "#52684f", tint: "#e4f2d6", border: "#6e9a57" },
-  { id: "act", label: "ACT", desc: "Make changes; approvals may be required", color: "#177a36", tint: "rgba(23,122,54,0.10)", border: "rgba(23,122,54,0.35)" },
+  // All three chips bind to --color-accent (the portaled menu re-points
+  // it at the theme's --accent-color), so they follow the effective
+  // mode like AUTO always did. PLAN used to hard-code the light
+  // Signature values (#52684f on #e4f2d6, border #6e9a57) — a pale
+  // mint chip sitting in the charcoal Dark menu (white-surface
+  // patchwork, fixed 2026-11-15). In Light the mixes resolve to the
+  // same green family from the light accent (#177A36).
+  { id: "plan", label: "PLAN", desc: "Inspect and explain; do not change files", color: "color-mix(in srgb, var(--color-accent) 55%, var(--text-color))", tint: "color-mix(in srgb, var(--color-accent) 12%, transparent)", border: "color-mix(in srgb, var(--color-accent) 35%, transparent)" },
+  { id: "act", label: "ACT", desc: "Make changes; approvals may be required", color: "var(--color-accent)", tint: "color-mix(in srgb, var(--color-accent) 10%, transparent)", border: "color-mix(in srgb, var(--color-accent) 35%, transparent)" },
   { id: "auto", label: "AUTO", desc: "LiTT chooses when to plan and when to act", color: "var(--color-accent)", tint: "color-mix(in srgb, var(--color-accent) 10%, transparent)", border: "color-mix(in srgb, var(--color-accent) 32%, transparent)" },
 ];
 

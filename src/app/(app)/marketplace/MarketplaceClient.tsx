@@ -263,7 +263,7 @@ export default function Marketplace({ initialItems, initialError = false, header
   }, [router]);
 
   return (
-    <div className="min-h-screen bg-[#070812] text-white" style={{ backgroundColor: T.bgColor + "d0", color: T.textColor }}>
+    <div className="min-h-screen" style={{ backgroundColor: T.bgColor + "d0", color: T.textColor }}>
       {/* Toast */}
       {toast && (
         <div
@@ -282,7 +282,7 @@ export default function Marketplace({ initialItems, initialError = false, header
       {/* When the server already rendered the H1/intro (SSR), the client only
           renders the interactive search + filters below. */}
       {!headerRendered ? (
-      <div className="border-b border-white/10 bg-gradient-to-b from-white/[.03] to-transparent px-4 py-8 sm:px-6 sm:py-10">
+      <div className="border-b border-[color-mix(in_srgb,var(--text-color)_10%,transparent)] bg-gradient-to-b from-[color-mix(in_srgb,var(--text-color)_3%,transparent)] to-transparent px-4 py-8 sm:px-6 sm:py-10">
         <ProductFrame>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-black tracking-tight sm:text-3xl" style={{ color: T.headerColor }}>
@@ -296,7 +296,7 @@ export default function Marketplace({ initialItems, initialError = false, header
               Beta
             </span>
           </div>
-          <p className="mt-2 max-w-xl text-sm text-white/55">
+          <p className="mt-2 max-w-xl text-sm text-[color-mix(in_srgb,var(--text-color)_55%,transparent)]">
             Browse verified capabilities for LiTT. {hasInstallableItems
               ? "Installable items show a clear action; everything else is labeled Coming Soon."
               : "Available items will show a clear Install or Use action when their executor is ready."}
@@ -304,14 +304,14 @@ export default function Marketplace({ initialItems, initialError = false, header
 
           {/* Search */}
           <div className="relative mt-6 max-w-md">
-            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
+            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[color-mix(in_srgb,var(--text-color)_30%,transparent)]" />
             <input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search capabilities…"
               aria-label="Search capabilities"
-              className="w-full rounded-xl border border-white/10 bg-white/[0.04] py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:border-white/25 focus:outline-none"
+              className="w-full rounded-xl border border-[color-mix(in_srgb,var(--text-color)_10%,transparent)] bg-[color-mix(in_srgb,var(--text-color)_4%,transparent)] py-2.5 pl-10 pr-4 text-sm text-[var(--text-color)] placeholder:text-[color-mix(in_srgb,var(--text-color)_30%,transparent)] focus:border-[color-mix(in_srgb,var(--text-color)_25%,transparent)] focus:outline-none"
             />
           </div>
 
@@ -332,8 +332,8 @@ export default function Marketplace({ initialItems, initialError = false, header
                 {c === "all" ? "All" : c.replace(/_/g, " ")}
               </button>
             ))}
-            <span className="mx-1 hidden h-5 w-px bg-white/10 sm:block" aria-hidden="true" />
-            <div className="flex overflow-hidden rounded-full border border-white/10" role="group" aria-label="Capability view">
+            <span className="mx-1 hidden h-5 w-px bg-[color-mix(in_srgb,var(--text-color)_10%,transparent)] sm:block" aria-hidden="true" />
+            <div className="flex overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--text-color)_10%,transparent)]" role="group" aria-label="Capability view">
               {(["all", "installed"] as const).map((v) => (
                 <button
                   key={v}
@@ -355,17 +355,17 @@ export default function Marketplace({ initialItems, initialError = false, header
       </div>
       ) : (
       /* Server rendered the H1/intro — client only needs the interactive controls. */
-      <div className="border-b border-white/10 px-4 py-6 sm:px-6">
+      <div className="border-b border-[color-mix(in_srgb,var(--text-color)_10%,transparent)] px-4 py-6 sm:px-6">
         <ProductFrame>
           <div className="relative max-w-md">
-            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
+            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[color-mix(in_srgb,var(--text-color)_30%,transparent)]" />
             <input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search capabilities…"
               aria-label="Search capabilities"
-              className="w-full rounded-xl border border-white/10 bg-white/[0.04] py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:border-white/25 focus:outline-none"
+              className="w-full rounded-xl border border-[color-mix(in_srgb,var(--text-color)_10%,transparent)] bg-[color-mix(in_srgb,var(--text-color)_4%,transparent)] py-2.5 pl-10 pr-4 text-sm text-[var(--text-color)] placeholder:text-[color-mix(in_srgb,var(--text-color)_30%,transparent)] focus:border-[color-mix(in_srgb,var(--text-color)_25%,transparent)] focus:outline-none"
             />
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -384,8 +384,8 @@ export default function Marketplace({ initialItems, initialError = false, header
                 {c === "all" ? "All" : c.replace(/_/g, " ")}
               </button>
             ))}
-            <span className="mx-1 hidden h-5 w-px bg-white/10 sm:block" aria-hidden="true" />
-            <div className="flex overflow-hidden rounded-full border border-white/10" role="group" aria-label="Capability view">
+            <span className="mx-1 hidden h-5 w-px bg-[color-mix(in_srgb,var(--text-color)_10%,transparent)] sm:block" aria-hidden="true" />
+            <div className="flex overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--text-color)_10%,transparent)]" role="group" aria-label="Capability view">
               {(["all", "installed"] as const).map((v) => (
                 <button
                   key={v}
@@ -411,29 +411,29 @@ export default function Marketplace({ initialItems, initialError = false, header
       <ProductFrame className="py-6">
         {loadError ? (
           <div className="py-12 text-center">
-            <p className="text-white/40">Marketplace couldn&rsquo;t load.</p>
+            <p className="text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">Marketplace couldn&rsquo;t load.</p>
             <button
               onClick={() => loadItems()}
-              className="mt-3 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/60 hover:bg-white/5"
+              className="mt-3 rounded-lg border border-[color-mix(in_srgb,var(--text-color)_10%,transparent)] px-4 py-2 text-sm text-[color-mix(in_srgb,var(--text-color)_60%,transparent)] hover:bg-[color-mix(in_srgb,var(--text-color)_5%,transparent)]"
             >
               Retry
             </button>
           </div>
         ) : loading ? (
           <div className="py-12 text-center">
-            <p className="text-white/40">Loading capabilities...</p>
+            <p className="text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">Loading capabilities...</p>
           </div>
         ) : items.length === 0 ? (
           <div className="py-12 text-center">
-            <p className="text-white/40">No capabilities listed yet. Check back soon.</p>
+            <p className="text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">No capabilities listed yet. Check back soon.</p>
           </div>
         ) : view === "installed" && !isSignedIn ? (
           <div className="py-12 text-center">
-            <p className="text-white/40">Sign in to see the capabilities you&rsquo;ve installed.</p>
+            <p className="text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">Sign in to see the capabilities you&rsquo;ve installed.</p>
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-12 text-center">
-            <p className="text-white/40">
+            <p className="text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">
               {view === "installed"
                 ? "You haven't installed any capabilities yet."
                 : "Nothing matches your search."}
@@ -443,7 +443,7 @@ export default function Marketplace({ initialItems, initialError = false, header
           <>
             {featured.length > 0 && (
               <section aria-label="Featured capabilities" className="mb-8">
-                <h2 className="mb-3 text-xs font-black uppercase tracking-widest text-white/40">
+                <h2 className="mb-3 text-xs font-black uppercase tracking-widest text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">
                   Featured
                 </h2>
                 <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0">
@@ -463,7 +463,7 @@ export default function Marketplace({ initialItems, initialError = false, header
             )}
 
             <section aria-label="Explore capabilities">
-              <h2 className="mb-3 text-xs font-black uppercase tracking-widest text-white/40">
+              <h2 className="mb-3 text-xs font-black uppercase tracking-widest text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">
                 Explore
               </h2>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -640,7 +640,7 @@ const CapabilityCard = memo(function CapabilityCard({
         {cta === "installed" && (
           <button
             onClick={handleCta}
-            className="flex w-full items-center justify-center gap-1.5 rounded-xl border py-2.5 text-[13px] font-black transition hover:bg-white/5"
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl border py-2.5 text-[13px] font-black transition hover:bg-[color-mix(in_srgb,var(--text-color)_5%,transparent)]"
             style={{ borderColor: accentColor + "50", color: accentColor }}
             aria-label={`${item.name} installed — manage`}
           >
@@ -650,7 +650,7 @@ const CapabilityCard = memo(function CapabilityCard({
         {cta === "coming_soon" && (
           <button
             disabled
-            className="w-full cursor-not-allowed rounded-xl bg-white/[0.04] py-2.5 text-[13px] font-black text-white/30"
+            className="w-full cursor-not-allowed rounded-xl bg-[color-mix(in_srgb,var(--text-color)_4%,transparent)] py-2.5 text-[13px] font-black text-[color-mix(in_srgb,var(--text-color)_30%,transparent)]"
             aria-label={`${item.name} coming soon`}
           >
             Coming Soon

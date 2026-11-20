@@ -227,10 +227,10 @@ function StateBadge({ state }: { state: AgentState }) {
     case "disabled": return <span className="flex items-center gap-1 rounded-md bg-amber-400/10 px-2 py-0.5 font-bold text-amber-300">Disabled</span>;
     case "processing": return <span className="flex items-center gap-1 rounded-md bg-blue-400/10 px-2 py-0.5 font-bold text-blue-300"><Clock size={10} /> Processing</span>;
     case "revoked": return <span className="flex items-center gap-1 rounded-md bg-rose-400/10 px-2 py-0.5 font-bold text-rose-300"><Ban size={10} /> Revoked</span>;
-    case "unavailable": return <span className="rounded-md bg-white/5 px-2 py-0.5 font-bold text-white/40">Unavailable</span>;
+    case "unavailable": return <span className="rounded-md bg-[color-mix(in_srgb,var(--text-color)_5%,transparent)] px-2 py-0.5 font-bold text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">Unavailable</span>;
     case "install": return <span className="rounded-md bg-accent/10 px-2 py-0.5 font-bold text-accent">Owned</span>;
-    case "buy": return <span className="rounded-md bg-white/5 px-2 py-0.5 font-bold text-white/60">Available</span>;
-    default: return <span className="rounded-md bg-white/5 px-2 py-0.5 font-bold text-white/40">...</span>;
+    case "buy": return <span className="rounded-md bg-[color-mix(in_srgb,var(--text-color)_5%,transparent)] px-2 py-0.5 font-bold text-[color-mix(in_srgb,var(--text-color)_60%,transparent)]">Available</span>;
+    default: return <span className="rounded-md bg-[color-mix(in_srgb,var(--text-color)_5%,transparent)] px-2 py-0.5 font-bold text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">...</span>;
   }
 }
 
@@ -259,7 +259,7 @@ function ActionButton({
         <Link href={instanceId ? `/studio?tool=chat&agentInstance=${instanceId}` : `/studio?tool=chat&agent=${itemSlug}`} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition hover:scale-[1.02]" style={{ background: categoryColor + "20", color: categoryColor }}>
           <ArrowRight size={12} /> Open in Studio
         </Link>
-        <button onClick={onToggle} className="rounded-xl border px-3 py-2.5 text-xs font-bold transition hover:bg-white/5" style={{ borderColor: borderColor + "30", color: textMuted }}>Disable</button>
+        <button onClick={onToggle} className="rounded-xl border px-3 py-2.5 text-xs font-bold transition hover:bg-[color-mix(in_srgb,var(--text-color)_5%,transparent)]" style={{ borderColor: borderColor + "30", color: textMuted }}>Disable</button>
         <button onClick={onUninstall} className="rounded-xl border border-rose-400/30 px-3 py-2.5 text-xs font-bold text-rose-300 transition hover:bg-rose-400/10">Remove</button>
       </div>
     );
