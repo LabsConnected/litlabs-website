@@ -131,8 +131,10 @@ describe("sandbox preview branch", () => {
 
     const status = getPreviewStatus(workspaceId)!;
     expect(Object.keys(status).sort()).toEqual(
-      ["command", "error", "errorCode", "framework", "lastHealthCheck", "logs", "port", "startedAt", "status"].sort(),
+      ["command", "error", "errorCode", "framework", "lastHealthCheck", "logs", "port", "serveMode", "startedAt", "status"].sort(),
     );
+    // A caller-supplied command start resolves to the dev serve mode.
+    expect(status.serveMode).toBe("dev");
     const serialized = JSON.stringify(status);
     expect(serialized).not.toContain("fake-preview");
     expect(serialized).not.toContain("fake-traffic");

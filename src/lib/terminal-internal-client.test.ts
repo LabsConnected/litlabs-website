@@ -239,6 +239,20 @@ describe("terminal client functions wire timeouts", () => {
     expect(url).toBe("https://terminal.internal.test/internal/workspace/ws1?userId=u");
     expect(url).not.toContain("terminal.public.test");
   });
+
+  it("getPreviewStatusInternal passes the runtime serveMode through untouched", async () => {
+    vi.mocked(fetch).mockImplementation(() =>
+      okJson({
+        workspaceId: "ws1",
+        status: "starting",
+        logs: [],
+        serveMode: "production-build",
+      }),
+    );
+
+    const status = await getPreviewStatusInternal("ws1", "u");
+    expect(status?.serveMode).toBe("production-build");
+  });
 });
 
 describe("error-code threading (wave-4 truth-in-UI)", () => {

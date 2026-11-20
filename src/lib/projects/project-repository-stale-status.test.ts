@@ -128,6 +128,7 @@ function liveStatus(
     lastHealthCheck: Date.now(),
     error: null,
     errorCode: null,
+    serveMode: null,
     logs: [],
     ...extra,
   };
