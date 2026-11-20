@@ -126,4 +126,35 @@ describe("StudioPreviewPanel async start (C3/C4)", () => {
     );
     expect(screen.getByText("Static View failed to start")).toBeInTheDocument();
   }, 20_000);
+
+  it("a production-build start shows Install and Build stages and names the production build (health-fix)", async () => {
+    let posted = false;
+    mockFetch((url, init) => {
+      if (!isPreviewApi(url)) return undefined;
+      if (isPost(init)) {
+        posted = true;
+        return json({ runtimeStatus: "starting", previewUrl: null, runtimeError: null });
+      }
+      if (!posted) return json(NOT_STARTED);
+      return json({
+        runtimeStatus: "starting",
+        previewUrl: null,
+        runtimeError: null,
+        serveMode: "production-build",
+        logs: [
+          "[preview] Installing dependencies in sandbox (pnpm)",
+          "[preview] Building production bundle in sandbox (pnpm exec next build)",
+        ],
+      });
+    });
+    render(panel("project-a"));
+
+    // The stages come from the runtime's own log lines: the build
+    // stage is current, Install is shown, and the detail text names
+    // the production build instead of "the dev server".
+    await waitFor(() => expect(screen.getByText("Build")).toBeInTheDocument(), { timeout: 15_000 });
+    expect(screen.getByText("Install")).toBeInTheDocument();
+    expect(screen.getByText(/running the production build/)).toBeInTheDocument();
+    expect(screen.queryByText(/starting the dev server/)).toBeNull();
+  }, 20_000);
 });

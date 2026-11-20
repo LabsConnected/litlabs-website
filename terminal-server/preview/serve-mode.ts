@@ -65,6 +65,36 @@ export const PREVIEW_PROD_BUILD_FILE_THRESHOLD = 250;
 export const SANDBOX_PREVIEW_BUILD_TIMEOUT_MS = 900_000;
 
 /**
+ * Health-probe budget for the production-build path. The dev path
+ * keeps the sandbox runtime's 120 s window (HEALTH_PROBE_TIMEOUT_MS
+ * in sandbox-runtime.ts): a dev server that will ever answer does
+ * so quickly once listening. A production build is different — the
+ * probe clock starts when the detached launch returns, but on a
+ * just-build-saturated 2 vCPU box `next start` still has to load
+ * the built server and its first GET / render can be slow, so the
+ * 120 s dev window convicted a healthy start (live proof
+ * 2026-11-19: the process was still alive after the window expired
+ * and the start failed "did not become healthy"). 300 s covers the
+ * observed spawn-to-listening-plus-first-render tail with room,
+ * while staying far below the install/build budgets it follows.
+ */
+export const PREVIEW_PROD_HEALTH_PROBE_TIMEOUT_MS = 300_000;
+
+/**
+ * Resolve the health-probe budget for a serve mode. The dev budget
+ * is passed in by the caller (it lives in sandbox-runtime.ts, which
+ * imports this module — passing it in keeps the dependency one-way).
+ */
+export function resolvePreviewHealthProbeTimeoutMs(
+  serveMode: PreviewServeMode,
+  devTimeoutMs: number,
+): number {
+  return serveMode === "production-build"
+    ? PREVIEW_PROD_HEALTH_PROBE_TIMEOUT_MS
+    : devTimeoutMs;
+}
+
+/**
  * Directories that never count toward a project's size: installed
  * dependencies (present on the volume for some projects, and pure
  * weight the project's own code did not create) and generated

@@ -276,6 +276,7 @@ export async function GET(
       framework: runtimeStatus.framework ?? project.framework,
       developmentCommand: runtimeStatus.command ?? project.developmentCommand,
       packageManager: project.packageManager,
+      serveMode: runtimeStatus.serveMode ?? null,
       logs: runtimeStatus.logs,
     });
   } catch (err) {

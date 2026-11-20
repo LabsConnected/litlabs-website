@@ -49,8 +49,11 @@ import {
   nextProductionStartCommand,
   resolvePreviewServeMode,
   PREVIEW_PROD_BUILD_FILE_THRESHOLD,
+  PREVIEW_PROD_HEALTH_PROBE_TIMEOUT_MS,
+  SANDBOX_PREVIEW_BUILD_TIMEOUT_MS,
   type PreviewServeMode,
 } from "./serve-mode";
+import { SANDBOX_INSTALL_TIMEOUT_MS } from "../sandbox/install-stamp";
 
 /**
  * Environment variables that may be inherited from the terminal server.
@@ -1221,6 +1224,7 @@ export function getPreviewStatus(workspaceId: string): {
   lastHealthCheck: number | null;
   error: string | null;
   errorCode: PreviewErrorCode | null;
+  serveMode: PreviewServeMode | null;
   logs: string[];
 } {
   const rt = runtimes.get(workspaceId);
@@ -1234,6 +1238,7 @@ export function getPreviewStatus(workspaceId: string): {
       lastHealthCheck: null,
       error: null,
       errorCode: null,
+      serveMode: null,
       logs: [],
     };
   }
@@ -1246,6 +1251,7 @@ export function getPreviewStatus(workspaceId: string): {
     lastHealthCheck: rt.lastHealthCheck,
     error: rt.error,
     errorCode: rt.errorCode,
+    serveMode: rt.serveMode ?? "dev",
     logs: [...rt.logs],
   };
 }
@@ -1353,10 +1359,22 @@ async function startSandboxPreviewBranch(
   // produced zero sandbox activity because it was handed the first
   // attempt's stuck runtime). Fall through instead: the teardown
   // below stops it and a fresh runtime starts.
+  // The freshness window is sized by the EXISTING runtime's serve
+  // mode (health-fix, 2026-11-19): a production-build start
+  // legitimately sits in `starting` through install (≤900 s) +
+  // build (≤900 s) + its health window (300 s), so the dev-sized
+  // probe window judged healthy in-flight production starts wedged
+  // and tore them down. Dev/static keep the existing window.
+  const startingFreshWindowMs =
+    (existing?.serveMode ?? "dev") === "production-build"
+      ? SANDBOX_INSTALL_TIMEOUT_MS +
+        SANDBOX_PREVIEW_BUILD_TIMEOUT_MS +
+        PREVIEW_PROD_HEALTH_PROBE_TIMEOUT_MS
+      : SANDBOX_HEALTH_PROBE_TIMEOUT_MS;
   const startingIsFresh =
     existing?.status === "starting" &&
     existing.startedAt !== null &&
-    Date.now() - existing.startedAt < SANDBOX_HEALTH_PROBE_TIMEOUT_MS;
+    Date.now() - existing.startedAt < startingFreshWindowMs;
   if (
     !input.forceRestart &&
     existing &&

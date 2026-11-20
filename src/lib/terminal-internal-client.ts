@@ -218,6 +218,7 @@ export interface PreviewStatusResponse {
   lastHealthCheck: number | null;
   error: string | null;
   errorCode: string | null;
+  serveMode: "dev" | "production-build" | null;
   logs: string[];
 }
 
