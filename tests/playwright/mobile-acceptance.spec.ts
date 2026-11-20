@@ -535,7 +535,10 @@ test.describe("LiTT Studio mobile visual evidence", () => {
       await sendAndWait(page, "Try once more", "We hit a snag, try again.");
       const failedTurn = page.locator('[data-testid="studio-transcript"]').last();
       await expect(failedTurn.getByText("We hit a snag, try again.")).toBeVisible();
-      await expect(failedTurn.getByRole("button", { name: "Retry" })).toBeVisible();
+      // The canonical retry control carries data-testid="retry-<messageId>";
+      // scope to it — a second icon-only Retry button also lives in the
+      // transcript and trips strict mode.
+      await expect(failedTurn.locator('[data-testid^="retry-"]')).toBeVisible();
       await expect(page.getByText("provider exploded")).toHaveCount(0);
       await expect(page.getByText("internal stack trace")).toHaveCount(0);
       await failedTurn.scrollIntoViewIfNeeded();
