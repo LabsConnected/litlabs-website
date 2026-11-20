@@ -218,6 +218,12 @@ const GEMINI_PRIMARY_MODEL =
   process.env.GEMINI_PRIMARY_MODEL || "gemini-flash-latest";
 const GEMINI_FALLBACK_MODEL =
   process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash";
+/** Per-model quota stepdown rung — same env name + default the V2 agent
+ *  lane's registry resolves (provider-registry GEMINI_LITE_MODEL). Gemini
+ *  free tier meters quota per model, so flash-lite sits on a separate
+ *  pool from gemini-2.5-flash and can serve while flash is saturated. */
+const GEMINI_LITE_MODEL =
+  process.env.GEMINI_LITE_MODEL || "gemini-2.5-flash-lite";
 
 export const DEFAULT_MODELS: Record<LLMProvider, string> = {
   gemini: GEMINI_PRIMARY_MODEL,
@@ -883,13 +889,30 @@ async function dispatchProvider(
     p.opts.modelOverride?.[provider] ?? DEFAULT_MODELS[provider];
 
   if (provider === "gemini") {
-    // Try the configured model first, then fall back to the lite variant
+    // Try the configured model first, then fall back within the provider
     try {
       return await generateViaGemini(p, modelName, timeoutMs);
     } catch (err) {
       if (err instanceof ProviderError && modelName !== GEMINI_FALLBACK_MODEL) {
         try {
           return await generateViaGemini(p, GEMINI_FALLBACK_MODEL, timeoutMs);
+        } catch {
+          throw err; // throw original
+        }
+      }
+      // The configured model IS gemini-2.5-flash and it failed on quota
+      // (429): step down to flash-lite within the same call before the
+      // chain fails over — the V2 lane's per-model rate-limit doctrine
+      // (a saturated model cools only itself; the lite pool is separate).
+      // Mirrors the streaming stepdown in streamViaGemini below.
+      if (
+        err instanceof ProviderError &&
+        err.status === 429 &&
+        modelName === GEMINI_FALLBACK_MODEL &&
+        modelName !== GEMINI_LITE_MODEL
+      ) {
+        try {
+          return await generateViaGemini(p, GEMINI_LITE_MODEL, timeoutMs);
         } catch {
           throw err; // throw original
         }
@@ -1352,6 +1375,25 @@ export async function streamText(
   );
 }
 
+/**
+ * V1 streaming Gemini stepdown (D3): candidate models for one streaming
+ * attempt, in order. The requested model goes first; on a 429/quota
+ * failure the SAME call steps down to flash-lite before streamText
+ * fails over to the next provider — the V2 agent lane's per-model
+ * rate-limit doctrine (provider-registry marks gemini
+ * perModelRateLimits: a saturated model cools only itself, because the
+ * free tier meters quota per model and the lite pool stays usable).
+ * Proven gap: 2026-11-17 19:36 a plain chat turn exhausted the whole
+ * V1 chain while the V2 lion run had succeeded at 19:12 via exactly
+ * this stepdown. No lighter rung exists when the requested model IS
+ * flash-lite, so the ladder is a single entry then.
+ */
+function geminiStreamCandidates(requested: string): string[] {
+  return requested === GEMINI_LITE_MODEL
+    ? [requested]
+    : [requested, GEMINI_LITE_MODEL];
+}
+
 async function streamViaGemini(
   p: GenerateParams,
   onChunk: (text: string) => void,
@@ -1365,10 +1407,59 @@ async function streamViaGemini(
   failover: LLMProvider[];
   finishReason?: string;
 }> {
+  const requestedModel =
+    p.opts.modelOverride?.["gemini"] ?? DEFAULT_MODELS["gemini"];
+  const candidates = geminiStreamCandidates(requestedModel);
+  let lastErr: unknown = null;
+  for (const modelName of candidates) {
+    // A stepdown is only clean before any text reached the caller:
+    // restarting on another model after chunks streamed would duplicate
+    // the prefix, so a post-output failure keeps today's failover.
+    let emitted = false;
+    const trackingOnChunk = (text: string) => {
+      emitted = true;
+      onChunk(text);
+    };
+    try {
+      return await streamViaGeminiModel(
+        p,
+        trackingOnChunk,
+        t0,
+        failover,
+        onReasoning,
+        modelName,
+      );
+    } catch (err) {
+      // A caller abort is not a quota failure — surface it untouched.
+      if (p.opts.signal?.aborted) throw err;
+      const providerErr = toGeminiProviderError(err);
+      lastErr = providerErr;
+      if (providerErr.status !== 429 || emitted) throw providerErr;
+      // 429 before any output: step down to the next Gemini candidate
+      // within this same call instead of failing the whole provider.
+    }
+  }
+  throw lastErr instanceof Error
+    ? lastErr
+    : new ProviderError("gemini", null, "Gemini streaming failed");
+}
+
+async function streamViaGeminiModel(
+  p: GenerateParams,
+  onChunk: (text: string) => void,
+  t0: number,
+  failover: LLMProvider[],
+  onReasoning: ((text: string) => void) | undefined,
+  modelName: string,
+): Promise<{
+  provider: LLMProvider;
+  model: string;
+  latencyMs: number;
+  failover: LLMProvider[];
+  finishReason?: string;
+}> {
   const genAI = getGenAI();
   if (!genAI) throw new ProviderError("gemini", null, "GEMINI_API_KEY not set");
-  const modelName =
-    p.opts.modelOverride?.["gemini"] ?? DEFAULT_MODELS["gemini"];
   const model = genAI.getGenerativeModel({ model: modelName });
   const fullPrompt = p.systemPrompt
     ? `${p.systemPrompt}\n\n${p.prompt}`

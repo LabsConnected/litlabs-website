@@ -2239,6 +2239,12 @@ async function runAgentLoopV2Inner(
           allowLittPaidProviders: cfg.allowLittPaidProviders,
           allowTransientPlanRetry: true,
           onRoutePlan: recordRoutePlan,
+          // D4 text channel: stream each step's reply text to the
+          // client as it is produced, instead of the answer arriving
+          // whole inside the terminal done payload.
+          onText: (text) => {
+            localProgress.emit({ type: "text", text });
+          },
         },
       );
       const llmDurationMs = Date.now() - llmStartTime;
@@ -4406,6 +4412,11 @@ async function resumeAgentLoopV2Inner(
           allowLittPaidProviders: cfg.allowLittPaidProviders,
           allowTransientPlanRetry: true,
           onRoutePlan: recordRoutePlan,
+          // D4 text channel: same streaming as the main loop — resumed
+          // runs share the text channel instead of arriving whole.
+          onText: (text) => {
+            localProgress.emit({ type: "text", text });
+          },
         },
       );
       if (llmResponse.responseShape && llmResponse.provider) {
