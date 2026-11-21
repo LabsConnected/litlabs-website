@@ -75,6 +75,32 @@ jobs:
         env:
           CI: true
 
+  bridge-agent-key-acl-windows:
+    name: Bridge agent device-key ACL (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run device-key ACL regression test
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap bridge-agent/pair.test.mjs | tee test-output.tap
+          if ! grep -qE '^ok [0-9]+ - a freshly created key file on Windows loses inherited ACEs and is scoped to the current user$' test-output.tap; then
+            echo "::error::Windows device-key ACL test did not run as expected (missing or skipped) — failing closed."
+            exit 1
+          fi
+          if ! grep -qE '^# skipped 0$' test-output.tap; then
+            echo "::error::A Windows-only pairing test was skipped on windows-latest — failing closed."
+            exit 1
+          fi
+
   production-upgrade:
     name: Production-style migration upgrade
     runs-on: ubuntu-latest
