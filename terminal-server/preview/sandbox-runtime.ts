@@ -259,7 +259,7 @@ async function captureBuildMemoryEvidence(
     }
     pushPreviewLog(
       runtime,
-      "[build] Memory snapshot after the failed build (sandbox limit: 2048 MB):",
+      "[build] Memory snapshot after the failed build (sandbox limit: 4096 MB):",
     );
     for (const line of lines) {
       pushPreviewLog(runtime, `[build] ${line}`);
@@ -459,7 +459,7 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
     pushPreviewLog(
       runtime,
       `[preview] Building production bundle in sandbox (${buildCommand}) — ` +
-        `this can take several minutes on the sandbox's 2 vCPU`,
+        `this can take several minutes on the sandbox's 4 vCPU`,
     );
     // The build's env mirrors the launch's composition — the
     // project's traveling env first (Next inlines NEXT_PUBLIC_*
@@ -669,7 +669,7 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
         pushPreviewLog(
           runtime,
           `[preview] Build process was killed by a signal (exit ${buildExitCode}) — ` +
-            `at the sandbox's 2 vCPU / 2048 MB limits the in-sandbox OOM killer ` +
+            `at the sandbox's 4 vCPU / 4096 MB limits the in-sandbox OOM killer ` +
             `is the leading cause`,
         );
       }

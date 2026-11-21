@@ -297,7 +297,7 @@ describe("startSandboxPreview — install memory evidence (round 12)", () => {
       expect(line).toContain("sandbox=sbx-1");
       expect(line).toContain("exit=0");
       expect(line).toContain("memory.peak=1048576000");
-      expect(line).toContain("limit=2147483648");
+      expect(line).toContain("limit=4294967296");
     } finally {
       info.mockRestore();
     }
