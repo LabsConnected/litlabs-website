@@ -315,6 +315,70 @@ describe("project.deploy is the deployment tool", () => {
   });
 });
 
+describe("deploy.execute / deploy.verify are recognised deploy evidence", () => {
+  it("is recognised as a deployment, unlike a file write or a preview", () => {
+    const evidence = deploymentEvidenceFrom([
+      { toolId: "files.write", success: true },
+      { toolId: "deploy.execute", success: true },
+    ]);
+    expect(evidence).not.toBeNull();
+    expect(evidence?.started).toBe(true);
+    expect(evidence?.succeeded).toBe(true);
+  });
+
+  it("completes a ship request on its own — deploy.execute verifies the URL internally", () => {
+    // deploy.execute returns the verified production URL as part of a
+    // successful result, so its own success IS the URL verification —
+    // the same self-verifying contract as project.deploy.
+    const toolCalls = [
+      { toolId: "files.write", success: true },
+      { toolId: "deploy.execute", success: true },
+    ];
+    const verdict = evaluateCompletion(requirementForMode("ship"), {
+      toolCalls: toolCalls.map((c) => ({ ...c, mutating: true, persisted: true })),
+      deployment: deploymentEvidenceFrom(toolCalls),
+    });
+    expect(verdict.state).toBe("complete");
+  });
+
+  it("keeps a ship request incomplete when deploy.execute failed", () => {
+    const toolCalls = [
+      { toolId: "files.write", success: true },
+      { toolId: "deploy.execute", success: false },
+    ];
+    const verdict = evaluateCompletion(requirementForMode("ship"), {
+      toolCalls: toolCalls.map((c) => ({ ...c, mutating: true, persisted: true })),
+      deployment: deploymentEvidenceFrom(toolCalls),
+    });
+    expect(verdict.state).toBe("partial");
+    expect(verdict.missing).toContain("successful deployment");
+  });
+
+  it("treats deploy.verify after a non-self-verifying deploy as URL verification", () => {
+    // Plain "deploy" is not self-verifying — it needs a verify step after it.
+    const evidence = deploymentEvidenceFrom([
+      { toolId: "deploy", success: true },
+      { toolId: "deploy.verify", success: true },
+    ]);
+    expect(evidence?.urlVerified).toBe(true);
+  });
+
+  it("does not count deploy.verify run BEFORE the deploy as verification", () => {
+    const evidence = deploymentEvidenceFrom([
+      { toolId: "deploy.verify", success: true },
+      { toolId: "deploy", success: true },
+    ]);
+    expect(evidence?.urlVerified).toBe(false);
+  });
+
+  it("leaves a non-self-verifying deploy unverified without a deploy.verify call", () => {
+    const evidence = deploymentEvidenceFrom([{ toolId: "deploy", success: true }]);
+    expect(evidence?.started).toBe(true);
+    expect(evidence?.succeeded).toBe(true);
+    expect(evidence?.urlVerified).toBe(false);
+  });
+});
+
 /* ── Boundary mutations never satisfy a file-work requirement ─────
  *
  * Regression (e2e-live 2026-10-31): a theme-edit run whose model called
