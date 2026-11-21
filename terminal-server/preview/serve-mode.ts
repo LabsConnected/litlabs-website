@@ -54,15 +54,35 @@ export type PreviewServeMode = "dev" | "production-build";
 export const PREVIEW_PROD_BUILD_FILE_THRESHOLD = 250;
 
 /**
- * Budget for the in-sandbox production build. Sized like the
- * install budget (SANDBOX_INSTALL_TIMEOUT_MS, 900 s): a cold
- * production build of a large Next.js app on 2 vCPU is the same
- * class of workload as its cold install, and install (≤900 s) +
- * build (≤900 s) + serving must fit inside the sandbox's session
- * lifetime. A build that exceeds the budget fails the start
- * honestly with its output tail, like an install timeout does.
+ * TOTAL wall-clock budget for the in-sandbox production build.
+ *
+ * This used to be 900 s and was passed as the timeoutMs of ONE
+ * blocking provider.execute — which made it a hard ceiling no
+ * large build could beat: live proof 2026-11-20 (build d04fb354)
+ * showed the litlabs-website build still running when the
+ * request died at the cap with [deadline_exceeded], on three
+ * attempts, never reaching the serve step. A local measurement
+ * of this repo's `next build` (PREVIEW-BUILD-TIMEOUT-DIAGNOSIS-
+ * 2026-11-20) took 908 s on a throttled ~1.5-CPU VM with ~8 GB
+ * RAM — right at the 900 s cap even uncontended-by-design and
+ * with 4× the sandbox's memory — and its peak RSS was 3,179 MB,
+ * more than the sandbox's entire 2048 MB. On the sandbox's
+ * 2 vCPU the same build is slower still, so a 15-minute cap is
+ * not a slow-build guard, it is a guarantee the flagship
+ * project can never preview.
+ *
+ * The build now runs DETACHED in the sandbox (sandbox-runtime.ts)
+ * and this constant is only the poll loop's total budget: no
+ * single request is ever outstanding longer than the launch /
+ * poll executes (30 s), and every poll re-arms the sandbox's
+ * session lifetime through provider.execute, so a build inside
+ * this budget cannot outlive its sandbox the way the blocking
+ * request could ([unavailable] sandbox-EOL failure, same proof).
+ * 45 minutes covers the measured build with headroom while
+ * still failing a genuinely wedged build honestly, with its
+ * output tail, inside one start.
  */
-export const SANDBOX_PREVIEW_BUILD_TIMEOUT_MS = 900_000;
+export const SANDBOX_PREVIEW_BUILD_TIMEOUT_MS = 2_700_000;
 
 /**
  * Health-probe budget for the production-build path. The dev path
