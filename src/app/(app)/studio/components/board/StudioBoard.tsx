@@ -63,7 +63,7 @@ import {
 } from "../../stores/useTerminalLogStore";
 import BoardPanel from "./BoardPanel";
 import BoardSettingsMenu from "./BoardSettingsMenu";
-import { visiblePanels } from "./board-layout";
+import { clampRectInsideArea, visiblePanels } from "./board-layout";
 import {
   BOARD_ACCENT_VIOLET,
   BOARD_PANEL_IDS,
@@ -543,7 +543,24 @@ export default function StudioBoard({
             status={statusForPanel(panel.id)}
             front={panel.id === frontPanelId}
             scale={viewport.scale}
-            onRectChange={(id, rect) => store.getState().setPanelRect(scope, id, rect)}
+            onRectChange={(id, rect) =>
+              store
+                .getState()
+                .setPanelRect(
+                  scope,
+                  id,
+                  // Drop clamp (live defect, Larry 2026-11-20): a drag
+                  // or resize commits through here on every move, so
+                  // clamping the rect to the visible region means a
+                  // panel can never be dropped half off the right or
+                  // bottom edge with its header controls cut off.
+                  // Before the container is measured there is no
+                  // visible region to clamp against — pass through.
+                  containerSize.width > 0 && containerSize.height > 0
+                    ? clampRectInsideArea(rect, visibleRegion)
+                    : rect,
+                )
+            }
             onBringToFront={(id) => store.getState().bringToFront(scope, id)}
             onMinimize={(id) => store.getState().minimizePanel(scope, id)}
             onToggleMaximize={(id) => store.getState().toggleMaximize(scope, id, visibleRegion)}

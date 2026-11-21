@@ -3,11 +3,14 @@
 import { useCallback, useState } from "react";
 import { AlertTriangle, Hand, Loader2, Magnet, MousePointer2, Move, Redo2, RotateCw, Undo2 } from "lucide-react";
 import StudioPreviewPanel, { type PreviewSelection } from "./StudioPreviewPanel";
+import { ProjectStructurePanel } from "./ProjectStructurePanel";
+import ElementInspectorPanel from "./shell/ElementInspectorPanel";
 import { useStudioContext } from "../context/StudioContext";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
 import { useProjectRuntime } from "../hooks/useProjectRuntime";
 import { useSharedElementEdits } from "../context/ElementEditsContext";
 import type { ElementPatch } from "../lib/element-edits";
+import type { CanvasDesignMode } from "../lib/studio-destinations";
 
 type CanvasTool = "select" | "pan" | "edit";
 
@@ -20,16 +23,32 @@ interface GeometryChange {
 }
 
 /**
- * ProjectDesignSurface is the Design tab's project-backed visual editor.
- * It embeds the live preview (StudioPreviewPanel + inspector bridge) and
- * turns pointer gestures into real workspace-file patches through the
- * shared useElementEdits write path — project files stay the only
- * document model; nothing is mirrored into a second canvas tree.
+ * ProjectDesignSurface is the Canvas & Design stage's project-backed
+ * surface. Three columns, one document model (the project files):
+ *  - Page structure (ProjectStructurePanel): the element tree of the
+ *    project's entry HTML file — renders with no preview running.
+ *  - The live preview (StudioPreviewPanel + inspector bridge): pointer
+ *    gestures become real workspace-file patches through the shared
+ *    useElementEdits write path.
+ *  - Design mode only: the element inspector (ElementInspectorPanel)
+ *    for the current selection, from either source. This panel existed
+ *    fully built but was never mounted anywhere; the stage is its
+ *    home now.
  */
 export function ProjectDesignSurface({
   onPreviewSelectionChange,
+  mode = "build",
+  onAskAboutSelection,
 }: {
   onPreviewSelectionChange?: (selection: PreviewSelection | null) => void;
+  /** The stage's Build/Design mode. Build shows the page structure;
+      Design adds the element inspector for the current selection.
+      Before this prop existed the mode never reached the surface, so
+      both modes rendered identically and Design did nothing. */
+  mode?: CanvasDesignMode;
+  /** "Ask LiTT to change this" for the inspected element — the same
+      handler CommandStudio wires for preview selections. */
+  onAskAboutSelection?: () => void;
 }) {
   const { projectId, selection } = useStudioContext();
   const { capabilities } = useConnectionSummary();
@@ -37,6 +56,23 @@ export function ProjectDesignSurface({
   const edits = useSharedElementEdits(projectId);
   const [tool, setTool] = useState<CanvasTool>("edit");
   const [snap, setSnap] = useState(true);
+  // The element the inspector styles. Set identically from a click in
+  // the live preview (bridge selection) or a click in the page
+  // structure tree (same identity format) — one selection, two
+  // sources, so Design works even when the preview is not running.
+  const [activeSelection, setActiveSelection] = useState<PreviewSelection | null>(null);
+
+  const handleSelection = useCallback(
+    (next: PreviewSelection | null) => {
+      setActiveSelection(next);
+      onPreviewSelectionChange?.(next);
+    },
+    [onPreviewSelectionChange],
+  );
+
+  // Design mode is for styling: clicks select, they never start a
+  // drag-reorder gesture.
+  const effectiveTool: CanvasTool = mode === "design" ? "select" : tool;
 
   /**
    * Geometry commits arrive from the in-frame inspector with the full
@@ -127,7 +163,7 @@ export function ProjectDesignSurface({
     <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="project-design-surface">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-black/10 px-4 py-2">
         <div className="min-w-0">
-          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-600">Design</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-600">{mode === "design" ? "Design" : "Build"}</p>
           <h2 className="truncate text-sm font-semibold text-zinc-900">{capabilities.projectName ?? "Active project"}</h2>
         </div>
         {selection && (
@@ -140,6 +176,11 @@ export function ProjectDesignSurface({
       {/* Canvas toolbar — tools, snapping, undo/redo over the shared
           element-edit write path. */}
       <div className="flex shrink-0 items-center gap-1 border-b border-black/10 px-3 py-1.5" role="toolbar" aria-label="Design canvas tools">
+        {mode === "design" ? (
+          <span className="px-1 text-[10px] font-semibold text-zinc-500">
+            Click an element in the preview or the page structure to style it
+          </span>
+        ) : (
         <div className="flex items-center gap-0.5 rounded-lg border border-black/10 p-0.5" role="group" aria-label="Tool">
           {toolButtons.map(({ id, label, icon: Icon, hint }) => (
             <button
@@ -160,6 +201,8 @@ export function ProjectDesignSurface({
             </button>
           ))}
         </div>
+        )}
+        {mode === "build" && (
         <button
           type="button"
           onClick={() => setSnap((v) => !v)}
@@ -175,6 +218,7 @@ export function ProjectDesignSurface({
           <Magnet size={11} className="pointer-events-none" aria-hidden="true" />
           Snap
         </button>
+        )}
         <div className="mx-1 h-4 w-px bg-black/10" aria-hidden="true" />
         <button
           type="button"
@@ -210,28 +254,66 @@ export function ProjectDesignSurface({
         )}
       </div>
 
-      <div className="min-h-0 flex-1">
-        <StudioPreviewPanel
+      <div className="flex min-h-0 flex-1">
+        {/* Page structure — read from the project's entry HTML file,
+            so the stage shows the project's real structure even when
+            the preview runtime is not running (previously the stage
+            was only the preview iframe and rendered nothing without
+            one). Selecting a node feeds the same selection sink as a
+            click in the preview frame. */}
+        <ProjectStructurePanel
           projectId={projectId}
-          projectName={capabilities.projectName}
-          repositoryName={capabilities.repositoryName}
-          branch={capabilities.activeBranch}
-          workspaceStatus={runtime.state.workspaceStatus}
-          sourceKind={capabilities.sourceKind}
-          sourceStatus={capabilities.sourceStatus}
-          versionControl={capabilities.versionControl}
-          lockSelection
-          inspectorTool={tool}
-          snapEnabled={snap}
-          onBridgeMessage={handleBridgeMessage}
-          onSelectionChange={(next: PreviewSelection | null) => {
-            // Full-fidelity sink → CommandStudio previewSelection →
-            // ElementInspectorPanel + composer chips. The legacy context
-            // selection derives from previewSelection automatically, so
-            // routing through setSelection here would only degrade it.
-            onPreviewSelectionChange?.(next);
-          }}
+          selectedPath={activeSelection?.path ?? null}
+          onSelect={handleSelection}
         />
+        <div className="min-h-0 min-w-0 flex-1">
+          <StudioPreviewPanel
+            projectId={projectId}
+            projectName={capabilities.projectName}
+            repositoryName={capabilities.repositoryName}
+            branch={capabilities.activeBranch}
+            workspaceStatus={runtime.state.workspaceStatus}
+            sourceKind={capabilities.sourceKind}
+            sourceStatus={capabilities.sourceStatus}
+            versionControl={capabilities.versionControl}
+            lockSelection
+            inspectorTool={effectiveTool}
+            snapEnabled={snap}
+            onBridgeMessage={handleBridgeMessage}
+            onSelectionChange={(next: PreviewSelection | null) => {
+              // Full-fidelity sink → CommandStudio previewSelection +
+              // this surface's inspector. The legacy context selection
+              // derives from previewSelection automatically, so routing
+              // through setSelection here would only degrade it.
+              handleSelection(next);
+            }}
+          />
+        </div>
+        {mode === "design" && (
+          <div
+            className="flex w-[300px] shrink-0 flex-col overflow-hidden border-l"
+            style={{ borderColor: "var(--studio-border)", backgroundColor: "var(--studio-surface)" }}
+            data-testid="design-inspector-column"
+          >
+            {activeSelection ? (
+              <ElementInspectorPanel
+                selection={activeSelection}
+                projectId={projectId}
+                route={null}
+                onAskAboutSelection={onAskAboutSelection}
+                onClearSelection={() => handleSelection(null)}
+              />
+            ) : (
+              <div className="flex flex-1 items-center justify-center p-4 text-center" data-testid="design-inspector-empty">
+                <p className="text-[11px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
+                  No element selected. Click an element in the preview — or
+                  pick one from the page structure — to see and edit its
+                  colors, typography, and spacing.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

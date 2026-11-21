@@ -23,11 +23,15 @@ export default function GameCard({
           src={game.coverUrl}
           alt={game.title}
           fill
-          sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 33vw"
+          // Covers ship pre-sized as WebP — serve the file directly
+          // instead of paying the optimizer's AVIF transcode per card
+          // (measured ~19s per cover from the old 2.5 MB PNGs).
+          unoptimized
+          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
           className="object-cover"
           onError={(e) => {
             (e.target as HTMLImageElement).src =
-              'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%23333"/><text x="50" y="50" text-anchor="middle" fill="%23666" font-size="40">🎮</text></svg>';
+              'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%232A1B4A"/><text x="50" y="58" text-anchor="middle" fill="%239B4DFF" font-size="40">🎮</text></svg>';
           }}
         />
         {/* Play overlay */}

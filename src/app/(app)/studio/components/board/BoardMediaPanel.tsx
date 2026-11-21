@@ -37,6 +37,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ImageIcon, LoaderCircle, Music, Pencil, Play, RefreshCw, Send, Trash2, X } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import type { StudioAsset } from "@/lib/assets/types";
+import { mediaThumbnailSrc } from "@/lib/assets/thumbnail";
 import { notifyAssetsChanged, useAssetsRefreshTrigger } from "../../hooks/useAssetsRefresh";
 import { BOARD_ACCENT_VIOLET } from "./board-types";
 
@@ -709,9 +710,11 @@ export default function BoardMediaPanel({ projectId }: BoardMediaPanelProps) {
                 title={asset.name}
               >
                 {asset.kind === "image" ? (
+                  // Grid cells load a small optimizer thumbnail, not the
+                  // full original (see lib/assets/thumbnail.ts).
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={asset.thumbnailUrl ?? asset.url}
+                    src={mediaThumbnailSrc(asset)}
                     alt={asset.name}
                     className="h-full w-full object-cover"
                     loading="lazy"
@@ -835,7 +838,7 @@ export default function BoardMediaPanel({ projectId }: BoardMediaPanelProps) {
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={candidate.url}
+                      src={mediaThumbnailSrc({ url: candidate.url })}
                       alt={`Generated option ${i + 1}`}
                       className="aspect-video w-full object-cover"
                     />

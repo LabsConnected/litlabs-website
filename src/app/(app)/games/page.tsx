@@ -324,10 +324,16 @@ export default function GamesPage() {
                       src={game.coverUrl}
                       alt={`${displayTitle} cover art`}
                       fill
-                      sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 33vw"
+                      // Covers ship pre-sized as WebP (~800px, tens of KB).
+                      // unoptimized serves that file directly: routing the
+                      // old 2.5 MB PNG originals through the image optimizer
+                      // made its AVIF transcode take ~19s per cover on a
+                      // small container, so cards sat as black boxes.
+                      unoptimized
+                      sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                       className="object-cover transition-transform duration-500 group-hover:scale-105"
                       onError={(e) => {
-                        (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%23111"/><text x="50" y="50" text-anchor="middle" fill="%23555" font-size="40">🎮</text></svg>';
+                        (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%232A1B4A"/><text x="50" y="58" text-anchor="middle" fill="%239B4DFF" font-size="40">🎮</text></svg>';
                       }}
                     />
                     {/* Gradient overlay on hover */}
