@@ -170,7 +170,16 @@ function makeRuntime(): PreviewRuntime {
 
 function makeSupport(
   buildExitCode: number,
-  buildOpts: { runningPollsBeforeDone?: number; neverDone?: boolean } = {},
+  buildOpts: {
+    runningPollsBeforeDone?: number;
+    neverDone?: boolean;
+    /** First N polls throw the SDK's deadline_exceeded error. */
+    pollThrowsBeforeDone?: number;
+    /** Every poll throws — the sandbox never answers a status check. */
+    pollAlwaysThrows?: boolean;
+    /** The build launch execute itself throws (transport failure). */
+    launchThrows?: boolean;
+  } = {},
 ): {
   support: SandboxPreviewSupport;
   executions: CapturedExecute[];
@@ -216,12 +225,32 @@ function makeSupport(
         },
       ) => {
         executions.push(input);
+        // The build launch execute, failing at the transport layer
+        // (round 3): the start must kill the possibly-running
+        // detached build rather than orphan it.
+        if (buildOpts.launchThrows && input.command.includes("build.sh")) {
+          throw new Error(
+            "[deadline_exceeded] the operation timed out: launch transport failed",
+          );
+        }
         // The detached build's poll (its command echoes DONE/RUNNING
         // from the exit file): RUNNING for the configured number of
         // polls, then DONE with the configured build outcome — or
-        // RUNNING forever when neverDone is set.
+        // RUNNING forever when neverDone is set. Round 3: polls can
+        // also throw the SDK's deadline_exceeded text, exactly as a
+        // build-starved envd answers in production.
         if (input.command.includes('echo "DONE')) {
           pollCount += 1;
+          if (
+            buildOpts.pollAlwaysThrows ||
+            pollCount <= (buildOpts.pollThrowsBeforeDone ?? 0)
+          ) {
+            throw new Error(
+              "[deadline_exceeded] the operation timed out: This error is likely " +
+                "due to exceeding 'timeoutMs' — the total time a long running " +
+                "request (like command execution or directory watch) can be active.",
+            );
+          }
           if (buildOpts.neverDone || pollCount <= (buildOpts.runningPollsBeforeDone ?? 0)) {
             return { exitCode: 0, stdout: "RUNNING", stderr: "", durationMs: 1 };
           }
@@ -416,6 +445,107 @@ describe("startSandboxPreview — production-build mode", () => {
     expect((err as PreviewError).code).toBe("preview_build_failed");
     expect(runtime.logs.some((l) => l.includes("exceeded the") && l.includes("budget"))).toBe(true);
     // The wedged build was killed, not left running in the sandbox.
+    expect(executions.some((e) => e.command.includes("kill -KILL"))).toBe(true);
+    expect(executions.some((e) => e.command.includes("run.sh"))).toBe(false);
+  });
+
+  it("tolerates throwing build polls and still launches when the build lands (round 3)", async () => {
+    // A build-starved envd answers status checks with
+    // [deadline_exceeded]; the pre-round-3 loop let the first such
+    // throw abort the whole start with the raw SDK error. Two
+    // throwing polls, then DONE 0: the start must survive, log the
+    // failures and the recovery, and launch.
+    const { support, executions } = makeSupport(0, { pollThrowsBeforeDone: 2 });
+    const runtime = makeRuntime();
+
+    await startSandboxPreview({
+      support,
+      runtime,
+      ws: WS,
+      framework: "nextjs",
+      command: "pnpm exec next start --port 3000 --hostname 0.0.0.0",
+      packageManager: "pnpm",
+      serveMode: "production-build",
+      buildCommand: "pnpm exec next build",
+      travelingEnv: {},
+      probe: healthyProbe,
+      buildPollIntervalMs: 1,
+    });
+
+    expect(executions.some((e) => e.command.includes("run.sh"))).toBe(true);
+    expect(
+      runtime.logs.some((l) => l.includes("Build status check failed (1 in a row")),
+    ).toBe(true);
+    expect(
+      runtime.logs.some((l) => l.includes("Build status checks recovered after 2")),
+    ).toBe(true);
+    expect(runtime.logs.some((l) => l.includes("Production build complete"))).toBe(true);
+  });
+
+  it("fails as status-unreadable — never the raw transport error — when polls throw until the budget ends (round 3)", async () => {
+    // Every status check throws: the wait must end at the budget
+    // with the failure CLASS named (build outcome unknown), the
+    // poll evidence counted, and a memory snapshot attempted —
+    // not with the SDK's bare [deadline_exceeded] message, which
+    // is all the round-2 proof could see.
+    const { support, executions } = makeSupport(0, { pollAlwaysThrows: true });
+    const runtime = makeRuntime();
+
+    const err = await startSandboxPreview({
+      support,
+      runtime,
+      ws: WS,
+      framework: "nextjs",
+      command: "pnpm exec next start --port 3000 --hostname 0.0.0.0",
+      packageManager: "pnpm",
+      serveMode: "production-build",
+      buildCommand: "pnpm exec next build",
+      travelingEnv: {},
+      probe: healthyProbe,
+      buildPollIntervalMs: 1,
+      buildBudgetMs: 25,
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(PreviewError);
+    expect((err as PreviewError).code).toBe("preview_build_failed");
+    expect(runtime.error).toContain("Production build status became unreadable in sandbox");
+    expect(runtime.error).toContain("consecutive status checks failed");
+    expect(
+      runtime.logs.some((l) => l.includes("Build status became unreadable")),
+    ).toBe(true);
+    // The memory snapshot was attempted (the stub answers empty,
+    // which is itself recorded) — the 2048 MB evidence channel.
+    expect(executions.some((e) => e.command.includes("free -m"))).toBe(true);
+    expect(runtime.logs.some((l) => l.includes("Memory snapshot"))).toBe(true);
+    // The possibly-still-running build was killed at the budget.
+    expect(executions.some((e) => e.command.includes("kill -KILL"))).toBe(true);
+    expect(executions.some((e) => e.command.includes("run.sh"))).toBe(false);
+  });
+
+  it("kills the detached build when the start dies after the launch (round 3)", async () => {
+    // The launch execute throws at the transport layer: whether or
+    // not the detached build actually started is unknowable, so
+    // the start must best-effort kill it via the pid file instead
+    // of orphaning a saturating build into the next start.
+    const { support, executions } = makeSupport(0, { launchThrows: true });
+    const runtime = makeRuntime();
+
+    const err = await startSandboxPreview({
+      support,
+      runtime,
+      ws: WS,
+      framework: "nextjs",
+      command: "pnpm exec next start --port 3000 --hostname 0.0.0.0",
+      packageManager: "pnpm",
+      serveMode: "production-build",
+      buildCommand: "pnpm exec next build",
+      travelingEnv: {},
+      probe: healthyProbe,
+      buildPollIntervalMs: 1,
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("launch transport failed");
     expect(executions.some((e) => e.command.includes("kill -KILL"))).toBe(true);
     expect(executions.some((e) => e.command.includes("run.sh"))).toBe(false);
   });
