@@ -135,6 +135,9 @@ export async function handleImageGenerate(
       // (LION-RUN-DIAGNOSIS-2026-11-16 Q2/F2a).
       assetId: result.assetId ?? null,
       assetPersistenceFailed: result.assetPersistenceFailed ?? false,
+      // False when the provider returned only a link whose bytes could
+      // not be fetched/persisted — delivery is possible but unverified.
+      deliveryVerified: result.deliveryVerified ?? true,
       cost: result.cost ?? 0,
       free: result.free ?? true,
       markdown: `![${prompt}](${result.downloadUrl})`,
