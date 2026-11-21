@@ -17,6 +17,7 @@ import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
 import { notifyAssetsChanged, useAssetsRefreshTrigger } from "../hooks/useAssetsRefresh";
 import type { StudioAsset } from "@/lib/assets/types";
+import { mediaThumbnailSrc } from "@/lib/assets/thumbnail";
 import { resolveSelectedModelHealth } from "../lib/model-health";
 import { useCanonicalConversation } from "../hooks/useCanonicalConversation";
 import { downloadProjectExport } from "../lib/export-project";
@@ -5206,9 +5207,12 @@ export function MediaWorkspacePanel({
               >
                 <span className="block h-28 w-full">
                   {asset.kind === "image" ? (
+                    // Grid cells load a small optimizer thumbnail, not the
+                    // full original — assets almost never carry a real
+                    // thumbnailUrl (see lib/assets/thumbnail.ts).
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={asset.thumbnailUrl ?? asset.url}
+                      src={mediaThumbnailSrc(asset)}
                       alt={asset.name}
                       className="h-full w-full object-cover"
                       loading="lazy"
