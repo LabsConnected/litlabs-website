@@ -201,13 +201,16 @@ export function describeProjectSource(project: CanonicalProject): ProjectSourceV
   // Git exists once the workspace has been provisioned: managed
   // framework workspaces are `git init`-ed at creation, GitHub
   // workspaces are clones. Before provisioning there is no working
-  // tree, so no Git. The one exception is a static-template project:
-  // provisioning routes it through the gitless "static" path (Gate 1),
-  // so its ready workspace has NO repository. The predicate mirrors
-  // workspace-recovery.ts, which derives the prepare source from the
-  // same two facts — keep them in step.
+  // tree, so no Git. The one exception is a managed static-template
+  // project: provisioning routes it through the gitless "static" path
+  // (Gate 1), so its ready workspace has NO repository. The predicate
+  // mirrors workspace-recovery.ts, which derives the prepare source
+  // from the same facts — keep them in step. A project with a GitHub
+  // repository connected is GitHub-backed (kind "github") regardless
+  // of its original template: its workspace is a clone, so the
+  // exception never applies to it.
   const gitlessStatic =
-    isManagedSourceType(project.sourceType) && isStaticTemplateId(project.templateId);
+    kind === "managed" && isStaticTemplateId(project.templateId);
   const gitInitialized = ready && !gitlessStatic;
 
   return {

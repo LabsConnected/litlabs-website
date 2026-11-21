@@ -7,6 +7,13 @@
  * the UI reported "No repository · —", the agent was denied git_status,
  * git_diff and checkpoints, and re-provisioning minted a fresh empty
  * directory that orphaned the user's files.
+ *
+ * Refinement (gitless-static fix): the Git claim holds for managed
+ * FRAMEWORK projects. Static-template projects (blank-static,
+ * empty-static) provision through the gitless "static" path (Gate 1
+ * blocks Git operations in production), so they truthfully report NO
+ * version control — while remaining healthy managed sources whose
+ * card copy must still never read "No repository".
  */
 
 import { describe, it, expect } from "vitest";
@@ -101,11 +108,27 @@ describe("managed source identity", () => {
   });
 
   it("reports Git version control without any GitHub repository", () => {
-    const source = describeProjectSource(managedProject());
+    // A managed FRAMEWORK project (nextjs template) is `git init`-ed at
+    // provisioning, so it reports Git with no GitHub repository.
+    const source = describeProjectSource(managedProject({ templateId: "nextjs" }));
     expect(source.versionControl).toBe("git");
     expect(source.gitInitialized).toBe(true);
     expect(source.githubConnected).toBe(false);
     expect(source.githubRepository).toBeNull();
+  });
+
+  it("reports a static-template managed project as gitless, not sourceless", () => {
+    // The default fixture is blank-static: provisioning routes it
+    // through the gitless "static" path (Gate 1), so its ready
+    // workspace has NO repository — while remaining a healthy,
+    // writable LiTT Managed source.
+    const source = describeProjectSource(managedProject());
+    expect(source.kind).toBe("managed");
+    expect(source.status).toBe("ready");
+    expect(source.writable).toBe(true);
+    expect(source.versionControl).toBe("none");
+    expect(source.gitInitialized).toBe(false);
+    expect(source.githubConnected).toBe(false);
   });
 
   it("reports the real branch instead of null", () => {
@@ -155,13 +178,25 @@ describe("provisioning states are truthful", () => {
 
 describe("project card copy", () => {
   it("never renders 'No repository' for a healthy managed project", () => {
-    const source = describeProjectSource(managedProject());
+    const source = describeProjectSource(managedProject({ templateId: "nextjs" }));
     const summary = formatSourceSummary({
       kind: source.kind, status: source.status,
       versionControl: source.versionControl, branch: source.branch,
       githubRepository: source.githubRepository,
     });
     expect(summary).toBe("LiTT Managed · Git · main");
+    expect(summary).not.toContain("No repository");
+    expect(summary).not.toContain("—");
+  });
+
+  it("renders honest copy for a gitless static project — no 'Git', no 'No repository'", () => {
+    const source = describeProjectSource(managedProject());
+    const summary = formatSourceSummary({
+      kind: source.kind, status: source.status,
+      versionControl: source.versionControl, branch: source.branch,
+      githubRepository: source.githubRepository,
+    });
+    expect(summary).toBe("LiTT Managed · main");
     expect(summary).not.toContain("No repository");
     expect(summary).not.toContain("—");
   });
