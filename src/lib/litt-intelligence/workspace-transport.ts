@@ -17,6 +17,7 @@ import "server-only";
 import { createTerminalToken } from "@/lib/terminal-auth";
 import { isCanonicalBase64 } from "@/lib/deployments/user-deployment";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
+import { isManagedSourceType, isStaticTemplateId } from "@/lib/projects/project-source";
 import { createWorkspaceCheckpoint } from "@/lib/missions/workspace-checkpoint";
 import { requireTerminalBaseUrl } from "@/lib/terminal-config";
 import { unquoteGitPath } from "./workspace-change-producer";
@@ -154,6 +155,16 @@ export interface WorkspaceTransport {
    * instead of claiming writes work.
    */
   readonly fileOpsReachable: boolean;
+  /**
+   * True when the workspace was provisioned through the gitless
+   * "static" path (a static-template LiTT-managed project — Gate 1
+   * blocks all Git operations in production, so prepareStaticWorkspace
+   * never creates a repository). Checkpoints are not applicable to
+   * such a workspace: createCheckpointBeforeMutation returns null
+   * WITHOUT recording a lastCheckpointError, and run settlement
+   * verifies changes through its gitless read-back path instead.
+   */
+  readonly isStaticWorkspace?: boolean;
 
   // File operations
   listFiles(path: string): Promise<{ entries: Array<{ name: string; type: string }> }>;
@@ -255,6 +266,17 @@ export async function createWorkspaceTransport(
     opts?.operationId,
   );
 
+  // Static-template managed projects provision gitless on purpose
+  // (Gate 1). Mirror workspace-recovery.ts's prepare-source derivation
+  // — same two facts, same default — so checkpointing can skip cleanly
+  // instead of failing against a repository that does not exist.
+  const verifiedProject = verified.project;
+  transport.isStaticWorkspace = Boolean(
+    verifiedProject &&
+      isManagedSourceType(verifiedProject.sourceType) &&
+      isStaticTemplateId(verifiedProject.templateId),
+  );
+
   // Honest reachability: verifyProjectWorkspace() only checks the DB row —
   // it cannot prove the terminal server actually serves /ws-files for this
   // project (a dead per-project transport still reports "workspace ready").
@@ -343,6 +365,9 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
 
   /** Set by createWorkspaceTransport() from the reachability probe. */
   public fileOpsReachable = true;
+
+  /** Set by createWorkspaceTransport() from the verified project row. */
+  public isStaticWorkspace = false;
 
   /** Round 11: see the interface field. Set on failure, cleared on success. */
   public lastCheckpointError: string | null = null;
@@ -904,6 +929,16 @@ class WorkspaceTransportImpl implements WorkspaceTransport {
   // ── Checkpoint ──
 
   async createCheckpointBeforeMutation(label: string): Promise<CheckpointInfo | null> {
+    // Static workspaces are gitless by design (Gate 1): there is no
+    // repository to checkpoint into. Return null WITHOUT recording
+    // lastCheckpointError — "not applicable", not "failed" — so run
+    // settlement stays on its gitless path (the volume-listing
+    // read-back fallback verifies the run's declared changes) instead
+    // of attaching a git failure to a build that actually succeeded.
+    if (this.isStaticWorkspace) {
+      this.lastCheckpointError = null;
+      return null;
+    }
     try {
       const checkpoint = await createWorkspaceCheckpoint({
         projectId: this.projectId,
