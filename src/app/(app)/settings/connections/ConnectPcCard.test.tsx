@@ -7,6 +7,7 @@ vi.mock("@/context/ThemeContext", () => ({ useTheme: () => ({ resolvedColors: {
 } }) }));
 
 const code = "ABCDEFGHJKMN";
+const pairingId = "11111111-1111-4111-8111-111111111111";
 let confirmed = false;
 let revoked = false;
 
@@ -19,7 +20,7 @@ beforeEach(() => {
       fingerprint: "a".repeat(64), revokedAt: revoked ? "2026-11-20" : null,
     }] : [] });
     if (path === "/api/local-devices/pairing" && init?.method === "POST")
-      return Response.json({ code, expiresAt: new Date(Date.now() + 600_000).toISOString() });
+      return Response.json({ code, pairingId, expiresAt: new Date(Date.now() + 600_000).toISOString() });
     if (path.startsWith("/api/local-devices/pairing/claim?") && !init?.method)
       return Response.json({ claim: { name: "Office PC", fingerprint: "a".repeat(64) } });
     if (path === "/api/local-devices/pairing/claim" && init?.method === "POST") {
@@ -40,6 +41,11 @@ describe("Connect PC", () => {
     expect(await screen.findByText(/Fingerprint: a{64}/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Confirm this PC" }));
     expect(await screen.findByRole("button", { name: "Revoke" })).toBeTruthy();
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls.some(([url]) => String(url).includes(`claim?id=${pairingId}`))).toBe(true);
+    expect(calls.every(([url]) => !String(url).includes(code))).toBe(true);
+    const confirmation = calls.find(([url, options]) => url === "/api/local-devices/pairing/claim" && options?.method === "POST");
+    expect(JSON.parse(String(confirmation?.[1]?.body))).toEqual({ pairingId });
     fireEvent.click(screen.getByRole("button", { name: "Revoke" }));
     await waitFor(() => expect(screen.getByText(/Office PC \(revoked\)/)).toBeTruthy());
   });

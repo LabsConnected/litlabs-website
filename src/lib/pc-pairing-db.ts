@@ -9,8 +9,8 @@ function check(error: { message: string } | null): void {
 
 function sessionFromRow(row: Row): PairingSession {
   return {
-    codeHash: String(row.code_hash), userId: String(row.user_id),
-    expiresAt: String(row.expires_at), claimedAt: row.claimed_at as string | null,
+    pairingId: String(row.pairing_id), codeHash: String(row.code_hash), userId: String(row.user_id),
+    createdAt: String(row.created_at), expiresAt: String(row.expires_at), claimedAt: row.claimed_at as string | null,
     consumedAt: row.consumed_at as string | null,
     fingerprint: row.fingerprint as string | null,
     publicKey: row.public_key as string | null, name: row.name as string | null,
@@ -29,33 +29,33 @@ function deviceFromRow(row: Row): PairedPc {
 export function createPcPairingStore(db: SupabaseClient): PairingStore {
   return {
     async createSession(session) {
-      const { error } = await db.from("pc_pairing_sessions").insert({
-        code_hash: session.codeHash, user_id: session.userId,
-        expires_at: session.expiresAt, claimed_at: null, consumed_at: null,
+      const { data, error } = await db.rpc("issue_pc_pairing", {
+        p_pairing_id: session.pairingId, p_code_hash: session.codeHash,
+        p_user_id: session.userId,
       });
       check(error);
+      if (typeof data !== "string") throw new Error("PC pairing session was not created");
+      return data;
     },
-    async claimSession(codeHash, claim, now) {
-      const { data, error } = await db.from("pc_pairing_sessions")
-        .update({ claimed_at: now, fingerprint: claim.fingerprint,
-          public_key: claim.publicKey, name: claim.name })
-        .eq("code_hash", codeHash).is("claimed_at", null)
-        .is("consumed_at", null).gt("expires_at", now)
-        .select().maybeSingle();
+    async claimSession(codeHash, claim) {
+      const { data, error } = await db.rpc("claim_pc_pairing", {
+        p_code_hash: codeHash, p_fingerprint: claim.fingerprint,
+        p_public_key: claim.publicKey, p_name: claim.name,
+      });
       check(error);
-      return Boolean(data);
+      return data === true;
     },
-    async peekClaim(userId, codeHash, now) {
+    async peekClaim(userId, pairingId, now) {
       const { data, error } = await db.from("pc_pairing_sessions").select()
-        .eq("code_hash", codeHash).eq("user_id", userId)
+        .eq("pairing_id", pairingId).eq("user_id", userId)
         .not("claimed_at", "is", null).is("consumed_at", null)
         .gt("expires_at", now).maybeSingle();
       check(error);
       return data ? sessionFromRow(data) : null;
     },
-    async completeClaim(userId, codeHash) {
+    async completeClaim(userId, pairingId) {
       const { data, error } = await db.rpc("complete_pc_pairing", {
-        p_user_id: userId, p_code_hash: codeHash,
+        p_user_id: userId, p_pairing_id: pairingId,
       }).maybeSingle();
       check(error);
       return data ? deviceFromRow(data as Row) : null;
@@ -66,12 +66,12 @@ export function createPcPairingStore(db: SupabaseClient): PairingStore {
       check(error);
       return (data ?? []).map(deviceFromRow);
     },
-    async revokeDevice(userId, id, now) {
-      const { data, error } = await db.from("local_devices")
-        .update({ revoked_at: now }).eq("id", id).eq("user_id", userId)
-        .is("revoked_at", null).select().maybeSingle();
+    async revokeDevice(userId, id) {
+      const { data, error } = await db.rpc("revoke_pc_device", {
+        p_user_id: userId, p_device_id: id,
+      });
       check(error);
-      return Boolean(data);
+      return data === true;
     },
   };
 }

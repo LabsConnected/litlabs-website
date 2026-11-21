@@ -1,8 +1,9 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const CODE_PATTERN = /^[A-HJKMNP-Z2-9]{12}$/;
 const CODE_TTL_MS = 10 * 60_000;
+const PAIRING_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function hashPairingCode(code: string): string {
   return createHash("sha256").update(`litt-pair:${code}`).digest("hex");
@@ -21,8 +22,10 @@ function validClaim(claim: { fingerprint: string; publicKey: string; name: strin
 }
 
 export interface PairingSession {
+  pairingId: string;
   codeHash: string;
   userId: string;
+  createdAt: string;
   expiresAt: string;
   claimedAt: string | null;
   consumedAt: string | null;
@@ -42,26 +45,28 @@ export interface PairedPc {
 }
 
 export interface PairingStore {
-  createSession(session: PairingSession): Promise<void>;
+  createSession(session: PairingSession): Promise<string>;
   claimSession(codeHash: string, claim: { fingerprint: string; publicKey: string; name: string }, now: string): Promise<boolean>;
-  peekClaim(userId: string, codeHash: string, now: string): Promise<PairingSession | null>;
-  completeClaim(userId: string, codeHash: string, now: string): Promise<PairedPc | null>;
+  peekClaim(userId: string, pairingId: string, now: string): Promise<PairingSession | null>;
+  completeClaim(userId: string, pairingId: string, now: string): Promise<PairedPc | null>;
   listDevices(userId: string): Promise<PairedPc[]>;
   revokeDevice(userId: string, id: string, now: string): Promise<boolean>;
 }
 
 export class PcPairingService {
   constructor(private readonly store: PairingStore, private readonly clock: () => Date = () => new Date()) {}
-  async createCode(userId: string): Promise<{ code: string; expiresAt: string }> {
+  async createCode(userId: string): Promise<{ code: string; pairingId: string; expiresAt: string }> {
     if (!userId) throw new Error("Signed-in user required");
     const bytes = randomBytes(12);
     const code = [...bytes].map((byte) => CODE_ALPHABET[byte % CODE_ALPHABET.length]).join("");
+    const pairingId = randomUUID();
+    const createdAt = this.clock().toISOString();
     const expiresAt = new Date(this.clock().getTime() + CODE_TTL_MS).toISOString();
-    await this.store.createSession({
-      codeHash: hashPairingCode(code), userId, expiresAt,
+    const storedExpiresAt = await this.store.createSession({
+      pairingId, codeHash: hashPairingCode(code), userId, createdAt, expiresAt,
       claimedAt: null, consumedAt: null, fingerprint: null, publicKey: null, name: null,
     });
-    return { code, expiresAt };
+    return { code, pairingId, expiresAt: storedExpiresAt };
   }
 
   async claimFromAgent(code: string, claim: { fingerprint: string; publicKey: string; name: string }): Promise<boolean> {
@@ -69,14 +74,14 @@ export class PcPairingService {
     return this.store.claimSession(hashPairingCode(code), { ...claim, name: claim.name.trim() }, this.clock().toISOString());
   }
 
-  async completeCode(userId: string, code: string): Promise<PairedPc | null> {
-    if (!userId || !CODE_PATTERN.test(code)) return null;
-    return this.store.completeClaim(userId, hashPairingCode(code), this.clock().toISOString());
+  async completePairing(userId: string, pairingId: string): Promise<PairedPc | null> {
+    if (!userId || !PAIRING_ID_PATTERN.test(pairingId)) return null;
+    return this.store.completeClaim(userId, pairingId, this.clock().toISOString());
   }
 
-  async peekClaim(userId: string, code: string): Promise<{ fingerprint: string; name: string } | null> {
-    if (!userId || !CODE_PATTERN.test(code)) return null;
-    const session = await this.store.peekClaim(userId, hashPairingCode(code), this.clock().toISOString());
+  async peekClaim(userId: string, pairingId: string): Promise<{ fingerprint: string; name: string } | null> {
+    if (!userId || !PAIRING_ID_PATTERN.test(pairingId)) return null;
+    const session = await this.store.peekClaim(userId, pairingId, this.clock().toISOString());
     if (!session || session.userId !== userId || !session.fingerprint || !session.publicKey || !session.name) return null;
     const claim = { fingerprint: session.fingerprint, publicKey: session.publicKey, name: session.name };
     return validClaim(claim) ? { fingerprint: claim.fingerprint, name: claim.name } : null;

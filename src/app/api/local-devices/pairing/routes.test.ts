@@ -15,10 +15,11 @@ import { POST as deviceClaim } from "./device-claim/route";
 import { GET as list } from "../route";
 import { DELETE as revoke } from "../[deviceId]/route";
 
+const pairingId = "11111111-1111-4111-8111-111111111111";
 const service = {
-  createCode: vi.fn(async () => ({ code: "ABCDEFGHJKMN", expiresAt: "tomorrow" })),
+  createCode: vi.fn(async () => ({ code: "ABCDEFGHJKMN", pairingId, expiresAt: "tomorrow" })),
   peekClaim: vi.fn(async () => ({ name: "Office PC", fingerprint: "a".repeat(64) })),
-  completeCode: vi.fn(async () => ({ id: "device" })),
+  completePairing: vi.fn(async () => ({ id: "device" })),
   claimFromAgent: vi.fn(async () => true),
   listDevices: vi.fn(async () => []),
   revokeDevice: vi.fn(async () => true),
@@ -38,8 +39,8 @@ describe("PC pairing API", () => {
   it("requires auth before code creation, claim inspection, confirmation, listing and revocation", async () => {
     vi.mocked(auth).mockResolvedValue({ userId: null } as never);
     expect((await create(req("/api/local-devices/pairing", "POST"))).status).toBe(401);
-    expect((await peek(req("/api/local-devices/pairing/claim?code=ABCDEFGHJKMN"))).status).toBe(401);
-    expect((await confirm(req("/api/local-devices/pairing/claim", "POST", { code: "ABCDEFGHJKMN" }))).status).toBe(401);
+    expect((await peek(req(`/api/local-devices/pairing/claim?id=${pairingId}`))).status).toBe(401);
+    expect((await confirm(req("/api/local-devices/pairing/claim", "POST", { pairingId }))).status).toBe(401);
     expect((await list(req("/api/local-devices"))).status).toBe(401);
     expect((await revoke(req("/api/local-devices/00000000-0000-0000-0000-000000000000", "DELETE"),
       { params: Promise.resolve({ deviceId: "00000000-0000-0000-0000-000000000000" }) })).status).toBe(401);
@@ -48,14 +49,14 @@ describe("PC pairing API", () => {
 
   it("passes only the verified owner ID to owner-scoped operations", async () => {
     await create(req("/api/local-devices/pairing", "POST"));
-    await peek(req("/api/local-devices/pairing/claim?code=ABCDEFGHJKMN"));
-    await confirm(req("/api/local-devices/pairing/claim", "POST", { code: "ABCDEFGHJKMN" }));
+    await peek(req(`/api/local-devices/pairing/claim?id=${pairingId}`));
+    await confirm(req("/api/local-devices/pairing/claim", "POST", { pairingId }));
     await list(req("/api/local-devices"));
     await revoke(req("/api/local-devices/00000000-0000-0000-0000-000000000000", "DELETE"),
       { params: Promise.resolve({ deviceId: "00000000-0000-0000-0000-000000000000" }) });
     expect(service.createCode).toHaveBeenCalledWith("alice");
-    expect(service.peekClaim).toHaveBeenCalledWith("alice", "ABCDEFGHJKMN");
-    expect(service.completeCode).toHaveBeenCalledWith("alice", "ABCDEFGHJKMN");
+    expect(service.peekClaim).toHaveBeenCalledWith("alice", pairingId);
+    expect(service.completePairing).toHaveBeenCalledWith("alice", pairingId);
     expect(service.listDevices).toHaveBeenCalledWith("alice");
     expect(service.revokeDevice).toHaveBeenCalledWith("alice", "00000000-0000-0000-0000-000000000000");
   });
@@ -78,11 +79,28 @@ describe("PC pairing API", () => {
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
     expect((await create(crossSite("/api/local-devices/pairing", "POST"))).status).toBe(403);
-    expect((await confirm(crossSite("/api/local-devices/pairing/claim", "POST", { code: "ABCDEFGHJKMN" }))).status).toBe(403);
+    expect((await confirm(crossSite("/api/local-devices/pairing/claim", "POST", { pairingId }))).status).toBe(403);
     expect((await revoke(crossSite("/api/local-devices/00000000-0000-0000-0000-000000000000", "DELETE"),
       { params: Promise.resolve({ deviceId: "00000000-0000-0000-0000-000000000000" }) })).status).toBe(403);
     expect(service.createCode).not.toHaveBeenCalled();
-    expect(service.completeCode).not.toHaveBeenCalled();
+    expect(service.completePairing).not.toHaveBeenCalled();
     expect(service.revokeDevice).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized claim based on received bytes without relying on Content-Length", async () => {
+    const oversized = { code: "ABCDEFGHJKMN", publicKey: "x".repeat(10_001),
+      fingerprint: "a".repeat(64), name: "PC", signature: "bad" };
+    const response = await deviceClaim(req("/api/local-devices/pairing/device-claim", "POST", oversized));
+    expect(response.status).toBe(413);
+    expect(verifyPcClaim).not.toHaveBeenCalled();
+    expect(service.claimFromAgent).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized owner confirmation based on received bytes", async () => {
+    const response = await confirm(req("/api/local-devices/pairing/claim", "POST", {
+      pairingId, padding: "x".repeat(10_001),
+    }));
+    expect(response.status).toBe(413);
+    expect(service.completePairing).not.toHaveBeenCalled();
   });
 });

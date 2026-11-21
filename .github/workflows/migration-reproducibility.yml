@@ -59,6 +59,16 @@ jobs:
         env:
           CI: true
 
+      - name: Run PC pairing concurrency test
+        run: node --test supabase/tests/pc_pairing_concurrency.test.mjs
+        env:
+          CI: true
+
+      - name: Run PC pairing helper identity test
+        run: node --test bridge-agent/pair.test.mjs
+        env:
+          CI: true
+
       - name: Stop Supabase
         if: always()
         run: npx supabase stop --no-backup

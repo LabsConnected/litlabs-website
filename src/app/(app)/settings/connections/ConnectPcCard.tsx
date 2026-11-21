@@ -10,6 +10,7 @@ export default function ConnectPcCard() {
   const T = useTheme().resolvedColors;
   const [devices, setDevices] = useState<Device[]>([]);
   const [code, setCode] = useState("");
+  const [pairingId, setPairingId] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [claim, setClaim] = useState<Claim | null>(null);
   const [busy, setBusy] = useState(false);
@@ -26,17 +27,17 @@ export default function ConnectPcCard() {
 
   useEffect(() => { void loadDevices().catch((e) => setError(e.message)); }, [loadDevices]);
   useEffect(() => {
-    if (!code || Date.now() >= Date.parse(expiresAt)) return;
+    if (!pairingId || Date.now() >= Date.parse(expiresAt)) return;
     const poll = async () => {
       try {
-        const response = await fetch(`/api/local-devices/pairing/claim?code=${encodeURIComponent(code)}`, { cache: "no-store" });
+        const response = await fetch(`/api/local-devices/pairing/claim?id=${encodeURIComponent(pairingId)}`, { cache: "no-store" });
         if (response.ok) setClaim((await response.json()).claim);
       } catch { /* The next poll retries. */ }
     };
     void poll();
     const timer = window.setInterval(() => { void poll(); }, 2500);
     return () => window.clearInterval(timer);
-  }, [code, expiresAt]);
+  }, [pairingId, expiresAt]);
 
   async function start() {
     setBusy(true); setError(""); setClaim(null);
@@ -44,7 +45,7 @@ export default function ConnectPcCard() {
       const response = await fetch("/api/local-devices/pairing", { method: "POST" });
       if (!response.ok) throw new Error("Could not create a pairing code");
       const data = await response.json();
-      setCode(data.code); setExpiresAt(data.expiresAt);
+      setCode(data.code); setPairingId(data.pairingId); setExpiresAt(data.expiresAt);
     } catch (e) { setError(e instanceof Error ? e.message : "Pairing failed"); }
     finally { setBusy(false); }
   }
@@ -53,10 +54,10 @@ export default function ConnectPcCard() {
     setBusy(true); setError("");
     try {
       const response = await fetch("/api/local-devices/pairing/claim", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pairingId }),
       });
       if (!response.ok) throw new Error("Claim expired. Generate a fresh code.");
-      setCode(""); setClaim(null);
+      setCode(""); setPairingId(""); setClaim(null);
       await loadDevices();
     } catch (e) { setError(e instanceof Error ? e.message : "Pairing failed"); }
     finally { setBusy(false); }
