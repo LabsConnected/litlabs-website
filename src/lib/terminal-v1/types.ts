@@ -33,8 +33,8 @@ export interface SandboxResourceLimits {
 }
 
 export const DEFAULT_SANDBOX_LIMITS: SandboxResourceLimits = {
-  cpuVcpus: 2,
-  memoryMB: 2048,
+  cpuVcpus: 4,
+  memoryMB: 4096,
   processLimit: 100,
   diskGB: 5,
   idleTimeoutMinutes: 15,

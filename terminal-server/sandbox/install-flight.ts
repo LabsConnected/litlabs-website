@@ -122,8 +122,8 @@ export function describeSandboxInstallExit(result: ExecuteCommandResult): string
  * the dev-server launch and user command execs never see it.
  */
 
-/** The sandbox's enforced memory ceiling (template-built, 2048 MB). */
-export const SANDBOX_MEMORY_LIMIT_BYTES = 2048 * 1024 * 1024;
+/** The sandbox's enforced memory ceiling (template-built, 4096 MB). */
+export const SANDBOX_MEMORY_LIMIT_BYTES = 4096 * 1024 * 1024;
 
 /**
  * Node heap cap for the install process. 768 MB leaves 256 MB of the

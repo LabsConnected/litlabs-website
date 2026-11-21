@@ -4,8 +4,8 @@
  * The sandbox preview has always run a project's dev server
  * (`next dev` for Next.js). That is the right default for small
  * projects: it boots fast and hot-reloads edits. It is the wrong
- * default for LARGE Next.js projects on the sandbox's 2 vCPU /
- * 2048 MB: the dev server's compile/watch load starves the box —
+ * default for LARGE Next.js projects on the sandbox's 4 vCPU /
+ * 4096 MB: the dev server's compile/watch load starves the box —
  * the live proof of 2026-11-19 showed the flagship litlabs-website
  * project (4,028 files on the volume, ~1,620 installed packages)
  * render, then go unreachable at +2–3 minutes while the dev

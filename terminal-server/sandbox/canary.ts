@@ -123,12 +123,14 @@ export interface CanaryOptions {
  * figure inside the sandbox, so if the template is built larger than
  * this, the allocation completes and the check fails (live failure
  * 2026-11-16: template rebuilt at 2048 MB while this said 512).
+ * Raised to 4 vCPU / 4096 MB on 2026-11-21, in step with the
+ * litt-sandbox template rebuild to that size.
  * CPU/memory here are the values the provider records and echoes; the
  * E2B SDK takes real sizing from the template build.
  */
 export const CANARY_LIMITS: SandboxResourceLimits = {
-  cpuVcpus: 2,
-  memoryMB: 2048,
+  cpuVcpus: 4,
+  memoryMB: 4096,
   processLimit: 64,
   diskGB: 2,
   idleTimeoutMinutes: 5,
