@@ -349,16 +349,18 @@ describe("provider routing: errors do not masquerade as empty responses", () => 
 });
 
 describe("provider routing: OpenAI-compatible native provider coverage", () => {
-  it("OPENAI_COMPATIBLE_NATIVE_PROVIDERS covers the six providers with chatUrls", () => {
+  it("OPENAI_COMPATIBLE_NATIVE_PROVIDERS covers the providers with chatUrls", () => {
     expect(OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has("openai")).toBe(true);
     expect(OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has("xai")).toBe(true);
     expect(OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has("deepseek")).toBe(true);
     expect(OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has("kimi")).toBe(true);
     expect(OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has("mistral")).toBe(true);
     expect(OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has("qwen")).toBe(true);
-    // Anthropic and Google are explicitly excluded this pass.
+    // Google is served natively via Gemini's OpenAI-compatible route
+    // (BYOK GEMINI_API_KEY / GOOGLE_API_KEY → generativelanguage.../openai).
+    expect(OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has("google")).toBe(true);
+    // Anthropic remains excluded — no OpenAI-compatible surface.
     expect(OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has("anthropic")).toBe(false);
-    expect(OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has("google")).toBe(false);
   });
 
   it("a direct xAI key routes to the native xAI adapter", () => {
