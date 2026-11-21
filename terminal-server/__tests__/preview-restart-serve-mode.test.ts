@@ -130,13 +130,17 @@ beforeEach(async () => {
     log: () => {},
   });
   registerSandboxPreviewSupport({ executor, provider });
-  // The fake provider's command model has no `next build` shape
-  // (it answers 127 "unsupported command"). Simulate a successful
-  // production build — exit 0, like the serve-mode suite's stubs —
-  // and delegate everything else to the fake's own model.
+  // The fake provider's command model has no build shapes (it
+  // answers 127 "unsupported command"). Simulate a successful
+  // DETACHED production build — the launch (build.sh) exits 0 and
+  // the exit-file poll reports DONE 0, like the serve-mode suite's
+  // stubs — and delegate everything else to the fake's own model.
   const realExecute = provider.execute.bind(provider);
   provider.execute = async (sandboxId, input) => {
-    if (input.command.includes("next build")) {
+    if (input.command.includes('echo "DONE')) {
+      return { exitCode: 0, stdout: "DONE 0", stderr: "", durationMs: 1 };
+    }
+    if (input.command.includes("build.sh")) {
       return {
         exitCode: 0,
         stdout: "✓ Compiled successfully\n",

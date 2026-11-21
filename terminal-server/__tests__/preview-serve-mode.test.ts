@@ -168,13 +168,17 @@ function makeRuntime(): PreviewRuntime {
   } as PreviewRuntime;
 }
 
-function makeSupport(buildExitCode: number): {
+function makeSupport(
+  buildExitCode: number,
+  buildOpts: { runningPollsBeforeDone?: number; neverDone?: boolean } = {},
+): {
   support: SandboxPreviewSupport;
   executions: CapturedExecute[];
   writtenFiles: Map<string, string>;
 } {
   const executions: CapturedExecute[] = [];
   const writtenFiles = new Map<string, string>();
+  let pollCount = 0;
   const provider = {
     name: "stub",
     fileTransfer: {
@@ -185,7 +189,18 @@ function makeSupport(buildExitCode: number): {
       writeFile: vi.fn(async (_id: string, path: string, data: Uint8Array) => {
         writtenFiles.set(path, new TextDecoder().decode(data));
       }),
-      readFile: vi.fn(async () => new Uint8Array()),
+      readFile: vi.fn(async (_id: string, path: string) => {
+        // The detached build's log: the build's own output, success
+        // or failure, is read back from the log file.
+        if (path.includes("build.log")) {
+          return new TextEncoder().encode(
+            buildExitCode === 0
+              ? "✓ Compiled successfully\n✓ Generating static pages"
+              : "Module not found: Can't resolve './missing-widget'",
+          );
+        }
+        return new Uint8Array();
+      }),
       listTree: vi.fn(async () => []),
       removePath: vi.fn(async () => {}),
       renamePath: vi.fn(async () => {}),
@@ -201,14 +216,19 @@ function makeSupport(buildExitCode: number): {
         },
       ) => {
         executions.push(input);
-        if (input.command.includes("next build")) {
+        // The detached build's poll (its command echoes DONE/RUNNING
+        // from the exit file): RUNNING for the configured number of
+        // polls, then DONE with the configured build outcome — or
+        // RUNNING forever when neverDone is set.
+        if (input.command.includes('echo "DONE')) {
+          pollCount += 1;
+          if (buildOpts.neverDone || pollCount <= (buildOpts.runningPollsBeforeDone ?? 0)) {
+            return { exitCode: 0, stdout: "RUNNING", stderr: "", durationMs: 1 };
+          }
           return {
-            exitCode: buildExitCode,
-            stdout: buildExitCode === 0 ? "✓ Compiled successfully\n✓ Generating static pages" : "",
-            stderr:
-              buildExitCode === 0
-                ? ""
-                : "Module not found: Can't resolve './missing-widget'",
+            exitCode: 0,
+            stdout: `DONE ${buildExitCode}`,
+            stderr: "",
             durationMs: 1,
           };
         }
@@ -271,22 +291,38 @@ describe("startSandboxPreview — production-build mode", () => {
     });
 
     const installIdx = executions.findIndex((e) => e.command.includes("install"));
-    const buildIdx = executions.findIndex((e) => e.command.includes("next build"));
-    const launchIdx = executions.findIndex((e) => e.command.includes("setsid nohup"));
+    const buildIdx = executions.findIndex((e) => e.command.includes("build.sh"));
+    const launchIdx = executions.findIndex((e) => e.command.includes("run.sh"));
     expect(installIdx, "an install execute call").toBeGreaterThanOrEqual(0);
-    expect(buildIdx, "a build execute call").toBeGreaterThan(installIdx);
+    expect(buildIdx, "a build launch execute call").toBeGreaterThan(installIdx);
     expect(launchIdx, "a launch execute call").toBeGreaterThan(buildIdx);
 
+    // The build launches DETACHED (the 2026-11-20 fix): no single
+    // execute carries the build or its total budget — the launch
+    // is a short setsid/nohup like the server's, the build command
+    // itself lives in the build script, and
+    // SANDBOX_PREVIEW_BUILD_TIMEOUT_MS is only the poll loop's
+    // total budget.
     const build = executions[buildIdx];
-    expect(build.timeoutMs).toBe(SANDBOX_PREVIEW_BUILD_TIMEOUT_MS);
+    expect(build.command).toContain("setsid nohup");
+    expect(build.timeoutMs).toBe(30_000);
     expect(build.env?.NODE_ENV).toBe("production");
+    expect(build.env?.NEXT_TELEMETRY_DISABLED).toBe("1");
     // The build is heap-shaped with the launch bound, not the
     // install's 768 MB resolve/link bound.
     expect(build.env?.NODE_OPTIONS).toBe(`--max-old-space-size=${SANDBOX_PREVIEW_NODE_HEAP_MB}`);
+    const buildScript = [...writtenFiles.values()].find((v) => v.includes("next build"));
+    expect(buildScript, "a build script carrying the build command").toBeDefined();
+    expect(buildScript).toContain("pnpm exec next build");
+    expect(buildScript).toContain("build.exit");
+    // The exit file was polled before the launch.
+    const pollIdx = executions.findIndex((e) => e.command.includes('echo "DONE'));
+    expect(pollIdx, "a build poll execute call").toBeGreaterThan(buildIdx);
+    expect(pollIdx).toBeLessThan(launchIdx);
 
     // The run script serves the production start command, and the
     // launch env runs it as production.
-    const script = [...writtenFiles.values()].find((v) => v.includes("exec "));
+    const script = [...writtenFiles.values()].find((v) => v.includes("exec pnpm exec next start"));
     expect(script).toContain("exec pnpm exec next start --port 3000");
     expect(executions[launchIdx].env?.NODE_ENV).toBe("production");
 
@@ -323,9 +359,69 @@ describe("startSandboxPreview — production-build mode", () => {
     expect(runtime.error).toContain("Production build failed in sandbox (exit 1)");
     expect(runtime.error).toContain("Module not found: Can't resolve './missing-widget'");
     // No server was launched: there is no state in which a failed
-    // build gets served.
-    expect(executions.some((e) => e.command.includes("setsid nohup"))).toBe(false);
+    // build gets served. (The build's own detached launch uses
+    // build.sh; the server's run.sh launch must never appear.)
+    expect(executions.some((e) => e.command.includes("run.sh"))).toBe(false);
     expect(runtime.status).not.toBe("ready");
+  });
+
+  it("polls a still-running build until its exit file lands, then launches", async () => {
+    // Two RUNNING polls, then DONE — a build that takes real time.
+    const { support, executions } = makeSupport(0, { runningPollsBeforeDone: 2 });
+    const runtime = makeRuntime();
+
+    await startSandboxPreview({
+      support,
+      runtime,
+      ws: WS,
+      framework: "nextjs",
+      command: "pnpm exec next start --port 3000 --hostname 0.0.0.0",
+      packageManager: "pnpm",
+      serveMode: "production-build",
+      buildCommand: "pnpm exec next build",
+      travelingEnv: {},
+      probe: healthyProbe,
+      buildPollIntervalMs: 1,
+    });
+
+    const polls = executions.filter((e) => e.command.includes('echo "DONE'));
+    expect(polls.length).toBe(3);
+    // The server launch followed the completed build (the health
+    // verdict itself lands through the background probe, exactly
+    // as in the single-poll case above).
+    expect(executions.some((e) => e.command.includes("run.sh"))).toBe(true);
+    expect(runtime.logs.some((l) => l.includes("Production build complete"))).toBe(true);
+  });
+
+  it("stops a build that exceeds its total budget and fails the start honestly", async () => {
+    const { support, executions } = makeSupport(0, { neverDone: true });
+    const runtime = makeRuntime();
+
+    const err = await startSandboxPreview({
+      support,
+      runtime,
+      ws: WS,
+      framework: "nextjs",
+      command: "pnpm exec next start --port 3000 --hostname 0.0.0.0",
+      packageManager: "pnpm",
+      serveMode: "production-build",
+      buildCommand: "pnpm exec next build",
+      travelingEnv: {},
+      probe: healthyProbe,
+      buildPollIntervalMs: 1,
+      buildBudgetMs: 5,
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(PreviewError);
+    expect((err as PreviewError).code).toBe("preview_build_failed");
+    expect(runtime.logs.some((l) => l.includes("exceeded the") && l.includes("budget"))).toBe(true);
+    // The wedged build was killed, not left running in the sandbox.
+    expect(executions.some((e) => e.command.includes("kill -KILL"))).toBe(true);
+    expect(executions.some((e) => e.command.includes("run.sh"))).toBe(false);
+  });
+
+  it("pins the total build budget at 45 minutes — the measured flagship build cannot fit in the old 900 s", () => {
+    expect(SANDBOX_PREVIEW_BUILD_TIMEOUT_MS).toBe(2_700_000);
   });
 
   it("dev mode (the default) never builds and launches as development", async () => {
@@ -413,6 +509,10 @@ function makeProbeSupport(opts: { groundTruthStdout?: string; logText?: string }
             stderr: "",
             durationMs: 1,
           };
+        }
+        // The detached build's poll: the build finished clean.
+        if (input.command.includes('echo "DONE')) {
+          return { exitCode: 0, stdout: "DONE 0", stderr: "", durationMs: 1 };
         }
         return { exitCode: 0, stdout: "", stderr: "", durationMs: 1 };
       },
