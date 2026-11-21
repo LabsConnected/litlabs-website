@@ -7,9 +7,12 @@
  *      "managed" (LiTT owns them) or "github" (mirrored from a repo).
  *
  *   2. VERSION CONTROL — whether the workspace has a Git repository.
- *      Every provisioned LiTT workspace is Git-backed, managed ones
- *      included: prepareManagedWorkspace() runs `git init` and commits
- *      the initial tree.
+ *      Framework workspaces are Git-backed, managed ones included:
+ *      prepareManagedWorkspace() runs `git init` and commits the
+ *      initial tree. Static-template workspaces are the one deliberate
+ *      exception: they provision gitless (Gate 1 blocks all Git
+ *      operations in production), so they have no repository, no
+ *      checkpoints and no diff — see isStaticTemplateId below.
  *
  *   3. REMOTE PROVIDER — whether a GitHub repository is connected.
  *      Optional, and never required to build.
@@ -62,7 +65,10 @@ export interface ProjectSourceView {
   label: string;
   /** Provisioning state of the source itself. */
   status: ProjectSourceStatus;
-  /** Whether the workspace has a Git repository. Managed projects do. */
+  /**
+   * Whether the workspace has a Git repository. Managed framework and
+   * GitHub projects do; static-template projects are gitless by design.
+   */
   versionControl: "git" | "none";
   /** True when Git history exists for this source. */
   gitInitialized: boolean;
@@ -193,9 +199,19 @@ export function describeProjectSource(project: CanonicalProject): ProjectSourceV
   const ready = status === "ready";
 
   // Git exists once the workspace has been provisioned: managed
-  // workspaces are `git init`-ed at creation, GitHub workspaces are
-  // clones. Before provisioning there is no working tree, so no Git.
-  const gitInitialized = ready;
+  // framework workspaces are `git init`-ed at creation, GitHub
+  // workspaces are clones. Before provisioning there is no working
+  // tree, so no Git. The one exception is a managed static-template
+  // project: provisioning routes it through the gitless "static" path
+  // (Gate 1), so its ready workspace has NO repository. The predicate
+  // mirrors workspace-recovery.ts, which derives the prepare source
+  // from the same facts — keep them in step. A project with a GitHub
+  // repository connected is GitHub-backed (kind "github") regardless
+  // of its original template: its workspace is a clone, so the
+  // exception never applies to it.
+  const gitlessStatic =
+    kind === "managed" && isStaticTemplateId(project.templateId);
+  const gitInitialized = ready && !gitlessStatic;
 
   return {
     kind,
