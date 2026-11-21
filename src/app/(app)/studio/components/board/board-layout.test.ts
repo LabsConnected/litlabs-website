@@ -3,9 +3,12 @@ import {
   BOARD_CHAT_TOP_INSET,
   clampPanelsToArea,
   clampRect,
+  clampRectInsideArea,
   defaultBoardLayout,
+  findOpenPosition,
   overviewViewport,
   panelsBoundingBox,
+  rectsOverlap,
   seedPanelRect,
   tidyPanels,
   visiblePanels,
@@ -231,6 +234,101 @@ describe("clampPanelsToArea", () => {
     const clamped = clampPanelsToArea(layout.panels, { width: 1640, height: 800 });
     expect(clamped.preview.rect).toEqual(layout.panels.preview.rect);
     expect(clamped.chat.rect).toEqual(layout.panels.chat.rect);
+  });
+});
+
+describe("clampRectInsideArea (drop clamp)", () => {
+  const area = { width: 1200, height: 800 };
+
+  it("pulls a panel dropped off the right edge fully back inside — close button included", () => {
+    const clamped = clampRectInsideArea({ x: 1100, y: 100, width: 436, height: 296 }, area);
+    expect(clamped.x + clamped.width).toBeLessThanOrEqual(1200);
+    expect(clamped.x).toBe(1200 - 436);
+    expect(clamped.y).toBe(100);
+  });
+
+  it("pulls a panel dropped off the bottom edge fully back inside", () => {
+    const clamped = clampRectInsideArea({ x: 100, y: 750, width: 436, height: 296 }, area);
+    expect(clamped.y + clamped.height).toBeLessThanOrEqual(800);
+    expect(clamped.y).toBe(800 - 296);
+  });
+
+  it("pulls a panel dropped off the left or top edge back to the origin", () => {
+    const clamped = clampRectInsideArea({ x: -300, y: -40, width: 436, height: 296 }, area);
+    expect(clamped.x).toBe(0);
+    expect(clamped.y).toBe(0);
+  });
+
+  it("shrinks a panel larger than the area to the area and pins it to the origin", () => {
+    const clamped = clampRectInsideArea({ x: 50, y: 50, width: 1600, height: 1000 }, area);
+    expect(clamped).toEqual({ x: 0, y: 0, width: 1200, height: 800 });
+  });
+
+  it("clamps inside an offset visible region (panned board)", () => {
+    const region = { x: 200, y: 50, width: 1000, height: 700 };
+    const clamped = clampRectInsideArea({ x: 1150, y: 700, width: 436, height: 296 }, region);
+    expect(clamped.x).toBeGreaterThanOrEqual(200);
+    expect(clamped.y).toBeGreaterThanOrEqual(50);
+    expect(clamped.x + clamped.width).toBeLessThanOrEqual(1200);
+    expect(clamped.y + clamped.height).toBeLessThanOrEqual(750);
+  });
+
+  it("leaves a rect already fully inside exactly where it is", () => {
+    const rect = { x: 436, y: 72, width: 700, height: 532 };
+    expect(clampRectInsideArea(rect, { width: 1640, height: 800 })).toEqual(rect);
+  });
+});
+
+describe("findOpenPosition (placement search)", () => {
+  const area = { width: 1640, height: 800 };
+
+  it("returns the desired rect when nothing occupies it", () => {
+    const desired = { x: 436, y: 72, width: 700, height: 532 };
+    expect(findOpenPosition(desired, [], area)).toEqual(desired);
+  });
+
+  it("does not stack a panel exactly on an occupied one (shared default rect)", () => {
+    const preview = { x: 436, y: 72, width: 700, height: 532 };
+    const placed = findOpenPosition({ ...preview }, [preview], area);
+    expect(placed.x === preview.x && placed.y === preview.y).toBe(false);
+    // Wherever it lands, it lands fully inside the area — header and
+    // close button reachable.
+    expect(placed.x).toBeGreaterThanOrEqual(0);
+    expect(placed.y).toBeGreaterThanOrEqual(0);
+    expect(placed.x + placed.width).toBeLessThanOrEqual(area.width);
+    expect(placed.y + placed.height).toBeLessThanOrEqual(area.height);
+  });
+
+  it("finds a fully free spot when the area has room", () => {
+    const occupied = [{ x: 0, y: 0, width: 400, height: 800 }];
+    const placed = findOpenPosition({ x: 0, y: 0, width: 300, height: 200 }, occupied, area);
+    expect(rectsOverlap(placed, occupied[0])).toBe(false);
+  });
+
+  it("the game default no longer opens World stacked exactly on Preview", () => {
+    const layout = defaultBoardLayout("game");
+    const world = layout.panels.world.rect;
+    const preview = layout.panels.preview.rect;
+    expect(layout.panels.world.open).toBe(true);
+    expect(world.x === preview.x && world.y === preview.y).toBe(false);
+    expect(world.x + world.width).toBeLessThanOrEqual(1640);
+    expect(world.y + world.height).toBeLessThanOrEqual(800);
+  });
+});
+
+describe("clampPanelsToArea — full-fit rescue", () => {
+  it("a panel half-buried off the right/bottom comes back fully inside, controls included", () => {
+    const layout = defaultBoardLayout("website");
+    layout.panels.browser = {
+      ...layout.panels.browser,
+      open: true,
+      rect: { x: 1500, y: 700, width: 860, height: 560 },
+    };
+    const clamped = clampPanelsToArea(layout.panels, { width: 1280, height: 720 });
+    expect(clamped.browser.rect.x + clamped.browser.rect.width).toBeLessThanOrEqual(1280);
+    expect(clamped.browser.rect.y + clamped.browser.rect.height).toBeLessThanOrEqual(720);
+    expect(clamped.browser.rect.x).toBeGreaterThanOrEqual(0);
+    expect(clamped.browser.rect.y).toBeGreaterThanOrEqual(0);
   });
 });
 
