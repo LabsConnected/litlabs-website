@@ -144,6 +144,14 @@ async function dismissCookieConsent(page) {
 async function openMobileSheet(page) {
   const sheet = page.getByTestId("litt-mobile-sheet");
   if (await sheet.isVisible().catch(() => false)) return;
+  // Full-screen tool surfaces (including Static View) hide the floating
+  // trigger by design. Return through the visible mobile navigation control.
+  const backToChat = page.getByTestId("mobile-back-to-chat");
+  if (await backToChat.isVisible().catch(() => false)) {
+    await backToChat.click();
+    await sheet.waitFor({ state: "visible", timeout: 15_000 });
+    return;
+  }
   // The Developer Tools drawer intentionally owns the mobile surface while
   // open. Close it through the same visible control a user would use before
   // reopening LiTT; do not change product visibility rules for this harness.
@@ -984,6 +992,7 @@ async function main() {
       sheetUp = await page.getByTestId("litt-mobile-sheet").isVisible().catch(() => false);
       if (!sheetUp) {
         await openMobileSheet(page).catch(() => {});
+        sheetUp = await page.getByTestId("litt-mobile-sheet").isVisible().catch(() => false);
       }
       stillUsable = await commandInput.isVisible().catch(() => false);
       if (stillUsable && sheetUp) break;
