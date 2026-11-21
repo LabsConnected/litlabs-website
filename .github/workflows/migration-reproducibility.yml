@@ -8,6 +8,8 @@ on:
       - "supabase/tests/**"
       - "supabase/upgrade-validation/**"
       - "supabase/config.toml"
+      - "bridge-agent/**"
+      - "public/bridge-agent/**"
       - ".github/workflows/migration-reproducibility.yml"
   workflow_dispatch:
 
