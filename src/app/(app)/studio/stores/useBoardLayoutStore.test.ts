@@ -107,6 +107,23 @@ describe("panel window actions", () => {
     expect(panel.rect.y).toBe(60);
   });
 
+  it("summoning a closed panel from its untouched default does not stack it on an open panel", () => {
+    // Browser and Preview share the inventory default rect (436,72);
+    // Preview is open by default, so a fresh Browser summon used to
+    // land exactly on it, burying it (live defect, 2026-11-20).
+    const preview = layout().panels.preview;
+    expect(preview.open).toBe(true);
+    store.getState().openPanel(SCOPE, "browser");
+    const browser = layout().panels.browser;
+    expect(browser.open).toBe(true);
+    expect(browser.rect.x === preview.rect.x && browser.rect.y === preview.rect.y).toBe(false);
+    // It still lands fully inside the design area, at full default size.
+    expect(browser.rect.width).toBe(boardDefinition("browser").defaultRect.width);
+    expect(browser.rect.height).toBe(boardDefinition("browser").defaultRect.height);
+    expect(browser.rect.x + browser.rect.width).toBeLessThanOrEqual(BOARD_DESIGN_AREA.width);
+    expect(browser.rect.y + browser.rect.height).toBeLessThanOrEqual(BOARD_DESIGN_AREA.height);
+  });
+
   it("re-summoning an already-open panel keeps the user's size", () => {
     store.getState().openPanel(SCOPE, "files");
     store.getState().setPanelRect(SCOPE, "files", { x: 70, y: 80, width: 320, height: 240 });
