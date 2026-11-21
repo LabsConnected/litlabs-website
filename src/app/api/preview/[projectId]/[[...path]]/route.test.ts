@@ -115,6 +115,10 @@ describe("GET /api/preview/[projectId]/[[...path]]", () => {
     );
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toContain("text/css");
+    // Plain session asset: no-transform must ride along so the edge
+    // never rewrites preview responses (Cloudflare RUM beacon note in
+    // the route's PREVIEW_SECURITY_HEADERS).
+    expect(res.headers.get("Cache-Control")).toBe("no-cache, no-transform");
     assertZeroSubprocesses();
   });
 
@@ -145,6 +149,12 @@ describe("GET /api/preview/[projectId]/[[...path]]", () => {
     expect(csp).toContain("https:");
     expect(csp).toContain("'wasm-unsafe-eval'"); // Tailwind v4 browser build (Oxide WASM)
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    // no-transform forbids edge rewriting: Cloudflare must not inject
+    // its RUM beacon into preview HTML — the beacon cannot run from the
+    // sandboxed opaque origin and errored on every load (2026-11-20).
+    // The root document mints a capability token, so its cache posture
+    // is the token one: no-store, with no-transform riding along.
+    expect(res.headers.get("Cache-Control")).toBe("no-store, no-transform");
     assertZeroSubprocesses();
   });
 
@@ -275,7 +285,7 @@ describe("GET /api/preview/[projectId]/[[...path]]", () => {
       // Token-mode hardening: only the opaque origin may read the response
       // (never "*"), and token-authorized content is never stored.
       expect(res.headers.get("Access-Control-Allow-Origin")).toBe("null");
-      expect(res.headers.get("Cache-Control")).toBe("no-store");
+      expect(res.headers.get("Cache-Control")).toBe("no-store, no-transform");
       assertZeroSubprocesses();
     });
 
