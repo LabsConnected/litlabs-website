@@ -22,6 +22,7 @@ import {
   clampPanelsToArea,
   clampRect,
   defaultBoardLayout,
+  findOpenPosition,
   overviewViewport,
   seedPanelRect,
   tidyPanels,
@@ -326,17 +327,32 @@ export const useBoardLayoutStore = create<BoardLayoutStore>()(
             // kept; tray restore and preset application deliberately
             // do NOT reset size (mapping §8.3).
             const def = boardDefinition(id);
+            let rect = clampRect({
+              x: panel.rect.x,
+              y: panel.rect.y,
+              width: def.defaultRect.width,
+              height: def.defaultRect.height,
+            });
+            // Placement guard (live defect, Larry 2026-11-20): a
+            // panel still sitting at its UNTOUCHED default position
+            // was never placed by the user, and several defaults
+            // share one rect (preview / code / browser / world at
+            // 436,72) — summoning it landed it exactly on an
+            // already-open panel, burying that panel. Search for a
+            // non-stacking spot instead. A position the user chose
+            // (moved panel, tray restore, preset) is kept exactly.
+            if (rect.x === def.defaultRect.x && rect.y === def.defaultRect.y) {
+              const occupied = Object.values(layout.panels)
+                .filter((p) => p.id !== id && p.open && !p.minimized)
+                .map((p) => p.rect);
+              rect = findOpenPosition(rect, occupied, BOARD_DESIGN_AREA);
+            }
             return updatePanel(layout, id, {
               open: true,
               minimized: false,
               maximized: false,
               restoreRect: null,
-              rect: clampRect({
-                x: panel.rect.x,
-                y: panel.rect.y,
-                width: def.defaultRect.width,
-                height: def.defaultRect.height,
-              }),
+              rect,
               z: topZ(layout) + 1,
             });
           }),
