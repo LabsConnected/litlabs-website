@@ -118,3 +118,93 @@ describe("describeProjectSource — repo gate", () => {
     expect(isRepoWorkspaceGated(view)).toBe(false);
   });
 });
+
+describe("describeProjectSource — version control truth", () => {
+  const MANAGED = {
+    sourceType: "blank",
+    githubInstallationId: null,
+    githubRepositoryId: null,
+    githubOwner: null,
+    githubRepo: null,
+    githubFullName: null,
+    githubDefaultBranch: null,
+    githubBranch: null,
+  } as const;
+
+  it("reports a ready static-template project as gitless (no repository by design)", () => {
+    const view = describeProjectSource(
+      project({
+        ...MANAGED,
+        templateId: "blank-static",
+        workspaceStatus: "ready",
+        workspaceId: "ws-1",
+        workspaceError: null,
+      }),
+    );
+    expect(view.kind).toBe("managed");
+    expect(view.status).toBe("ready");
+    expect(view.writable).toBe(true);
+    expect(view.versionControl).toBe("none");
+    expect(view.gitInitialized).toBe(false);
+    expect(
+      formatSourceSummary({
+        kind: view.kind,
+        status: view.status,
+        versionControl: view.versionControl,
+        branch: view.branch,
+        githubRepository: view.githubRepository,
+      }),
+    ).not.toContain("Git");
+  });
+
+  it("reports the empty-static template as gitless too", () => {
+    const view = describeProjectSource(
+      project({
+        ...MANAGED,
+        templateId: "empty-static",
+        workspaceStatus: "ready",
+        workspaceId: "ws-1",
+        workspaceError: null,
+      }),
+    );
+    expect(view.versionControl).toBe("none");
+    expect(view.gitInitialized).toBe(false);
+  });
+
+  it("keeps a ready managed framework project Git-backed", () => {
+    const view = describeProjectSource(
+      project({
+        ...MANAGED,
+        templateId: "nextjs",
+        workspaceStatus: "ready",
+        workspaceId: "ws-1",
+        workspaceError: null,
+      }),
+    );
+    expect(view.versionControl).toBe("git");
+    expect(view.gitInitialized).toBe(true);
+  });
+
+  it("keeps a ready GitHub project Git-backed even with no templateId", () => {
+    const view = describeProjectSource(
+      project({ workspaceStatus: "ready", workspaceId: "ws-1", workspaceError: null }),
+    );
+    expect(view.kind).toBe("github");
+    expect(view.versionControl).toBe("git");
+    expect(view.gitInitialized).toBe(true);
+  });
+
+  it("reports a static project as gitless before provisioning too (no false git claim)", () => {
+    const view = describeProjectSource(
+      project({
+        ...MANAGED,
+        templateId: "blank-static",
+        workspaceStatus: "not_prepared",
+        workspaceId: null,
+        workspaceError: null,
+      }),
+    );
+    expect(view.gitInitialized).toBe(false);
+    expect(view.versionControl).toBe("none");
+  });
+});
