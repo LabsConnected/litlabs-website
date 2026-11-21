@@ -111,9 +111,14 @@ export default function BoardBrowserPanel() {
   // Mirror of tabs for use inside the message listener without
   // re-subscribing on every state change.
   const tabsRef = useRef(tabs);
-  tabsRef.current = tabs;
   const activeTabIdRef = useRef(activeTabId);
-  activeTabIdRef.current = activeTabId;
+  // Sync the mirrors after commit (refs must not be written during
+  // render — react-hooks/refs). The message listener only ever reads
+  // them from an event, which fires after the commit that matters.
+  useEffect(() => {
+    tabsRef.current = tabs;
+    activeTabIdRef.current = activeTabId;
+  });
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
   const currentUrl = activeTab ? tabCurrentUrl(activeTab) : null;
