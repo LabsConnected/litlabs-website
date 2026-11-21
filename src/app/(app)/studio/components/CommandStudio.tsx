@@ -3522,7 +3522,11 @@ function CommandStudioContent() {
         </span>
       </div>
       <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-        <VisualCanvasBuilder onPreviewSelectionChange={(sel) => setPreviewSelection(sel)} />
+        <VisualCanvasBuilder
+          onPreviewSelectionChange={(sel) => setPreviewSelection(sel)}
+          mode={effectiveCanvasDesignMode}
+          onAskAboutSelection={handleAskAboutPreviewSelection}
+        />
       </div>
     </div>
   );

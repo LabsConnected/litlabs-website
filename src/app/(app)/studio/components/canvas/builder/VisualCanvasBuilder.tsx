@@ -14,6 +14,7 @@ import { useConnectionSummary } from "@/app/(app)/studio/hooks/useConnectionSumm
 import { useResizableWidth } from "@/app/(app)/studio/hooks/useResizableWidth";
 import ResizeHandle from "@/app/(app)/studio/components/shell/ResizeHandle";
 import { useStudioContext } from "@/app/(app)/studio/context/StudioContext";
+import type { CanvasDesignMode } from "../../../lib/studio-destinations";
 import { ProjectDesignSurface } from "../../ProjectDesignSurface";
 import type { PreviewSelection } from "../../StudioPreviewPanel";
 import { useCanvasFileSync } from "./useCanvasFileSync";
@@ -63,11 +64,18 @@ function HtmlFileList() {
 
 export function VisualCanvasBuilder({
   onPreviewSelectionChange,
+  mode,
+  onAskAboutSelection,
 }: {
   /** Full-fidelity selection sink — forwards the live preview element
       identity (attrs/styles/path/rect) to CommandStudio's
       previewSelection so the inspector can edit the real file. */
   onPreviewSelectionChange?: (selection: PreviewSelection | null) => void;
+  /** The stage's Build/Design mode — forwarded to the project-backed
+      surface so Design actually changes what the stage shows. */
+  mode?: CanvasDesignMode;
+  /** "Ask LiTT to change this" for the inspected element. */
+  onAskAboutSelection?: () => void;
 } = {}) {
   const { projectId: activeProjectId } = useStudioContext();
   const loadDocument = useCanvasBuilderStore((s) => s.loadDocument);
@@ -211,7 +219,13 @@ export function VisualCanvasBuilder({
   // Existing projects are project-first. The canvas-only starter flow is
   // reserved for a genuinely project-less creation session.
   if (activeProjectId || serverProjectId) {
-    return <ProjectDesignSurface onPreviewSelectionChange={onPreviewSelectionChange} />;
+    return (
+      <ProjectDesignSurface
+        onPreviewSelectionChange={onPreviewSelectionChange}
+        mode={mode}
+        onAskAboutSelection={onAskAboutSelection}
+      />
+    );
   }
 
   // HTML/CSS/JS mode — render the file editor with live preview
