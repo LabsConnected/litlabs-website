@@ -361,7 +361,10 @@ describe("BoardBrowserPanel", () => {
     fireEvent.change(screen.getByTestId("board-browser-input"), { target: { value: "example.com" } });
     fireEvent.keyDown(screen.getByTestId("board-browser-input"), { key: "Enter" });
     const frame = screen.getByTestId("board-browser-frame");
-    expect(frame).toHaveAttribute("src", "https://example.com");
+    expect(frame).toHaveAttribute(
+      "src",
+      "/api/studio/browser/proxy?url=https%3A%2F%2Fexample.com",
+    );
     expect(screen.getByTestId("board-browser-open")).toHaveAttribute("href", "https://example.com");
   });
 });
