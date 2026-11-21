@@ -91,7 +91,18 @@ const PREVIEW_SECURITY_HEADERS: Record<string, string> = {
   // No referrer leakage to third parties embedded in user content.
   "Referrer-Policy": "no-referrer",
   // Never cache preview content aggressively; the user edits frequently.
-  "Cache-Control": "no-cache",
+  // no-transform is load-bearing, not a caching nuance: it forbids
+  // intermediary rewriting of the response body. litlabs.net is proxied
+  // through Cloudflare, which otherwise injects its RUM / Web Analytics
+  // beacon script into HTML responses at the edge. That beacon cannot
+  // run inside the preview's sandboxed opaque origin ("null"): its POST
+  // to /cdn-cgi/rum is CORS-blocked and its frame access throws an
+  // uncaught SecurityError — on EVERY preview load, flooding the Studio
+  // console (observed live 2026-11-20). With no-transform the edge must
+  // serve the document exactly as authored and injects nothing. Same
+  // pattern as the streaming routes, which already send
+  // "no-cache, no-transform".
+  "Cache-Control": "no-cache, no-transform",
 };
 
 function mimeFor(path: string): string {
@@ -453,15 +464,17 @@ export async function GET(
       // manifest, never the origin; this only narrows who may READ a
       // token-authorized asset response. Token-bearing responses are
       // no-store so neither the token-embedding document nor the assets
-      // it authorizes persist in any cache.
+      // it authorizes persist in any cache. no-transform rides along so
+      // token-served documents get the same edge-injection refusal as
+      // PREVIEW_SECURITY_HEADERS (see the beacon note there).
       ...(presentedToken
         ? {
             "Access-Control-Allow-Origin": "null",
             "Vary": "Origin",
-            "Cache-Control": "no-store",
+            "Cache-Control": "no-store, no-transform",
           }
         : mintedTokenHtml
-          ? { "Cache-Control": "no-store" }
+          ? { "Cache-Control": "no-store, no-transform" }
           : {}),
     },
   });
