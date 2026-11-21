@@ -2177,11 +2177,28 @@ export async function restartPreview(
   // leg goes through the async accept (C3/C4): the stop phase above
   // stays synchronous and bounded, and the fresh start's long phase
   // completes in the background under the new "starting" runtime.
+  //
+  // Production-build exception (live failure 2026-11-20): a
+  // production-build runtime's stored command is the SERVE command
+  // (`next start`), not a dev command. Passing framework+command
+  // back verbatim marks the start caller-supplied, and the sandbox
+  // branch then skips serve-mode resolution entirely — the restart
+  // came back serveMode "dev" with no build step, and launched
+  // `next start` in a sandbox whose `.next` build is sandbox-local
+  // output (never on the volume, and absent in any fresh sandbox or
+  // after an interrupted first build): Next died instantly with
+  // "Could not find a production build in the '.next' directory"
+  // and the probe convicted the guest at the dev-sized 120 s
+  // window. For a production-build runtime, omit framework/command
+  // so the restart re-runs detection + serve-mode resolution and
+  // rebuilds before it re-serves, exactly like a fresh start.
+  const productionBuild = (rt.serveMode ?? "dev") === "production-build";
   return startPreviewAccepted({
     workspaceId,
     userId: rt.userId,
-    framework: rt.framework,
-    command: rt.command,
+    ...(productionBuild
+      ? {}
+      : { framework: rt.framework, command: rt.command }),
     packageManager: "pnpm",
     projectEnv: projectEnv ?? rt.clerkProjectEnv ?? undefined,
     forceRestart: true,
