@@ -1,57 +1,70 @@
 "use client";
 
 /**
- * BoardBrowserPanel — an embedded web view on the board (board-only
- * rebuild, 2026-11-14, checklist item 5).
+ * BoardBrowserPanel — a real embedded browser on the board.
  *
- * A real iframe with a small local history (back / forward / refresh),
- * a URL bar, and an open-in-new-tab escape hatch.
+ * How it renders pages (rewritten 2026-11-20, Larry's "#2 priority"):
+ * The panel used to point an iframe straight at the typed URL and
+ * almost nothing loaded: the Studio page's own CSP restricts frame-src
+ * to 'self' plus a small allowlist, and many sites additionally refuse
+ * framing via X-Frame-Options / CSP frame-ancestors. The frame now
+ * loads the same-origin browsing proxy
+ * (src/app/api/studio/browser/proxy), which fetches the page
+ * server-side, strips the framing refusals, and re-serves it in a
+ * CSP-sandboxed opaque origin. See src/lib/studio/browser-proxy.ts for
+ * the full diagnosis, security model, and honest limits (login
+ * sessions and heavily app-like sites need a real remote browser;
+ * that is a product decision above this panel).
  *
- * Embed-blocked handling (2026-11-17, Larry's screenshot defect):
- * Sites that send X-Frame-Options / CSP frame-ancestors refuse to be
- * framed. The browser gives a cross-origin parent NO reliable signal
- * for that refusal: the framed document cannot be inspected (same-origin
- * policy), and browsers differ on whether a blocked frame fires `load`,
- * `error`, or neither. The previous version left that case as an
- * unexplained blank white page with a sad-document icon.
+ * Navigation model:
+ *   - Panel-driven navigation (address bar, back, forward, refresh,
+ *     tab switch) sets the frame's src to the proxy URL for the tab's
+ *     current real URL, and is tracked in a per-tab local history.
+ *   - In-page navigation (link clicks, GET form submits) is routed
+ *     through the proxy by the bootstrap script injected into proxied
+ *     documents; that script postMessages each navigation back, so the
+ *     address bar and history stay truthful and back/forward work for
+ *     pages reached by clicking, not just by typing.
+ *   - Messages are trusted only when they come from this panel's own
+ *     frame window and carry the proxy's source marker — a proxied
+ *     document runs in an opaque origin, so origin alone proves
+ *     nothing; the window identity is the check.
  *
- * Detection approach — a bounded load watchdog, plus `onError`:
- *   - Every navigation / refresh / retry arms a generous watchdog
- *     (BROWSER_EMBED_WATCHDOG_MS, 8s).
- *   - A usable `load` event disarms it and the site renders as before.
- *   - An iframe `error` event, or the watchdog expiring with no load,
- *     moves the panel to the blocked state instead of a blank page.
- *   - While the watchdog is armed a plain loading note is shown, so the
- *     panel is never an unexplained blank even before the verdict.
+ * Tabs: each tab keeps its own history; switching tabs reloads that
+ * tab's current page (page state is not kept alive across switches —
+ * history and address are).
  *
- * Honest limits of that approach (documented, not hidden):
- *   - This is a heuristic, not proof of X-Frame-Options. A site that is
- *     merely slower than the watchdog, or a network failure, can be
- *     shown the same blocked state. The copy therefore offers Try again
- *     and Open in a new tab rather than claiming certainty, and the
- *     bound is deliberately generous so a slow legitimate site is
- *     unlikely to be mislabeled.
- *   - Some browsers fire `load` for their own blocked-frame error page.
- *     In that case the watchdog is disarmed and this detection cannot
- *     catch the block — cross-origin rules forbid reading the framed
- *     document to confirm what actually rendered. No code inside this
- *     panel can fully close that gap without a server-side probe, which
- *     is out of scope for this file.
+ * Blocked/failed handling: a bounded load watchdog (plus iframe error)
+ * still guards every load; when it expires the panel shows an honest
+ * couldn't-load state with Try again and Open in a new tab, instead of
+ * the unexplained blank page this panel originally shipped.
  *
  * Token-bound surfaces; no pink.
  */
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, ExternalLink, Globe, RefreshCw } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, Globe, Plus, RefreshCw, X } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
+import { BROWSER_PROXY_MESSAGE_SOURCE, browserProxyUrl } from "@/lib/studio/browser-proxy";
 
 /**
- * Generous bound for a framed page to signal a usable load before the
- * panel presents the embed-blocked state. Exported for tests.
+ * Generous bound for a proxied page to signal a usable load before the
+ * panel presents the couldn't-load state. Exported for tests.
  */
 export const BROWSER_EMBED_WATCHDOG_MS = 8000;
 
 type EmbedStatus = "loading" | "loaded" | "blocked";
+
+interface BrowserTabState {
+  id: number;
+  history: string[];
+  historyIndex: number;
+  input: string;
+  reloadKey: number;
+  /** Proxy URL the frame should load; null when the tab has no page yet. */
+  frameSrc: string | null;
+  status: EmbedStatus;
+}
 
 /** Normalize a typed address into a loadable URL, or null if empty. */
 export function normalizeBrowserUrl(raw: string): string | null {
@@ -62,15 +75,57 @@ export function normalizeBrowserUrl(raw: string): string | null {
   return `https://${trimmed}`;
 }
 
+function tabCurrentUrl(tab: BrowserTabState): string | null {
+  return tab.historyIndex >= 0 ? tab.history[tab.historyIndex] : null;
+}
+
+function tabLabel(tab: BrowserTabState): string {
+  const url = tabCurrentUrl(tab);
+  if (!url) return "New tab";
+  try {
+    return new URL(url).hostname || url;
+  } catch {
+    return url;
+  }
+}
+
+let nextTabId = 1;
+function freshTab(): BrowserTabState {
+  return {
+    id: nextTabId++,
+    history: [],
+    historyIndex: -1,
+    input: "",
+    reloadKey: 0,
+    frameSrc: null,
+    status: "loaded",
+  };
+}
+
 export default function BoardBrowserPanel() {
   const { tokens } = useTheme();
-  const [input, setInput] = useState("");
-  const [history, setHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const [reloadKey, setReloadKey] = useState(0);
-  const [embedStatus, setEmbedStatus] = useState<EmbedStatus>("loading");
+  const [tabs, setTabs] = useState<BrowserTabState[]>(() => [freshTab()]);
+  const [activeTabId, setActiveTabId] = useState<number>(() => tabs[0]?.id ?? 1);
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const currentUrl = historyIndex >= 0 ? history[historyIndex] : null;
+  const frameNodeRef = useRef<HTMLIFrameElement | null>(null);
+  // Mirror of tabs for use inside the message listener without
+  // re-subscribing on every state change.
+  const tabsRef = useRef(tabs);
+  const activeTabIdRef = useRef(activeTabId);
+  // Sync the mirrors after commit (refs must not be written during
+  // render — react-hooks/refs). The message listener only ever reads
+  // them from an event, which fires after the commit that matters.
+  useEffect(() => {
+    tabsRef.current = tabs;
+    activeTabIdRef.current = activeTabId;
+  });
+
+  const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
+  const currentUrl = activeTab ? tabCurrentUrl(activeTab) : null;
+
+  const updateTab = (tabId: number, patch: Partial<BrowserTabState>) => {
+    setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, ...patch } : t)));
+  };
 
   const clearWatchdog = () => {
     if (watchdogRef.current !== null) {
@@ -79,27 +134,134 @@ export default function BoardBrowserPanel() {
     }
   };
 
-  // Arm the watchdog for every new attempt (navigation, back/forward to
-  // a different URL, refresh, or retry — the last two change reloadKey
-  // and remount the iframe via its key).
-  useEffect(() => {
-    if (!currentUrl) return;
-    setEmbedStatus("loading");
+  const armWatchdog = (tabId: number) => {
     clearWatchdog();
     watchdogRef.current = setTimeout(() => {
       watchdogRef.current = null;
-      setEmbedStatus("blocked");
+      updateTab(tabId, { status: "blocked" });
     }, BROWSER_EMBED_WATCHDOG_MS);
+  };
+
+  // Arm the watchdog for panel-driven loads: a new frame src, a
+  // refresh (reloadKey remounts the frame), or switching to a tab that
+  // has a page in flight.
+  useEffect(() => {
+    if (!activeTab || !activeTab.frameSrc) return;
+    updateTab(activeTab.id, { status: "loading" });
+    armWatchdog(activeTab.id);
     return clearWatchdog;
-  }, [currentUrl, reloadKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab?.id, activeTab?.frameSrc, activeTab?.reloadKey]);
+
+  // In-page navigation sync from the proxied document's bootstrap.
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const frame = frameNodeRef.current;
+      if (!frame || event.source !== frame.contentWindow) return;
+      const data = event.data as { source?: unknown; type?: unknown; url?: unknown } | null;
+      if (!data || data.source !== BROWSER_PROXY_MESSAGE_SOURCE) return;
+      if (typeof data.url !== "string" || !data.url) return;
+      const tabId = activeTabIdRef.current;
+      const tab = tabsRef.current.find((t) => t.id === tabId);
+      if (!tab) return;
+      const url = data.url;
+
+      if (data.type === "landed") {
+        // Redirect correction: the frame landed somewhere other than
+        // the history entry we asked for — replace, don't push.
+        if (tabCurrentUrl(tab) !== url) {
+          const history = [...tab.history];
+          if (tab.historyIndex >= 0) history[tab.historyIndex] = url;
+          else history.push(url);
+          updateTab(tabId, {
+            history,
+            historyIndex: history.length - 1,
+            input: url,
+            status: "loaded",
+          });
+        } else {
+          updateTab(tabId, { status: "loaded" });
+        }
+        clearWatchdog();
+      } else if (data.type === "navigate") {
+        // The frame is already navigating itself (the bootstrap set
+        // its location); record the destination so back/forward and
+        // the address bar stay truthful, and guard the load.
+        if (tabCurrentUrl(tab) !== url) {
+          const history = [...tab.history.slice(0, tab.historyIndex + 1), url];
+          updateTab(tabId, { history, historyIndex: history.length - 1, input: url, status: "loading" });
+        } else {
+          updateTab(tabId, { status: "loading" });
+        }
+        armWatchdog(tabId);
+      } else if (data.type === "external") {
+        // target=_blank links and POST forms: a real browser tab is
+        // the honest home for these.
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!activeTab) return null;
 
   const navigate = (raw: string) => {
     const url = normalizeBrowserUrl(raw);
     if (!url) return;
-    const next = [...history.slice(0, historyIndex + 1), url];
-    setHistory(next);
-    setHistoryIndex(next.length - 1);
-    setInput(url);
+    const history = [...activeTab.history.slice(0, activeTab.historyIndex + 1), url];
+    updateTab(activeTab.id, {
+      history,
+      historyIndex: history.length - 1,
+      input: url,
+      frameSrc: browserProxyUrl(url),
+    });
+  };
+
+  const goBack = () => {
+    if (activeTab.historyIndex <= 0) return;
+    const next = activeTab.historyIndex - 1;
+    const url = activeTab.history[next] ?? "";
+    updateTab(activeTab.id, {
+      historyIndex: next,
+      input: url,
+      frameSrc: browserProxyUrl(url),
+    });
+  };
+
+  const goForward = () => {
+    if (activeTab.historyIndex >= activeTab.history.length - 1) return;
+    const next = activeTab.historyIndex + 1;
+    const url = activeTab.history[next] ?? "";
+    updateTab(activeTab.id, {
+      historyIndex: next,
+      input: url,
+      frameSrc: browserProxyUrl(url),
+    });
+  };
+
+  const addTab = () => {
+    const tab = freshTab();
+    setTabs((prev) => [...prev, tab]);
+    setActiveTabId(tab.id);
+  };
+
+  const closeTab = (tabId: number) => {
+    const idx = tabs.findIndex((t) => t.id === tabId);
+    if (idx < 0) return;
+    const next = tabs.filter((t) => t.id !== tabId);
+    if (next.length === 0) {
+      const replacement = freshTab();
+      setTabs([replacement]);
+      setActiveTabId(replacement.id);
+      return;
+    }
+    if (tabId === activeTabId) {
+      const neighbor = next[Math.min(idx, next.length - 1)];
+      setActiveTabId(neighbor.id);
+    }
+    setTabs(next);
   };
 
   // React's onError prop alone is not reliably delivered for <iframe>
@@ -107,9 +269,10 @@ export default function BoardBrowserPanel() {
   // through a ref callback; either path lands in the blocked state.
   const handleFrameError = () => {
     clearWatchdog();
-    setEmbedStatus("blocked");
+    updateTab(activeTab.id, { status: "blocked" });
   };
   const frameRef = (node: HTMLIFrameElement | null) => {
+    frameNodeRef.current = node;
     if (node) node.onerror = handleFrameError;
   };
 
@@ -128,6 +291,55 @@ export default function BoardBrowserPanel() {
       style={{ backgroundColor: tokens.surface, color: tokens.text }}
     >
       <div
+        className="flex shrink-0 items-end gap-1 border-b px-2 pt-1.5"
+        style={{ borderColor: tokens.border }}
+        data-testid="board-browser-tabs"
+      >
+        {tabs.map((tab) => (
+          <div
+            key={tab.id}
+            className="flex min-w-0 max-w-40 items-center gap-1 rounded-t-md border border-b-0 px-2 py-1"
+            style={{
+              borderColor: tokens.border,
+              backgroundColor: tab.id === activeTab.id ? tokens.surface : "transparent",
+              color: tab.id === activeTab.id ? tokens.text : tokens.textMuted,
+            }}
+          >
+            <button
+              type="button"
+              data-testid="board-browser-tab"
+              data-tab-id={tab.id}
+              aria-label={`Tab: ${tabLabel(tab)}`}
+              className="min-w-0 flex-1 truncate text-left text-[11px]"
+              onClick={() => setActiveTabId(tab.id)}
+            >
+              {tabLabel(tab)}
+            </button>
+            <button
+              type="button"
+              data-testid="board-browser-close-tab"
+              data-tab-id={tab.id}
+              aria-label={`Close tab: ${tabLabel(tab)}`}
+              className="flex h-4 w-4 shrink-0 items-center justify-center rounded hover:bg-black/10"
+              onClick={() => closeTab(tab.id)}
+            >
+              <X size={10} aria-hidden />
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          data-testid="board-browser-new-tab"
+          aria-label="New tab"
+          className="mb-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md hover:bg-black/5"
+          style={{ color: tokens.text }}
+          onClick={addTab}
+        >
+          <Plus size={13} aria-hidden />
+        </button>
+      </div>
+
+      <div
         className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5"
         style={{ borderColor: tokens.border }}
       >
@@ -137,12 +349,8 @@ export default function BoardBrowserPanel() {
           data-testid="board-browser-back"
           className={barButton}
           style={{ color: tokens.text }}
-          disabled={historyIndex <= 0}
-          onClick={() => {
-            const next = historyIndex - 1;
-            setHistoryIndex(next);
-            setInput(history[next] ?? "");
-          }}
+          disabled={activeTab.historyIndex <= 0}
+          onClick={goBack}
         >
           <ArrowLeft size={13} aria-hidden />
         </button>
@@ -152,12 +360,8 @@ export default function BoardBrowserPanel() {
           data-testid="board-browser-forward"
           className={barButton}
           style={{ color: tokens.text }}
-          disabled={historyIndex >= history.length - 1}
-          onClick={() => {
-            const next = historyIndex + 1;
-            setHistoryIndex(next);
-            setInput(history[next] ?? "");
-          }}
+          disabled={activeTab.historyIndex >= activeTab.history.length - 1}
+          onClick={goForward}
         >
           <ArrowRight size={13} aria-hidden />
         </button>
@@ -168,16 +372,16 @@ export default function BoardBrowserPanel() {
           className={barButton}
           style={{ color: tokens.text }}
           disabled={!currentUrl}
-          onClick={() => setReloadKey((k) => k + 1)}
+          onClick={() => updateTab(activeTab.id, { reloadKey: activeTab.reloadKey + 1 })}
         >
           <RefreshCw size={12} aria-hidden />
         </button>
         <input
           data-testid="board-browser-input"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
+          value={activeTab.input}
+          onChange={(e) => updateTab(activeTab.id, { input: e.target.value })}
           onKeyDown={(e) => {
-            if (e.key === "Enter") navigate(input);
+            if (e.key === "Enter") navigate(activeTab.input);
           }}
           placeholder="Enter a web address…"
           className="min-w-0 flex-1 rounded-full border bg-transparent px-3 py-1 text-xs outline-none"
@@ -199,7 +403,7 @@ export default function BoardBrowserPanel() {
       </div>
 
       {currentUrl ? (
-        embedStatus === "blocked" ? (
+        activeTab.status === "blocked" ? (
           <div
             className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center"
             data-testid="board-browser-blocked"
@@ -208,8 +412,8 @@ export default function BoardBrowserPanel() {
           >
             <Globe size={22} style={{ color: tokens.textMuted }} aria-hidden />
             <p className="max-w-80 text-xs leading-5" style={{ color: tokens.text }}>
-              This site doesn&apos;t allow itself to be displayed inside other
-              apps, so it can&apos;t be shown here.
+              This page couldn&apos;t be loaded in the panel. It may be down, too
+              slow, or need a full browser — opening it in a new tab always works.
             </p>
             <p
               className="max-w-full truncate text-xs"
@@ -233,7 +437,7 @@ export default function BoardBrowserPanel() {
               <button
                 type="button"
                 data-testid="board-browser-blocked-retry"
-                onClick={() => setReloadKey((k) => k + 1)}
+                onClick={() => updateTab(activeTab.id, { reloadKey: activeTab.reloadKey + 1 })}
                 className="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium"
                 style={{ borderColor: tokens.border, color: tokens.text }}
               >
@@ -244,7 +448,7 @@ export default function BoardBrowserPanel() {
           </div>
         ) : (
           <div className="relative flex min-h-0 flex-1 flex-col">
-            {embedStatus === "loading" && (
+            {activeTab.status === "loading" && (
               <p
                 data-testid="board-browser-loading"
                 className="shrink-0 px-3 py-1.5 text-center text-[11px]"
@@ -255,16 +459,16 @@ export default function BoardBrowserPanel() {
             )}
             <iframe
               ref={frameRef}
-              key={`${currentUrl}:${reloadKey}`}
+              key={`${activeTab.id}:${activeTab.reloadKey}`}
               data-testid="board-browser-frame"
               title="Board browser"
-              src={currentUrl}
+              src={activeTab.frameSrc ?? undefined}
               className="min-h-0 flex-1 border-0"
               style={{ backgroundColor: "#FFFFFF" }}
-              sandbox="allow-scripts allow-forms allow-popups allow-same-origin"
+              sandbox="allow-scripts allow-forms allow-popups allow-modals"
               onLoad={() => {
                 clearWatchdog();
-                setEmbedStatus("loaded");
+                updateTab(activeTab.id, { status: "loaded" });
               }}
               onError={handleFrameError}
             />
@@ -274,8 +478,9 @@ export default function BoardBrowserPanel() {
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
           <Globe size={22} style={{ color: tokens.textMuted }} aria-hidden />
           <p className="max-w-60 text-xs leading-5" style={{ color: tokens.textMuted }}>
-            Browse the web without leaving Studio. Some sites refuse to be
-            embedded — if a page stays blank, open it in a new tab instead.
+            Browse the web without leaving Studio. Pages load through
+            LiTT&apos;s browser view — most sites work; a few that need a
+            full browser can be opened in a new tab instead.
           </p>
         </div>
       )}
