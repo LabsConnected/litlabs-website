@@ -682,6 +682,7 @@ export function workLogLabel(verdict: CompletionVerdict): string | null {
  */
 const DEPLOY_TOOL_IDS = new Set([
   "project.deploy",
+  "deploy.execute",
   "deploy",
   "deploy.run",
   "deployment.create",
@@ -697,11 +698,22 @@ const DEPLOY_TOOL_IDS = new Set([
  * For these, a successful result already means the URL was fetched, so no
  * separate verification call is required. Every other deploy tool still
  * needs an explicit check afterwards.
+ *
+ * `deploy.execute` (src/lib/litt-intelligence/tool-registry.ts) returns the
+ * verified production URL as part of a successful result — the same
+ * self-verifying contract as `project.deploy`.
  */
-const SELF_VERIFYING_DEPLOY_TOOLS = new Set(["project.deploy"]);
+const SELF_VERIFYING_DEPLOY_TOOLS = new Set(["project.deploy", "deploy.execute"]);
 
-/** Tool ids that can verify a live URL actually serves. */
+/**
+ * Tool ids that can verify a live URL actually serves.
+ *
+ * `deploy.verify` (src/lib/litt-intelligence/tool-registry.ts) exists
+ * specifically to fetch a production URL and confirm it is reachable —
+ * the verification step a non-self-verifying deploy tool still needs.
+ */
 const URL_VERIFY_TOOL_IDS = new Set([
+  "deploy.verify",
   "browser.navigate",
   "browser.snapshot",
   "web.fetch",
