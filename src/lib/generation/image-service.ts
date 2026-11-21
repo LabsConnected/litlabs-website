@@ -1719,6 +1719,12 @@ export async function generateImage(
         durableUrl,
         durationMs: Date.now() - startTime,
         chargedBits: usedCost,
+        // Persist the provider thumbnail when one exists — the Asset
+        // Lake adapter reads metadata.thumbUrl, and dropping it here
+        // forced Media grids to download the full original per cell.
+        ...(typeof result.thumbUrl === "string" && result.thumbUrl
+          ? { thumbUrl: result.thumbUrl }
+          : {}),
       });
       await deps.setJobStatus(job.id, "completed", {
         assetId: `generation_job:${job.id}`,
