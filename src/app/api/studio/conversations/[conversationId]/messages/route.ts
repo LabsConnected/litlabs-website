@@ -1656,11 +1656,17 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               // status — never a tool's self-report. Only set for build-flow
               // statuses that actually ran a preview phase; "completed"
               // (read-only/exec/media turns have no preview phase) and
-              // "cancelled" leave it unset so they are unaffected.
+              // "cancelled" leave it unset so they are unaffected. A "failed"
+              // status alone is not enough: the flow also returns "failed"
+              // for pre-preview failures (build checks, missing artifacts)
+              // that never launched a preview — previewAttempted distinguishes
+              // those so their real error text is not replaced by a preview
+              // verdict.
               ...(launchFlowResult &&
               (launchFlowResult.status === "preview_ready" ||
                 launchFlowResult.status === "deployed" ||
-                launchFlowResult.status === "failed")
+                (launchFlowResult.status === "failed" &&
+                  launchFlowResult.previewAttempted === true))
                 ? {
                     preview: {
                       started:

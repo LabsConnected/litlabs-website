@@ -1298,6 +1298,55 @@ describe("POST /api/studio/conversations/[conversationId]/messages — SSE strea
     expect(doneEvents[0]?.assistantMessage.status).toBe("completed");
   });
 
+  it("a pre-preview build-check failure keeps its own error text — not a 'required preview failed' verdict", async () => {
+    // Regression for the Greptile P2 on #1066: guardPhase1 returns
+    // status:"failed" with the build-check details in finalText and no
+    // error field when buildFixResult.allPassed is false — preview was
+    // never launched. The route must not relabel that as a preview
+    // failure and overwrite the actionable build errors.
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({} as any);
+    vi.mocked(runLaunchFlow).mockResolvedValue({
+      success: false,
+      status: "failed",
+      previewAttempted: false,
+      finalText: "The project did not pass all checks after 3 repair attempts.\n- build failed (exit 1): Module not found: './missing'",
+      buildFixResult: {
+        allPassed: false,
+        results: [{ check: "build", passed: false, exitCode: 1, stdout: "", stderr: "Module not found: './missing'", errorCount: 1 }],
+        repairAttempts: 3,
+        finalState: "failed",
+      },
+      agentLoopResult: {
+        stepsUsed: 3,
+        toolCalls: [{ toolId: "files.write", success: true, summary: "wrote index.html", mutating: true, paths: ["index.html"], persisted: true }],
+        workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true },
+        cancelled: false,
+        pendingApproval: null,
+      } as any,
+      cancelled: false,
+      totalDurationMs: 100,
+    } as any);
+
+    const req = makeRequest({});
+    const res = await POST(req, { params: Promise.resolve({ conversationId: "conv-123" }) });
+    const { events } = await readSSE(res);
+
+    expect(updateMessageStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      expect.stringContaining("did not pass all checks"),
+    );
+    expect(updateMessageStatus).not.toHaveBeenCalledWith(
+      expect.any(String),
+      "user_123",
+      "failed",
+      expect.stringContaining("required preview failed"),
+    );
+    const doneEvents = events.filter((e) => e.type === "done");
+    expect(doneEvents[0]?.assistantMessage.status).toBe("failed");
+  });
+
   it("per-claim verification: a contradicted write in a multi-file build reports failed even when the other writes verified (gitless)", async () => {
     // Issue #704: before per-claim tracking, one verified mutation
     // satisfied the whole run — a write contradicted by read-back was
