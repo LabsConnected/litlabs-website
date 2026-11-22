@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 import { CANONICAL_REDIRECTS } from "./src/lib/canonical-redirects";
 import { PREVIEW_CONTENT_SECURITY_POLICY } from "./src/lib/projects/preview-csp";
+import { PROXIED_DOCUMENT_CSP } from "./src/lib/studio/browser-proxy";
 import { devTerminalConnectSrcEntries } from "./src/lib/terminal-csp";
 
 const nextConfig: NextConfig = {
@@ -303,6 +304,42 @@ const nextConfig: NextConfig = {
           {
             key: "Content-Security-Policy",
             value: PREVIEW_CONTENT_SECURITY_POLICY,
+          },
+          {
+            key: "X-Content-Type-Options",
+            value: "nosniff",
+          },
+          // Allow framing by same origin (Studio). Do NOT use DENY here.
+          {
+            key: "X-Frame-Options",
+            value: "SAMEORIGIN",
+          },
+        ],
+      },
+      // Studio Browser panel proxy (/api/studio/browser/proxy).
+      //
+      // Same rationale as /api/preview above: the global "/(.*)" rule
+      // would otherwise apply X-Frame-Options: DENY and the app CSP to
+      // the proxied document, and this config header wins over the
+      // route's own headers in production — so the panel's iframe was
+      // refused by OUR OWN headers even though the proxy route had
+      // already stripped the target site's framing refusal (live
+      // defect 2026-11-22: every site showed "refused to connect").
+      //
+      // The CSP comes from src/lib/studio/browser-proxy.ts
+      // (PROXIED_DOCUMENT_CSP — the sandbox value the route stamps),
+      // the single source of truth shared with the route handler, so
+      // the two must not drift. The opaque-origin sandbox is the
+      // security boundary for proxied content; framing is same-origin
+      // only, exactly like the preview.
+      //
+      // Keep this rule AFTER the global rule — later matching rule wins.
+      {
+        source: "/api/studio/browser/proxy",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: PROXIED_DOCUMENT_CSP,
           },
           {
             key: "X-Content-Type-Options",
