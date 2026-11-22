@@ -73,7 +73,10 @@ describe("StudioBoard surface (board-only)", () => {
     expect(screen.getByTestId("board-layout-menu")).toBeInTheDocument();
     expect(screen.getByTestId("board-settings-button")).toBeInTheDocument();
     expect(screen.getByTestId("board-zoom-control")).toBeInTheDocument();
-    expect(screen.getByTestId("board-zoom-label")).toHaveTextContent("100%");
+    // The select is the only zoom readout — the old separate label
+    // span printed the same percent a second time ("100% ∨ 100%").
+    expect(screen.getByTestId("board-zoom-select")).toHaveValue("100");
+    expect(screen.queryByTestId("board-zoom-label")).toBeNull();
   });
 
   it("the pill toolbar is centered in the board's top bar area, not docked to an edge", () => {
@@ -243,11 +246,11 @@ describe("StudioBoard surface (board-only)", () => {
     renderBoard();
     fireEvent.click(screen.getByTestId("board-zoom-in"));
     expect(store.getState().scopes[SCOPE].viewport.scale).toBeCloseTo(1.1);
-    expect(screen.getByTestId("board-zoom-label")).toHaveTextContent("110%");
+    expect(screen.getByTestId("board-zoom-select")).toHaveValue("110");
     fireEvent.click(screen.getByTestId("board-zoom-out"));
     fireEvent.click(screen.getByTestId("board-zoom-out"));
     expect(store.getState().scopes[SCOPE].viewport.scale).toBeCloseTo(0.9);
-    expect(screen.getByTestId("board-zoom-label")).toHaveTextContent("90%");
+    expect(screen.getByTestId("board-zoom-select")).toHaveValue("90");
   });
 });
 
@@ -306,7 +309,7 @@ describe("StudioBoard Board Settings wiring (Amendment 5)", () => {
     useBoardSettingsStore.getState().setDefaultZoomPercent(150);
     renderBoard();
     expect(store.getState().scopes[SCOPE].viewport.scale).toBe(1.5);
-    expect(screen.getByTestId("board-zoom-label")).toHaveTextContent("150%");
+    expect(screen.getByTestId("board-zoom-select")).toHaveValue("150");
   });
 
   it("the default zoom never overrides a viewport the user already arranged", () => {

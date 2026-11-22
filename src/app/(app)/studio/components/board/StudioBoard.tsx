@@ -63,7 +63,7 @@ import {
 } from "../../stores/useTerminalLogStore";
 import BoardPanel from "./BoardPanel";
 import BoardSettingsMenu from "./BoardSettingsMenu";
-import { clampRectInsideArea, visiblePanels } from "./board-layout";
+import { clampRectInsideArea, fitOnOpenViewport, visiblePanels } from "./board-layout";
 import {
   BOARD_ACCENT_VIOLET,
   BOARD_PANEL_IDS,
@@ -285,6 +285,29 @@ export default function StudioBoard({
       store.getState().setViewport(scope, { panX: 0, panY: 0, scale: percent / 100 });
     }
   }, [layout, scope, store]);
+
+  // Fit on open (Larry, 2026-11-22): the saved panel arrangement can
+  // be larger than the window it reopens in — at the stored 100% the
+  // board then looks "zoomed in", with panels past the edges and no
+  // visible way to reach them. Once per scope, after the container
+  // has a real size, frame everything (the zoom control's Fit value)
+  // when — and only when — the open panels overflow the viewport at
+  // the stored camera. Camera only: panel rects are never rewritten
+  // here, and a board whose panels already fit keeps its stored
+  // camera untouched. Runs after the default-zoom seed above, so it
+  // judges the camera the seed left behind. The phone stack has no
+  // pan/zoom world, so it is skipped while narrow.
+  const fitCheckedForScope = useRef<string | null>(null);
+  useEffect(() => {
+    if (!layout) return;
+    if (narrow) return;
+    if (fitCheckedForScope.current === scope) return;
+    if (containerSize.width <= 0 || containerSize.height <= 0) return;
+    fitCheckedForScope.current = scope;
+    if (layout.overviewReturnViewport) return;
+    const fit = fitOnOpenViewport(layout.panels, layout.viewport, containerSize);
+    if (fit) store.getState().setViewport(scope, fit);
+  }, [layout, scope, store, containerSize, narrow]);
 
   // Kimi wiring item 2: panel header statuses. These two store hooks
   // must stay ABOVE the layout early return — hooks cannot appear after
@@ -803,9 +826,6 @@ export default function StudioBoard({
               <option value={String(zoomPercent)}>{zoomPercent}%</option>
             )}
           </select>
-          <span data-testid="board-zoom-label" className="min-w-9 text-center text-[11px] font-medium">
-            {zoomPercent}%
-          </span>
           <button
             type="button"
             data-testid="board-zoom-in"
