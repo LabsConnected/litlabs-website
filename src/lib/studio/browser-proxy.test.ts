@@ -36,6 +36,25 @@ describe("buildProxyBootstrapScript", () => {
     expect(script).toContain('"litt-browser"');
   });
 
+  it("uses an absolute proxy URL when the app origin is supplied", () => {
+    // The injected <base href="<target URL>"> would resolve a
+    // root-relative proxy URL against the target origin — the
+    // bootstrap must navigate the frame on OUR origin instead.
+    const script = buildProxyBootstrapScript("https://example.com/final", "https://app.litlabs.net");
+    expect(script).toContain('var PROXY = "https://app.litlabs.net/api/studio/browser/proxy"');
+    expect(script).not.toContain('var PROXY = "/api/studio/browser/proxy"');
+  });
+
+  it("tolerates a trailing slash on the supplied origin", () => {
+    const script = buildProxyBootstrapScript("https://example.com/final", "https://app.litlabs.net/");
+    expect(script).toContain('var PROXY = "https://app.litlabs.net/api/studio/browser/proxy"');
+  });
+
+  it("falls back to the root-relative proxy path when no origin is supplied", () => {
+    const script = buildProxyBootstrapScript("https://example.com/final");
+    expect(script).toContain('var PROXY = "/api/studio/browser/proxy"');
+  });
+
   it("cannot be broken out of by a URL containing a script close tag", () => {
     const script = buildProxyBootstrapScript("https://example.com/</script><script>alert(1)</script>");
     // Only the wrapper's own closing tag may appear literally.
@@ -53,6 +72,16 @@ describe("injectProxyBootstrap", () => {
     expect(out).not.toContain("Content-Security-Policy");
     expect(out.indexOf("<base")).toBeLessThan(out.indexOf("<title>"));
     expect(out).toContain("post('landed', TARGET)");
+  });
+
+  it("threads the app origin into the bootstrap so in-page navigation stays on the proxy", () => {
+    const out = injectProxyBootstrap(
+      "<html><head><title>t</title></head><body>hi</body></html>",
+      "https://example.com/page",
+      "https://app.litlabs.net",
+    );
+    expect(out).toContain('var PROXY = "https://app.litlabs.net/api/studio/browser/proxy"');
+    expect(out).toContain('<base href="https://example.com/page">');
   });
 
   it("creates a head when the document has none", () => {
