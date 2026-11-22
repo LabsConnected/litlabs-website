@@ -75,7 +75,15 @@ export async function GET(req: NextRequest) {
     const body = await upstream.arrayBuffer();
     if (body.byteLength <= MAX_HTML_REWRITE_BYTES) {
       const html = new TextDecoder("utf-8").decode(body);
-      const rewritten = injectProxyBootstrap(html, upstream.url || rawTarget);
+      // Pass our own origin so the injected bootstrap navigates the
+      // frame to an ABSOLUTE proxy URL — the document's injected
+      // <base href="<target URL>"> would otherwise resolve the
+      // root-relative proxy path against the target origin.
+      const rewritten = injectProxyBootstrap(
+        html,
+        upstream.url || rawTarget,
+        new URL(req.url).origin,
+      );
       headers.set("content-type", "text/html; charset=utf-8");
       return new NextResponse(rewritten, { status: upstream.status, headers });
     }

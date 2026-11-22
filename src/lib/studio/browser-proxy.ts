@@ -113,15 +113,28 @@ export function isHtmlContentType(contentType: string | null | undefined): boole
  * Messages carry `source: "litt-browser"` and are only trusted by the
  * panel when they come from the panel's own frame window.
  */
-export function buildProxyBootstrapScript(finalUrl: string): string {
+export function buildProxyBootstrapScript(finalUrl: string, proxyOrigin?: string): string {
   // JSON-encode the URL for safe embedding; escape `<` so a URL can
   // never break out of the script element.
   const targetJson = JSON.stringify(finalUrl).replace(/</g, "\\u003c");
+  // The proxy URL the bootstrap navigates the frame to MUST be absolute
+  // when the app origin is known: injectProxyBootstrap inserts
+  // <base href="<target URL>"> into the same document, so a
+  // root-relative proxy URL would resolve against the TARGET origin
+  // (e.g. https://en.wikipedia.org/api/studio/browser/proxy?...) and
+  // the frame would load a framing-blocked page from the target's own
+  // server — the "This content is blocked" failure on in-page link
+  // clicks and GET form submits (live-proven 2026-11-22). The route
+  // handler passes its own request origin; the relative path remains
+  // the fallback for callers that cannot know it.
+  const proxyBase = proxyOrigin
+    ? `${proxyOrigin.replace(/\/+$/, "")}${BROWSER_PROXY_PATH}`
+    : BROWSER_PROXY_PATH;
   return [
     "<script>",
     "(function () {",
     `  var TARGET = ${targetJson};`,
-    `  var PROXY = ${JSON.stringify(BROWSER_PROXY_PATH)};`,
+    `  var PROXY = ${JSON.stringify(proxyBase)};`,
     `  var SOURCE = ${JSON.stringify(BROWSER_PROXY_MESSAGE_SOURCE)};`,
     "  function proxied(u) { return PROXY + '?url=' + encodeURIComponent(u); }",
     "  function resolve(u) { try { return new URL(u, TARGET).toString(); } catch (e) { return null; } }",
@@ -173,9 +186,9 @@ export function buildProxyBootstrapScript(finalUrl: string): string {
  *     immediately after the opening <head> tag (or <html>, or at the
  *     very start when the document has neither).
  */
-export function injectProxyBootstrap(html: string, finalUrl: string): string {
+export function injectProxyBootstrap(html: string, finalUrl: string, proxyOrigin?: string): string {
   const baseHref = finalUrl.replace(/"/g, "&quot;");
-  const injection = `<base href="${baseHref}">\n${buildProxyBootstrapScript(finalUrl)}`;
+  const injection = `<base href="${baseHref}">\n${buildProxyBootstrapScript(finalUrl, proxyOrigin)}`;
   const cleaned = html
     .replace(/<base\b[^>]*>/gi, "")
     .replace(
