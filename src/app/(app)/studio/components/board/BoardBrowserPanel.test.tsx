@@ -42,7 +42,7 @@ describe("BoardBrowserPanel embed-blocked state", () => {
 
     const blocked = screen.getByTestId("board-browser-blocked");
     expect(blocked).toHaveTextContent(
-      "This site doesn't allow itself to be displayed inside other apps, so it can't be shown here.",
+      "This page couldn't be loaded in the panel.",
     );
     expect(screen.getByTestId("board-browser-blocked-url")).toHaveTextContent(
       "https://google.com",
@@ -71,7 +71,7 @@ describe("BoardBrowserPanel embed-blocked state", () => {
     expect(screen.queryByTestId("board-browser-loading")).toBeNull();
     expect(screen.getByTestId("board-browser-frame")).toHaveAttribute(
       "src",
-      "https://example.com",
+      "/api/studio/browser/proxy?url=https%3A%2F%2Fexample.com",
     );
   });
 
@@ -99,7 +99,10 @@ describe("BoardBrowserPanel embed-blocked state", () => {
     // Blocked UI is replaced by a fresh frame with the watchdog re-armed.
     expect(screen.queryByTestId("board-browser-blocked")).toBeNull();
     const frame = screen.getByTestId("board-browser-frame");
-    expect(frame).toHaveAttribute("src", "https://google.com");
+    expect(frame).toHaveAttribute(
+      "src",
+      "/api/studio/browser/proxy?url=https%3A%2F%2Fgoogle.com",
+    );
     expect(screen.getByTestId("board-browser-loading")).toBeInTheDocument();
 
     // A load on the retry disarms the re-armed watchdog.
@@ -109,6 +112,31 @@ describe("BoardBrowserPanel embed-blocked state", () => {
     });
     expect(screen.queryByTestId("board-browser-blocked")).toBeNull();
     expect(screen.getByTestId("board-browser-frame")).toBeInTheDocument();
+  });
+
+  it("back and forward walk the panel history and reload the frame through the proxy", () => {
+    wrap(<BoardBrowserPanel />);
+    navigateTo("example.com");
+    navigateTo("news.site");
+    const back = screen.getByTestId("board-browser-back");
+    const forward = screen.getByTestId("board-browser-forward");
+    expect(back).not.toBeDisabled();
+    expect(forward).toBeDisabled();
+
+    fireEvent.click(back);
+    expect(screen.getByTestId("board-browser-input")).toHaveValue("https://example.com");
+    expect(screen.getByTestId("board-browser-frame")).toHaveAttribute(
+      "src",
+      "/api/studio/browser/proxy?url=https%3A%2F%2Fexample.com",
+    );
+    expect(forward).not.toBeDisabled();
+
+    fireEvent.click(forward);
+    expect(screen.getByTestId("board-browser-input")).toHaveValue("https://news.site");
+    expect(screen.getByTestId("board-browser-frame")).toHaveAttribute(
+      "src",
+      "/api/studio/browser/proxy?url=https%3A%2F%2Fnews.site",
+    );
   });
 
   it("Try again without a load re-enters the blocked state after the watchdog expires again", () => {
@@ -123,5 +151,105 @@ describe("BoardBrowserPanel embed-blocked state", () => {
       vi.advanceTimersByTime(BROWSER_EMBED_WATCHDOG_MS + 1);
     });
     expect(screen.getByTestId("board-browser-blocked")).toBeInTheDocument();
+  });
+});
+
+describe("BoardBrowserPanel tabs and in-page navigation sync", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  function postFromFrame(data: unknown) {
+    const frame = screen.getByTestId("board-browser-frame") as HTMLIFrameElement;
+    const event = new MessageEvent("message", {
+      data,
+      source: frame.contentWindow as unknown as MessageEventSource,
+    });
+    act(() => {
+      window.dispatchEvent(event);
+    });
+  }
+
+  it("opens a second tab with its own history and switches between tabs", () => {
+    wrap(<BoardBrowserPanel />);
+    navigateTo("example.com");
+    fireEvent.load(screen.getByTestId("board-browser-frame"));
+
+    fireEvent.click(screen.getByTestId("board-browser-new-tab"));
+    expect(screen.getAllByTestId("board-browser-tab")).toHaveLength(2);
+    // The new tab starts empty: no frame, address bar blank.
+    expect(screen.queryByTestId("board-browser-frame")).toBeNull();
+    expect(screen.getByTestId("board-browser-input")).toHaveValue("");
+
+    navigateTo("news.site");
+    expect(screen.getByTestId("board-browser-frame")).toHaveAttribute(
+      "src",
+      "/api/studio/browser/proxy?url=https%3A%2F%2Fnews.site",
+    );
+
+    // Switching back to the first tab restores its page and address.
+    fireEvent.click(screen.getAllByTestId("board-browser-tab")[0]);
+    expect(screen.getByTestId("board-browser-input")).toHaveValue("https://example.com");
+    expect(screen.getByTestId("board-browser-frame")).toHaveAttribute(
+      "src",
+      "/api/studio/browser/proxy?url=https%3A%2F%2Fexample.com",
+    );
+  });
+
+  it("closing the active tab activates a neighbor; closing the last tab leaves a fresh one", () => {
+    wrap(<BoardBrowserPanel />);
+    navigateTo("example.com");
+    fireEvent.click(screen.getByTestId("board-browser-new-tab"));
+    navigateTo("news.site");
+    expect(screen.getAllByTestId("board-browser-tab")).toHaveLength(2);
+
+    fireEvent.click(screen.getAllByTestId("board-browser-close-tab")[1]);
+    expect(screen.getAllByTestId("board-browser-tab")).toHaveLength(1);
+    expect(screen.getByTestId("board-browser-input")).toHaveValue("https://example.com");
+
+    fireEvent.click(screen.getAllByTestId("board-browser-close-tab")[0]);
+    expect(screen.getAllByTestId("board-browser-tab")).toHaveLength(1);
+    expect(screen.getByTestId("board-browser-input")).toHaveValue("");
+    expect(screen.queryByTestId("board-browser-frame")).toBeNull();
+  });
+
+  it("records in-page navigations posted by the proxied document so Back reaches them", () => {
+    wrap(<BoardBrowserPanel />);
+    navigateTo("example.com");
+    fireEvent.load(screen.getByTestId("board-browser-frame"));
+
+    postFromFrame({ source: "litt-browser", type: "navigate", url: "https://example.com/about" });
+
+    expect(screen.getByTestId("board-browser-input")).toHaveValue("https://example.com/about");
+    const back = screen.getByTestId("board-browser-back");
+    expect(back).not.toBeDisabled();
+    fireEvent.click(back);
+    expect(screen.getByTestId("board-browser-input")).toHaveValue("https://example.com");
+  });
+
+  it("corrects the address bar when the frame reports a redirect landing", () => {
+    wrap(<BoardBrowserPanel />);
+    navigateTo("example.com");
+    postFromFrame({ source: "litt-browser", type: "landed", url: "https://www.example.com/" });
+    expect(screen.getByTestId("board-browser-input")).toHaveValue("https://www.example.com/");
+    // A landing replaces the entry — Back stays disabled.
+    expect(screen.getByTestId("board-browser-back")).toBeDisabled();
+  });
+
+  it("ignores messages that do not come from the panel's own frame", () => {
+    wrap(<BoardBrowserPanel />);
+    navigateTo("example.com");
+    const event = new MessageEvent("message", {
+      data: { source: "litt-browser", type: "navigate", url: "https://evil.example/" },
+    });
+    act(() => {
+      window.dispatchEvent(event);
+    });
+    expect(screen.getByTestId("board-browser-input")).toHaveValue("https://example.com");
   });
 });

@@ -4,8 +4,8 @@
  * The sandbox preview has always run a project's dev server
  * (`next dev` for Next.js). That is the right default for small
  * projects: it boots fast and hot-reloads edits. It is the wrong
- * default for LARGE Next.js projects on the sandbox's 2 vCPU /
- * 2048 MB: the dev server's compile/watch load starves the box —
+ * default for LARGE Next.js projects on the sandbox's 4 vCPU /
+ * 8192 MB: the dev server's compile/watch load starves the box —
  * the live proof of 2026-11-19 showed the flagship litlabs-website
  * project (4,028 files on the volume, ~1,620 installed packages)
  * render, then go unreachable at +2–3 minutes while the dev
@@ -54,15 +54,65 @@ export type PreviewServeMode = "dev" | "production-build";
 export const PREVIEW_PROD_BUILD_FILE_THRESHOLD = 250;
 
 /**
- * Budget for the in-sandbox production build. Sized like the
- * install budget (SANDBOX_INSTALL_TIMEOUT_MS, 900 s): a cold
- * production build of a large Next.js app on 2 vCPU is the same
- * class of workload as its cold install, and install (≤900 s) +
- * build (≤900 s) + serving must fit inside the sandbox's session
- * lifetime. A build that exceeds the budget fails the start
- * honestly with its output tail, like an install timeout does.
+ * TOTAL wall-clock budget for the in-sandbox production build.
+ *
+ * This used to be 900 s and was passed as the timeoutMs of ONE
+ * blocking provider.execute — which made it a hard ceiling no
+ * large build could beat: live proof 2026-11-20 (build d04fb354)
+ * showed the litlabs-website build still running when the
+ * request died at the cap with [deadline_exceeded], on three
+ * attempts, never reaching the serve step. A local measurement
+ * of this repo's `next build` (PREVIEW-BUILD-TIMEOUT-DIAGNOSIS-
+ * 2026-11-20) took 908 s on a throttled ~1.5-CPU VM with ~8 GB
+ * RAM — right at the 900 s cap even uncontended-by-design and
+ * with 4× the sandbox's memory — and its peak RSS was 3,179 MB,
+ * more than the sandbox's entire 2048 MB. On the sandbox's
+ * 2 vCPU the same build is slower still, so a 15-minute cap is
+ * not a slow-build guard, it is a guarantee the flagship
+ * project can never preview.
+ *
+ * The build now runs DETACHED in the sandbox (sandbox-runtime.ts)
+ * and this constant is only the poll loop's total budget: no
+ * single request is ever outstanding longer than the launch /
+ * poll executes (30 s), and every poll re-arms the sandbox's
+ * session lifetime through provider.execute, so a build inside
+ * this budget cannot outlive its sandbox the way the blocking
+ * request could ([unavailable] sandbox-EOL failure, same proof).
+ * 45 minutes covers the measured build with headroom while
+ * still failing a genuinely wedged build honestly, with its
+ * output tail, inside one start.
  */
-export const SANDBOX_PREVIEW_BUILD_TIMEOUT_MS = 900_000;
+export const SANDBOX_PREVIEW_BUILD_TIMEOUT_MS = 2_700_000;
+
+/**
+ * Health-probe budget for the production-build path. The dev path
+ * keeps the sandbox runtime's 120 s window (HEALTH_PROBE_TIMEOUT_MS
+ * in sandbox-runtime.ts): a dev server that will ever answer does
+ * so quickly once listening. A production build is different — the
+ * probe clock starts when the detached launch returns, but on a
+ * just-build-saturated 2 vCPU box `next start` still has to load
+ * the built server and its first GET / render can be slow, so the
+ * 120 s dev window convicted a healthy start (live proof
+ * 2026-11-19: the process was still alive after the window expired
+ * and the start failed "did not become healthy"). 300 s covers the
+ * observed spawn-to-listening-plus-first-render tail with room,
+ * while staying far below the install/build budgets it follows.
+ */
+export const PREVIEW_PROD_HEALTH_PROBE_TIMEOUT_MS = 300_000;
+
+/**
+ * Resolve the health-probe budget for a serve mode. The dev budget
+ * is passed in by the caller (it lives in sandbox-runtime.ts, which
+ * imports this module — passing it in keeps the dependency one-way).
+ */
+export function resolvePreviewHealthProbeTimeoutMs(
+  serveMode: PreviewServeMode,
+  devTimeoutMs: number,
+): number {
+  return serveMode === "production-build"
+    ? PREVIEW_PROD_HEALTH_PROBE_TIMEOUT_MS
+    : devTimeoutMs;
+}
 
 /**
  * Directories that never count toward a project's size: installed
@@ -121,13 +171,34 @@ export function resolvePreviewServeMode(framework: string, fileCount: number): P
 }
 
 /**
- * The production build command, mirroring detectFramework's dev
- * command shape (`<pm> exec next …` — the project's own dev script
- * is bypassed for the same reason: it may hardcode ports or flags
- * that belong to the project's machines, not the preview).
+ * The production build command.
+ *
+ * When the project declares a `build` script, the preview runs it
+ * (`<pm> run build`): the build script is the project's production
+ * build contract — the same one Railway/nixpacks/Vercel run — and
+ * for a monorepo it is the only place the required order is
+ * written down (build the workspace packages first, then the
+ * site). The bare command this function used to always return
+ * (`<pm> exec next build`) skips that order: workspace packages
+ * like @litt/agent-core resolve only through a `dist/` that
+ * exists solely after their own build, `pnpm install` links but
+ * never builds them, and the site build died with "Module not
+ * found: Can't resolve '@litt/agent-core'" (round-6 live proof,
+ * 2026-11-22; PREVIEW-BUILD-PACKAGES-DIAGNOSIS-2026-11-22.md).
+ *
+ * The dev script stays bypassed (it may hardcode ports or flags
+ * that belong to the project's machines, not the preview); a
+ * build script has no port to fight over, so running it is safe
+ * in the sandbox. A project with NO declared build script keeps
+ * the previous bare command exactly.
  */
-export function nextProductionBuildCommand(packageManager: string): string {
-  return `${packageManager} exec next build`;
+export function nextProductionBuildCommand(
+  packageManager: string,
+  buildScript?: string | null,
+): string {
+  return buildScript && buildScript.trim().length > 0
+    ? `${packageManager} run build`
+    : `${packageManager} exec next build`;
 }
 
 /**

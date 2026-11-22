@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { useState } from "react";
 
-// Same voice/theme mocks as CommandComposer.test.tsx.
+// Voice/theme mocks — only needed by the CommandComposer row test below
+// (UnifiedSelector itself does not use them).
 vi.mock("@/app/(app)/studio/context/VoiceSessionContext", () => ({
   useVoiceSession: () => ({
     voiceState: "idle",
@@ -52,6 +54,7 @@ vi.mock("@/app/(app)/studio/hooks/useUserPlan", () => ({
 }));
 
 import CommandComposer from "./CommandComposer";
+import UnifiedSelectorPopover from "./UnifiedSelector";
 import { useStudioModelStore, MODELS } from "../stores/useStudioModelStore";
 
 function setViewport(width: number, height: number) {
@@ -60,18 +63,43 @@ function setViewport(width: number, height: number) {
   fireEvent(window, new Event("resize"));
 }
 
-function renderComposer() {
-  return render(
-    <CommandComposer value="" onChange={vi.fn()} onSend={vi.fn()} busy={false} />,
+/**
+ * Mirrors how CommandStudio hosts the selector after the chat-bar
+ * cleanup (2026-11-20): CommandStudio owns the open state, the popover
+ * is portaled with an anchor rect, and model selection writes the
+ * shared model store.
+ */
+function SelectorHost() {
+  const [open, setOpen] = useState(false);
+  const selectedModel = useStudioModelStore((s) => s.selectedModel);
+  const providerHealth = useStudioModelStore((s) => s.providerHealth);
+  const selectModel = useStudioModelStore((s) => s.selectModel);
+  return (
+    <>
+      <button type="button" data-testid="open-selector" onClick={() => setOpen(true)}>
+        Open selector
+      </button>
+      {open && (
+        <UnifiedSelectorPopover
+          rect={{ top: 600, bottom: 700, left: 100, right: 500, width: 400, height: 100 }}
+          activeAgentId="litt"
+          selectedModelId={selectedModel.id}
+          providerHealth={providerHealth}
+          onClose={() => setOpen(false)}
+          onAgentSelect={vi.fn()}
+          onModelSelect={selectModel}
+        />
+      )}
+    </>
   );
 }
 
 function openSelector() {
-  fireEvent.click(screen.getByTestId("unified-selector-trigger"));
+  fireEvent.click(screen.getByTestId("open-selector"));
   return screen.getByRole("dialog", { name: /select assistant and model/i });
 }
 
-describe("UnifiedSelectorPopover — model selector fix", () => {
+describe("UnifiedSelectorPopover — model selector (chat-bar cleanup host)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Offline Ollama probe — the Local section must simply stay hidden.
@@ -90,7 +118,7 @@ describe("UnifiedSelectorPopover — model selector fix", () => {
   });
 
   it("opens as a desktop popover with Model and Assistant as separate tabs", () => {
-    renderComposer();
+    render(<SelectorHost />);
     const dialog = openSelector();
     expect(dialog).toBeTruthy();
     expect(screen.queryByTestId("unified-selector-backdrop")).toBeNull();
@@ -101,7 +129,7 @@ describe("UnifiedSelectorPopover — model selector fix", () => {
   });
 
   it("shows free provider models up top and keeps Advanced collapsed", () => {
-    renderComposer();
+    render(<SelectorHost />);
     openSelector();
     expect(screen.getByText(/your keys — byok/i)).toBeTruthy();
     expect(screen.getByText(/free models/i)).toBeTruthy();
@@ -114,7 +142,7 @@ describe("UnifiedSelectorPopover — model selector fix", () => {
   });
 
   it("search filters models and surfaces Advanced matches without expanding", () => {
-    renderComposer();
+    render(<SelectorHost />);
     openSelector();
     const search = screen.getByTestId("model-search-input");
     fireEvent.change(search, { target: { value: "reasoning" } });
@@ -127,7 +155,7 @@ describe("UnifiedSelectorPopover — model selector fix", () => {
   });
 
   it("shows the current selection in the header and marks the active row", () => {
-    renderComposer();
+    render(<SelectorHost />);
     openSelector();
     expect(screen.getByText(/now using/i)).toBeTruthy();
     const active = document.querySelector('[data-active-model="true"]');
@@ -136,19 +164,17 @@ describe("UnifiedSelectorPopover — model selector fix", () => {
   });
 
   it("selecting a model updates the store and closes the selector", async () => {
-    renderComposer();
+    render(<SelectorHost />);
     openSelector();
     fireEvent.click(screen.getByRole("button", { name: /gpt-4o \(byok\)/i }));
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: /select assistant and model/i })).toBeNull(),
     );
     expect(useStudioModelStore.getState().selectedModel.id).toBe("gpt-4o");
-    const trigger = screen.getByTestId("unified-selector-trigger");
-    expect(trigger.getAttribute("title")).toContain("GPT-4o (BYOK)");
   });
 
   it("Escape and outside tap close the selector", async () => {
-    renderComposer();
+    render(<SelectorHost />);
     openSelector();
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() =>
@@ -162,7 +188,7 @@ describe("UnifiedSelectorPopover — model selector fix", () => {
   });
 
   it("Assistant tab holds the modes, separate from the model list", () => {
-    renderComposer();
+    render(<SelectorHost />);
     openSelector();
     fireEvent.click(screen.getByTestId("selector-tab-assistant"));
     expect(screen.getByText(/assistant mode/i)).toBeTruthy();
@@ -174,7 +200,7 @@ describe("UnifiedSelectorPopover — model selector fix", () => {
 
   it("mobile width renders a bottom sheet and locks background scroll", async () => {
     setViewport(390, 844);
-    renderComposer();
+    render(<SelectorHost />);
     // Re-run the viewport effect at mobile width before opening.
     setViewport(390, 844);
     const dialog = openSelector();
@@ -190,11 +216,36 @@ describe("UnifiedSelectorPopover — model selector fix", () => {
   });
 
   it("reopening shows the previously selected model as active", () => {
-    renderComposer();
+    render(<SelectorHost />);
     openSelector();
     fireEvent.click(screen.getByRole("button", { name: /claude sonnet \(byok\)/i }));
     openSelector();
     const active = document.querySelector('[data-active-model="true"]');
     expect(active?.textContent).toContain("Claude Sonnet (BYOK)");
+  });
+});
+
+describe("CommandComposer row — clean chat bar (Larry, 2026-11-20)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    localStorage.clear();
+    setViewport(390, 844);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    setViewport(1024, 768);
+  });
+
+  it("has no round selector button in the composer row — just text box, +, mic, send", () => {
+    render(<CommandComposer value="" onChange={vi.fn()} onSend={vi.fn()} busy={false} />);
+    // The round avatar/selector button is gone from the row.
+    expect(screen.queryByTestId("unified-selector-trigger")).toBeNull();
+    // The approved bar remains: attach (+), voice (mic), one send button.
+    expect(screen.getByLabelText("Attach files, media, or links")).toBeTruthy();
+    expect(screen.getByLabelText("Start voice")).toBeTruthy();
+    expect(screen.getByTestId("studio-send-button")).toBeTruthy();
+    expect(screen.getByPlaceholderText(/ask litt anything/i)).toBeTruthy();
   });
 });

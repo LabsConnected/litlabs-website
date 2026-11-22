@@ -97,6 +97,30 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
     expect(screen.getByText("I'm ready to help.")).toBeTruthy();
   });
 
+  it("renders no avatar/logo image on assistant rows — the LITT text label is the only identifier (Larry, 2026-11-20)", () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "Hello", createdAt: Date.now() },
+      { role: "assistant", content: "I'm ready to help.", createdAt: Date.now() },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+      />,
+    );
+    const assistantRow = screen.getByTestId("assistant-message");
+    // The old robot logo (litt-avatar-64.webp) hanging over the row's
+    // left edge is gone entirely — no <img> anywhere in the row.
+    expect(assistantRow.querySelector("img")).toBeNull();
+    expect(assistantRow.innerHTML).not.toContain("litt-avatar");
+    // The text label still identifies the speaker.
+    expect(assistantRow.textContent).toContain("LiTT");
+    // The user's own avatar is untouched.
+    expect(screen.getByTestId("user-avatar")).toBeTruthy();
+  });
+
   it("renders completion summary with explicit mutation categories and recovery feedback", () => {
     render(
       <StudioTranscript
@@ -456,20 +480,19 @@ describe("StudioTranscript — truthful work log", () => {
   });
 });
 
-describe("StudioTranscript — overflowDownloads (mobile density redesign)", () => {
+describe("StudioTranscript — no floating downloads in the chat view (chat-bar cleanup, 2026-11-20)", () => {
   const downloadable: ChatMessage[] = [
     { role: "user", content: "Hello", createdAt: Date.now() },
     { role: "assistant", content: "Hi there.", createdAt: Date.now() },
   ];
 
-  function renderTranscript(overflowDownloads?: boolean) {
+  function renderTranscript() {
     return render(
       <StudioTranscript
         messages={downloadable}
         busy={false}
         activeAgentId={"litt" as AgentId}
         onRouteToolAction={vi.fn()}
-        overflowDownloads={overflowDownloads}
       />,
     );
   }
@@ -478,46 +501,16 @@ describe("StudioTranscript — overflowDownloads (mobile density redesign)", () 
     downloadTextFileMock.mockClear();
   });
 
-  it("collapses the download pills into a single overflow button when enabled", () => {
-    renderTranscript(true);
-    const overflow = screen.getByTestId("transcript-overflow");
-    expect(overflow).toBeInTheDocument();
-    expect(overflow).toHaveAttribute("aria-expanded", "false");
-    // The pills stay hidden until the overflow menu opens.
-    expect(screen.queryByTestId("download-txt")).toBeNull();
-    expect(screen.queryByTestId("download-md")).toBeNull();
-  });
-
-  it("opens the overflow menu with both downloads and wires the original handlers", () => {
-    renderTranscript(true);
-    fireEvent.click(screen.getByTestId("transcript-overflow"));
-
-    expect(screen.getByTestId("transcript-overflow")).toHaveAttribute("aria-expanded", "true");
-    const txt = screen.getByTestId("download-txt");
-    const md = screen.getByTestId("download-md");
-    expect(txt).toBeInTheDocument();
-    expect(md).toBeInTheDocument();
-
-    fireEvent.click(txt);
-    expect(downloadTextFileMock).toHaveBeenCalledTimes(1);
-    expect(downloadTextFileMock.mock.calls[0][0]).toMatch(/\.txt$/);
-    // Choosing an option closes the menu.
-    expect(screen.queryByTestId("download-txt")).toBeNull();
-    expect(screen.queryByTestId("download-md")).toBeNull();
-  });
-
-  it("keeps the two download pills directly visible on desktop (default)", () => {
+  it("renders no floating ⋯ button and no download pills over the chat", () => {
     renderTranscript();
+    // Larry's complaint: the circle "…" hovering over the chat is gone,
+    // and so are the desktop Download .txt / .md pills — the chat view
+    // holds nothing extra. Export lives in the chat header menu and the
+    // mobile Tools sheet.
     expect(screen.queryByTestId("transcript-overflow")).toBeNull();
-
-    const txt = screen.getByTestId("download-txt");
-    const md = screen.getByTestId("download-md");
-    expect(txt).toBeInTheDocument();
-    expect(md).toBeInTheDocument();
-
-    fireEvent.click(md);
-    expect(downloadTextFileMock).toHaveBeenCalledTimes(1);
-    expect(downloadTextFileMock.mock.calls[0][0]).toMatch(/\.md$/);
+    expect(screen.queryByTestId("download-txt")).toBeNull();
+    expect(screen.queryByTestId("download-md")).toBeNull();
+    expect(downloadTextFileMock).not.toHaveBeenCalled();
   });
 });
 

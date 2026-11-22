@@ -137,6 +137,14 @@ const nextConfig: NextConfig = {
         hostname: "**.r2.cloudflarestorage.com",
       },
       {
+        // Default R2 public URLs (lib/r2 getPublicAssetUrl falls back to
+        // https://<bucket>.<account>.r2.dev/... when R2_PUBLIC_URL is
+        // unset). Asset Lake thumbnails route through the optimizer —
+        // without this entry those URLs are rejected with 400.
+        protocol: "https",
+        hostname: "**.r2.dev",
+      },
+      {
         protocol: "https",
         hostname: "**.googleusercontent.com",
       },

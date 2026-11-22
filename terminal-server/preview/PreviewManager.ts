@@ -49,8 +49,11 @@ import {
   nextProductionStartCommand,
   resolvePreviewServeMode,
   PREVIEW_PROD_BUILD_FILE_THRESHOLD,
+  PREVIEW_PROD_HEALTH_PROBE_TIMEOUT_MS,
+  SANDBOX_PREVIEW_BUILD_TIMEOUT_MS,
   type PreviewServeMode,
 } from "./serve-mode";
+import { SANDBOX_INSTALL_TIMEOUT_MS } from "../sandbox/install-stamp";
 
 /**
  * Environment variables that may be inherited from the terminal server.
@@ -242,9 +245,10 @@ export interface PreviewRuntime {
   serveMode?: PreviewServeMode;
   /**
    * The production build command for serveMode
-   * "production-build" (`<pm> exec next build`), recorded with
-   * the serve mode so a recreation rebuilds before it re-serves.
-   * Null in dev mode.
+   * "production-build" (the project's declared build script via
+   * `<pm> run build`, or `<pm> exec next build` when it declares
+   * none), recorded with the serve mode so a recreation rebuilds
+   * before it re-serves. Null in dev mode.
    */
   buildCommand?: string | null;
 }
@@ -949,6 +953,13 @@ interface FrameworkInfo {
   framework: string;
   command: string;
   packageManager: string;
+  /**
+   * The project's declared `scripts.build`, when package.json has
+   * one. Read by detection so the production-build serve mode can
+   * run the project's own build chain (serve-mode.ts); null when
+   * the project declares none (or detection was caller-supplied).
+   */
+  buildScript: string | null;
 }
 
 function detectFramework(root: string): FrameworkInfo {
@@ -970,11 +981,14 @@ function detectFramework(root: string): FrameworkInfo {
 
   // Read package.json scripts for dev command
   let devScript: string | null = null;
+  let buildScript: string | null = null;
   let declaredPm: string | null = null;
   if (hasPkgJson) {
     try {
       const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
       devScript = pkg?.scripts?.dev ?? null;
+      buildScript =
+        typeof pkg?.scripts?.build === "string" ? pkg.scripts.build : null;
       // packageManager field (e.g. "pnpm@9.15.0") takes precedence
       if (typeof pkg?.packageManager === "string") {
         const m = pkg.packageManager.match(/^([a-z]+)/i);
@@ -999,27 +1013,28 @@ function detectFramework(root: string): FrameworkInfo {
       framework: "nextjs",
       command: `${nextBin} dev --port $PORT --hostname ${previewBindHost()}`,
       packageManager,
+      buildScript,
     };
   }
 
   if (hasViteConfig || (hasPkgJson && devScript?.includes("vite"))) {
-    return { framework: "vite", command: `${packageManager} dev`, packageManager };
+    return { framework: "vite", command: `${packageManager} dev`, packageManager, buildScript };
   }
 
   if (hasIndexHtml && !hasPkgJson) {
-    return { framework: "static", command: "npx --yes serve -s . -l $PORT", packageManager: "npx" };
+    return { framework: "static", command: "npx --yes serve -s . -l $PORT", packageManager: "npx", buildScript };
   }
 
   if (hasPkgJson && devScript) {
-    return { framework: "node", command: `${packageManager} dev`, packageManager };
+    return { framework: "node", command: `${packageManager} dev`, packageManager, buildScript };
   }
 
   // Fallback: static server if index.html exists
   if (hasIndexHtml) {
-    return { framework: "static", command: "npx --yes serve -s . -l $PORT", packageManager: "npx" };
+    return { framework: "static", command: "npx --yes serve -s . -l $PORT", packageManager: "npx", buildScript };
   }
 
-  return { framework: "unknown", command: "", packageManager };
+  return { framework: "unknown", command: "", packageManager, buildScript };
 }
 
 // ─── Health probing ────────────────────────────────────────────────
@@ -1221,6 +1236,7 @@ export function getPreviewStatus(workspaceId: string): {
   lastHealthCheck: number | null;
   error: string | null;
   errorCode: PreviewErrorCode | null;
+  serveMode: PreviewServeMode | null;
   logs: string[];
 } {
   const rt = runtimes.get(workspaceId);
@@ -1234,6 +1250,7 @@ export function getPreviewStatus(workspaceId: string): {
       lastHealthCheck: null,
       error: null,
       errorCode: null,
+      serveMode: null,
       logs: [],
     };
   }
@@ -1246,6 +1263,7 @@ export function getPreviewStatus(workspaceId: string): {
     lastHealthCheck: rt.lastHealthCheck,
     error: rt.error,
     errorCode: rt.errorCode,
+    serveMode: rt.serveMode ?? "dev",
     logs: [...rt.logs],
   };
 }
@@ -1292,6 +1310,7 @@ async function startSandboxPreviewBranch(
           framework: input.framework,
           command: input.command,
           packageManager: input.packageManager ?? "pnpm",
+          buildScript: null,
         }
       : detectFramework(ws.root);
 
@@ -1309,7 +1328,10 @@ async function startSandboxPreviewBranch(
     const fileCount = countProjectFiles(ws.root);
     serveMode = resolvePreviewServeMode(detected.framework, fileCount);
     if (serveMode === "production-build") {
-      buildCommand = nextProductionBuildCommand(detected.packageManager);
+      buildCommand = nextProductionBuildCommand(
+        detected.packageManager,
+        detected.buildScript,
+      );
       detected.command = nextProductionStartCommand(
         detected.packageManager,
         previewBindHost(),
@@ -1353,10 +1375,22 @@ async function startSandboxPreviewBranch(
   // produced zero sandbox activity because it was handed the first
   // attempt's stuck runtime). Fall through instead: the teardown
   // below stops it and a fresh runtime starts.
+  // The freshness window is sized by the EXISTING runtime's serve
+  // mode (health-fix, 2026-11-19): a production-build start
+  // legitimately sits in `starting` through install (≤900 s) +
+  // build (≤900 s) + its health window (300 s), so the dev-sized
+  // probe window judged healthy in-flight production starts wedged
+  // and tore them down. Dev/static keep the existing window.
+  const startingFreshWindowMs =
+    (existing?.serveMode ?? "dev") === "production-build"
+      ? SANDBOX_INSTALL_TIMEOUT_MS +
+        SANDBOX_PREVIEW_BUILD_TIMEOUT_MS +
+        PREVIEW_PROD_HEALTH_PROBE_TIMEOUT_MS
+      : SANDBOX_HEALTH_PROBE_TIMEOUT_MS;
   const startingIsFresh =
     existing?.status === "starting" &&
     existing.startedAt !== null &&
-    Date.now() - existing.startedAt < SANDBOX_HEALTH_PROBE_TIMEOUT_MS;
+    Date.now() - existing.startedAt < startingFreshWindowMs;
   if (
     !input.forceRestart &&
     existing &&
@@ -1563,6 +1597,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
         framework: input.framework,
         command: input.command,
         packageManager: input.packageManager ?? "pnpm",
+        buildScript: null,
       }
     : detectFramework(ws.root);
 
@@ -2159,11 +2194,28 @@ export async function restartPreview(
   // leg goes through the async accept (C3/C4): the stop phase above
   // stays synchronous and bounded, and the fresh start's long phase
   // completes in the background under the new "starting" runtime.
+  //
+  // Production-build exception (live failure 2026-11-20): a
+  // production-build runtime's stored command is the SERVE command
+  // (`next start`), not a dev command. Passing framework+command
+  // back verbatim marks the start caller-supplied, and the sandbox
+  // branch then skips serve-mode resolution entirely — the restart
+  // came back serveMode "dev" with no build step, and launched
+  // `next start` in a sandbox whose `.next` build is sandbox-local
+  // output (never on the volume, and absent in any fresh sandbox or
+  // after an interrupted first build): Next died instantly with
+  // "Could not find a production build in the '.next' directory"
+  // and the probe convicted the guest at the dev-sized 120 s
+  // window. For a production-build runtime, omit framework/command
+  // so the restart re-runs detection + serve-mode resolution and
+  // rebuilds before it re-serves, exactly like a fresh start.
+  const productionBuild = (rt.serveMode ?? "dev") === "production-build";
   return startPreviewAccepted({
     workspaceId,
     userId: rt.userId,
-    framework: rt.framework,
-    command: rt.command,
+    ...(productionBuild
+      ? {}
+      : { framework: rt.framework, command: rt.command }),
     packageManager: "pnpm",
     projectEnv: projectEnv ?? rt.clerkProjectEnv ?? undefined,
     forceRestart: true,

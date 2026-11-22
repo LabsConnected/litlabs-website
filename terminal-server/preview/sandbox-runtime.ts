@@ -73,6 +73,7 @@ import {
   type PreviewUpstream,
 } from "./PreviewManager";
 import {
+  resolvePreviewHealthProbeTimeoutMs,
   SANDBOX_PREVIEW_BUILD_TIMEOUT_MS,
   type PreviewServeMode,
 } from "./serve-mode";
@@ -87,6 +88,23 @@ const PREVIEW_TMP_DIR = "/tmp/litt-preview";
 const RUN_SCRIPT_PATH = `${PREVIEW_TMP_DIR}/run.sh`;
 const LOG_PATH = `${PREVIEW_TMP_DIR}/preview.log`;
 const PID_PATH = `${PREVIEW_TMP_DIR}/preview.pid`;
+const BUILD_SCRIPT_PATH = `${PREVIEW_TMP_DIR}/build.sh`;
+const BUILD_LOG_PATH = `${PREVIEW_TMP_DIR}/build.log`;
+const BUILD_EXIT_PATH = `${PREVIEW_TMP_DIR}/build.exit`;
+const BUILD_PID_PATH = `${PREVIEW_TMP_DIR}/build.pid`;
+
+/**
+ * How often the start polls a detached production build's exit
+ * file. Each poll is a provider.execute, which also re-arms the
+ * sandbox's session lifetime — a building sandbox is an active
+ * sandbox and must never reach its create-time kill bound
+ * mid-build (the [unavailable] sandbox-EOL build failure of
+ * 2026-11-20). 15 s keeps the re-arm far inside the 60-minute
+ * plan cap while adding negligible load to a build-saturated box.
+ */
+const PREVIEW_BUILD_POLL_INTERVAL_MS = 15_000;
+/** Timeout for the build's launch and poll executes themselves. */
+const PREVIEW_BUILD_EXECUTE_TIMEOUT_MS = 30_000;
 
 const HEALTH_PROBE_INTERVAL_MS = 1000;
 /**
@@ -101,6 +119,17 @@ const HEALTH_PROBE_INTERVAL_MS = 1000;
  * now reaches "ready" instead of a false "did not become healthy".
  */
 export const HEALTH_PROBE_TIMEOUT_MS = 120_000;
+/**
+ * Per-attempt probe abort on the production-build path. The dev
+ * path keeps probeUpstream's 3 s default: a dev server's first
+ * response is a fast local compile. A production server's first
+ * GET / render on a just-build-saturated 2 vCPU box can run far
+ * past 3 s — and with a 3 s abort EVERY attempt failed identically,
+ * so the retry loop could never accumulate progress (live proof
+ * 2026-11-19). 20 s matches the in-guest ground-truth curl's
+ * budget (checkSandboxPreviewGroundTruth).
+ */
+const PROD_HEALTH_PROBE_ATTEMPT_TIMEOUT_MS = 20_000;
 /** Session extension granted while a sandbox preview is in use. */
 const PREVIEW_SESSION_EXTENSION_MS = 120 * 60_000;
 
@@ -131,6 +160,9 @@ export interface SandboxPreviewStartArgs {
   travelingEnv: Record<string, string>;
   /** Health probe override (tests). Defaults to a real upstream fetch. */
   probe?: (origin: string, headers: Record<string, string>) => Promise<SandboxProbeResult>;
+  /** Build poll interval / total budget overrides (tests). */
+  buildPollIntervalMs?: number;
+  buildBudgetMs?: number;
 }
 
 /**
@@ -165,6 +197,81 @@ export interface SandboxProbeResult {
 
 /** Byte offsets into the sandbox preview log, per workspace. */
 const logOffsets = new Map<string, number>();
+
+/** Best-effort kill of the detached production build (its process
+ * group, via the pid file the launch recorded). Used when the build
+ * exceeds its budget and whenever the start dies after the launch:
+ * a build nobody is watching must not keep saturating the sandbox
+ * (round 3, 2026-11-21 — see the poll loop below). Never throws. */
+async function killDetachedBuild(
+  provider: SandboxProvider,
+  sandboxId: string,
+): Promise<void> {
+  await provider
+    .execute(sandboxId, {
+      command:
+        `kill -KILL -$(cat ${BUILD_PID_PATH} 2>/dev/null) 2>/dev/null; ` +
+        `kill -KILL $(cat ${BUILD_PID_PATH} 2>/dev/null) 2>/dev/null; true`,
+      cwd: SANDBOX_WORKSPACE_ROOT,
+      timeoutMs: PREVIEW_BUILD_EXECUTE_TIMEOUT_MS,
+    })
+    .catch(() => {});
+}
+
+/**
+ * Best-effort in-sandbox memory snapshot after a failed build,
+ * pushed into the preview log as [build] lines. The flagship
+ * build's peak RSS measured on a roomy VM (3,179 MB) exceeds the
+ * sandbox's 2048 MB, so whether the in-sandbox build is being
+ * OOM-killed is THE open question of the preview saga — and until
+ * now no live proof could answer it, because a failed start
+ * surfaced only a transport error and the build's own evidence
+ * stayed inside the dead sandbox. `free -m` + /proc/meminfo +
+ * the kernel's OOM lines (when dmesg is readable) are the
+ * cheapest self-settling evidence. Never throws, never changes
+ * the outcome: an unreadable snapshot is itself recorded.
+ */
+async function captureBuildMemoryEvidence(
+  provider: SandboxProvider,
+  sandboxId: string,
+  runtime: PreviewRuntime,
+): Promise<void> {
+  try {
+    const res = await provider.execute(sandboxId, {
+      command:
+        "free -m 2>/dev/null | head -3; " +
+        "grep -E \"MemTotal|MemAvailable|SwapTotal|SwapFree\" /proc/meminfo 2>/dev/null; " +
+        "dmesg 2>/dev/null | grep -iE \"out of memory|oom-kill|killed process\" | tail -3; true",
+      cwd: SANDBOX_WORKSPACE_ROOT,
+      timeoutMs: 10_000,
+    });
+    const lines = (res.stdout ?? "")
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .filter((line) => line.length > 0)
+      .slice(0, 8);
+    if (lines.length === 0) {
+      pushPreviewLog(
+        runtime,
+        "[build] Memory snapshot after the failed build came back empty",
+      );
+      return;
+    }
+    pushPreviewLog(
+      runtime,
+      "[build] Memory snapshot after the failed build (sandbox limit: 8192 MB):",
+    );
+    for (const line of lines) {
+      pushPreviewLog(runtime, `[build] ${line}`);
+    }
+  } catch (err) {
+    pushPreviewLog(
+      runtime,
+      `[build] Memory snapshot after the failed build was unreadable: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
+  }
+}
 
 /**
  * Start the dev server inside the sandbox and wire the runtime's
@@ -311,78 +418,281 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
   // Production-build serve mode (serve-mode.ts): for a large
   // Next.js project, build BEFORE launching, and let the run script
   // below serve the built output (`next start`, already resolved
-  // into args.command by PreviewManager). The build runs inline in
-  // the start — the same position the install occupies — so the
-  // async-start contract is unchanged: the start returns once the
-  // server is launched, and the health probe judges the server,
-  // never the build. A failed build is a failed start: the runtime
-  // records preview_build_failed with the build's own output tail
-  // as the diagnostic, and no server is launched — there is no
-  // state in which a stale or partial build gets served as ready.
+  // into args.command by PreviewManager). A failed build is a
+  // failed start: the runtime records preview_build_failed with
+  // the build's own output tail as the diagnostic, and no server
+  // is launched — there is no state in which a stale or partial
+  // build gets served as ready.
+  //
+  // The build runs DETACHED, exactly like the server launch below
+  // (setsid/nohup, output to a log file, exit code to an exit
+  // file), and the start polls the exit file. It used to be ONE
+  // blocking provider.execute capped at 900 s: the flagship
+  // project's build measurably needs far longer than that on
+  // 2 vCPU, so every start died at the cap with
+  // [deadline_exceeded] and never reached the serve step, and a
+  // build whose single request outlived the sandbox died with it
+  // ([unavailable] sandbox EOL) — live proof 2026-11-20, three
+  // attempts, build d04fb354. Detached, no request is ever
+  // outstanding longer than 30 s, every poll re-arms the
+  // sandbox's session lifetime through provider.execute (a
+  // building sandbox stays alive), and
+  // SANDBOX_PREVIEW_BUILD_TIMEOUT_MS is the poll loop's TOTAL
+  // budget. The async-start contract is unchanged: the start
+  // returns once the server is launched, and the health probe
+  // judges the server, never the build.
+  //
+  // Round 3 (2026-11-21): the detached design's first live proof
+  // (fa7c64a8) STILL failed all three attempts with the raw
+  // [deadline_exceeded] text — at 43–46 min, <5 min and 10–15 min.
+  // Diagnosis (PREVIEW-TIMEOUT-ROUND3-DIAGNOSIS-2026-11-21.md):
+  // the polls themselves were the outstanding envd streams; a
+  // build saturating 2 vCPU inside 2048 MB starves envd past a
+  // poll's 30 s cap, and the loop let that first throwing poll
+  // abort the start with the raw SDK error. The loop now tolerates
+  // throwing polls (counted + logged, polling continues to the
+  // budget), a dying start kills the detached build instead of
+  // orphaning it into the next start's sandbox, and every failed
+  // build records a memory snapshot — the evidence the next proof
+  // needs to settle the 2048 MB question.
   if (serveMode === "production-build" && buildCommand) {
     pushPreviewLog(
       runtime,
       `[preview] Building production bundle in sandbox (${buildCommand}) — ` +
-        `this can take several minutes on the sandbox's 2 vCPU`,
+        `this can take several minutes on the sandbox's 4 vCPU`,
     );
-    const build = await provider.execute(sandboxId, {
-      command: buildCommand,
-      cwd: SANDBOX_WORKSPACE_ROOT,
-      timeoutMs: SANDBOX_PREVIEW_BUILD_TIMEOUT_MS,
-      // The build's env mirrors the launch's composition — the
-      // project's traveling env first (Next inlines NEXT_PUBLIC_*
-      // values at build time, so the build needs the same project
-      // env the server would have been launched with), then the
-      // pins — with three production differences: NODE_ENV is
-      // production (the build's whole point), the HOME pin keeps
-      // caches out of the root-owned workspace root (the install's
-      // EACCES lesson), and the heap shaping is the LAUNCH bound
-      // (buildSandboxPreviewLaunchEnv, 1280 MB): compiling this
-      // tree is the same class of workload the launch bound was
-      // sized for, and the install's 768 MB resolve/link bound
-      // risks GC thrash mid-compile.
-      env: {
-        ...args.travelingEnv,
-        NODE_ENV: "production",
-        NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
-        HOME: SANDBOX_HOME_DIR,
-        ...buildSandboxPreviewLaunchEnv(),
-      },
-    });
+    // The build's env mirrors the launch's composition — the
+    // project's traveling env first (Next inlines NEXT_PUBLIC_*
+    // values at build time, so the build needs the same project
+    // env the server would have been launched with), then the
+    // pins — with three production differences: NODE_ENV is
+    // production (the build's whole point), the HOME pin keeps
+    // caches out of the root-owned workspace root (the install's
+    // EACCES lesson), and the heap shaping is the LAUNCH bound
+    // (buildSandboxPreviewLaunchEnv, 1280 MB): compiling this
+    // tree is the same class of workload the launch bound was
+    // sized for, and the install's 768 MB resolve/link bound
+    // risks GC thrash mid-compile. Telemetry is disabled: the
+    // build must never stall on a phone-home attempt from inside
+    // a restricted-egress sandbox.
+    const buildEnv: Record<string, string> = {
+      ...args.travelingEnv,
+      NODE_ENV: "production",
+      NPM_CONFIG_IGNORE_WORKSPACE_ROOT_CHECK: "true",
+      NEXT_TELEMETRY_DISABLED: "1",
+      HOME: SANDBOX_HOME_DIR,
+      ...buildSandboxPreviewLaunchEnv(),
+    };
+    // The build script carries the command ONLY — no env, no
+    // secrets (the run script's discipline): the env travels on
+    // the launch execute and is inherited by the detached child.
+    // The script records the build's exit code in the exit file,
+    // which is the poll loop's ground truth.
+    await transfer.makeDir(sandboxId, PREVIEW_TMP_DIR);
+    const buildScript =
+      "#!/bin/bash\n" +
+      `cd ${SANDBOX_WORKSPACE_ROOT}\n` +
+      `${buildCommand}\n` +
+      `echo $? > ${BUILD_EXIT_PATH}\n`;
+    await transfer.writeFile(
+      sandboxId,
+      BUILD_SCRIPT_PATH,
+      new TextEncoder().encode(buildScript),
+    );
+    const buildBudgetMs = args.buildBudgetMs ?? SANDBOX_PREVIEW_BUILD_TIMEOUT_MS;
+    const buildPollIntervalMs = args.buildPollIntervalMs ?? PREVIEW_BUILD_POLL_INTERVAL_MS;
+    let buildExitCode: number | null = null;
+    let buildTimedOut = false;
+    // Round 3 (2026-11-21): poll transport health. The round-2
+    // proof (production fa7c64a8, WITH the detached build) failed
+    // three more times with the raw SDK [deadline_exceeded] text
+    // at 43–46 min, <5 min and 10–15 min — never the budget
+    // verdict, never a build exit code. The only start-path calls
+    // that can mint that text are envd command streams whose
+    // timeoutMs expired (SDK Code.DeadlineExceeded mapping), and
+    // in the build phase the outstanding streams are these polls:
+    // a trivial exit-file check that cannot complete within its
+    // 30 s cap while the build saturates 2 vCPU and thrashes a
+    // 2048 MB sandbox (the build's measured peak RSS is 3,179 MB
+    // on a roomy VM). The pre-round-3 loop let the FIRST throwing
+    // poll abort the whole start, and PreviewManager's catch
+    // copied the raw SDK message into the user-facing error —
+    // discarding every diagnostic the detached design exists to
+    // produce. Now a throwing poll is evidence, not a verdict:
+    // it is counted, logged, and polling continues to the total
+    // budget; only the budget can end the wait, and it ends it
+    // with the failure class spelled out (see buildStatusUnreadable).
+    let pollFailureCount = 0;
+    let consecutivePollFailures = 0;
+    let lastPollError: string | null = null;
+    const buildStartedAt = Date.now();
+    const buildDeadline = buildStartedAt + buildBudgetMs;
+    try {
+      const launchBuild = await provider.execute(sandboxId, {
+        command:
+          // A previous start's build may still be running in this
+          // sandbox (its start was abandoned or restarted): stop it
+          // and clear its artifacts so its exit file can never be
+          // read as this build's result.
+          `if [ -f ${BUILD_PID_PATH} ]; then kill -KILL -$(cat ${BUILD_PID_PATH} 2>/dev/null) 2>/dev/null; fi; ` +
+          `rm -f ${BUILD_EXIT_PATH} ${BUILD_LOG_PATH} ${BUILD_PID_PATH}; ` +
+          `setsid nohup bash ${BUILD_SCRIPT_PATH} >> ${BUILD_LOG_PATH} 2>&1 < /dev/null & ` +
+          `echo $! > ${BUILD_PID_PATH}`,
+        cwd: SANDBOX_WORKSPACE_ROOT,
+        timeoutMs: PREVIEW_BUILD_EXECUTE_TIMEOUT_MS,
+        env: buildEnv,
+      });
+      if (launchBuild.exitCode !== 0) {
+        buildExitCode = launchBuild.exitCode;
+      }
+      let pollCount = 0;
+      while (buildExitCode === null) {
+        pollCount += 1;
+        let done: RegExpExecArray | null = null;
+        try {
+          const status = await provider.execute(sandboxId, {
+            command:
+              `if [ -f ${BUILD_EXIT_PATH} ]; then echo "DONE $(cat ${BUILD_EXIT_PATH})"; else echo RUNNING; fi`,
+            cwd: SANDBOX_WORKSPACE_ROOT,
+            timeoutMs: PREVIEW_BUILD_EXECUTE_TIMEOUT_MS,
+          });
+          done = /DONE\s+(-?\d+)/.exec(status.stdout ?? "");
+          if (consecutivePollFailures > 0) {
+            pushPreviewLog(
+              runtime,
+              `[preview] Build status checks recovered after ${consecutivePollFailures} ` +
+                `failed attempt(s) — the sandbox is answering again`,
+            );
+            consecutivePollFailures = 0;
+          }
+        } catch (err) {
+          pollFailureCount += 1;
+          consecutivePollFailures += 1;
+          lastPollError = err instanceof Error ? err.message : String(err);
+          if (consecutivePollFailures === 1 || consecutivePollFailures % 4 === 0) {
+            pushPreviewLog(
+              runtime,
+              `[preview] Build status check failed (${consecutivePollFailures} in a row, ` +
+                `${pollFailureCount} total): ${lastPollError} — a status check timing out ` +
+                `does not stop the detached build; polling continues`,
+            );
+          }
+        }
+        if (done) {
+          buildExitCode = Number.parseInt(done[1], 10);
+          break;
+        }
+        if (Date.now() >= buildDeadline) {
+          buildTimedOut = true;
+          buildExitCode = -1;
+          await killDetachedBuild(provider, sandboxId);
+          break;
+        }
+        // Heartbeat (~every 4th poll, ≈60 s at the default
+        // interval): the preview log is the only build-progress
+        // surface the Studio shows, and a silent 45-minute wait
+        // reads as a hang. The line carries the poll-failure count
+        // so starvation is visible as it develops, not just at the
+        // verdict.
+        if (pollCount % 4 === 0) {
+          pushPreviewLog(
+            runtime,
+            `[preview] Build still running — ${Math.round((Date.now() - buildStartedAt) / 1000)}s ` +
+              `of ${Math.round(buildBudgetMs / 1000)}s budget elapsed` +
+              (pollFailureCount > 0
+                ? `, ${pollFailureCount} status check(s) have failed so far`
+                : ""),
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, buildPollIntervalMs));
+      }
+    } catch (err) {
+      // The start is dying after the launch (the launch execute
+      // itself is the only expected thrower left — the polls are
+      // tolerated above): do not leave the detached build running
+      // behind it. A surviving build saturates the sandbox the
+      // NEXT start provisions into, which is how the round-2
+      // restarts starved faster than the first start (<5 min and
+      // 10–15 min against the first start's 43–46). Best effort:
+      // the rethrow is the outcome.
+      await killDetachedBuild(provider, sandboxId);
+      throw err;
+    }
+    // The wait ended at the budget while the status checks
+    // themselves were failing: the build's outcome is UNKNOWN —
+    // it may have finished, failed, or still be running in a
+    // sandbox too starved to answer. That is a different failure
+    // class from "the build ran past its budget" (polls answering
+    // RUNNING the whole time) and from "the build failed" (an
+    // exit code was read), and the verdict below says so.
+    const buildStatusUnreadable = buildTimedOut && consecutivePollFailures > 0;
     // A bounded tail of the build's own output goes into the
     // preview log either way: on success it is the only record of
     // what was built; on failure it IS the diagnosis. [build]
     // lines stay ring-only (pushPreviewLog mirrors only [preview]
     // verdict lines to the service stdout).
-    const buildOutput = `${build.stdout}\n${build.stderr}`
+    let buildLogText = "";
+    try {
+      const bytes = await transfer.readFile(sandboxId, BUILD_LOG_PATH);
+      buildLogText = new TextDecoder().decode(bytes);
+    } catch {
+      // The log read is evidence, never the outcome.
+    }
+    const buildOutput = buildLogText
       .split("\n")
       .map((line) => line.trimEnd())
       .filter((line) => line.length > 0);
     for (const line of buildOutput.slice(-30)) {
       pushPreviewLog(runtime, `[build] ${line}`);
     }
-    if (build.exitCode !== 0) {
-      if (build.exitCode < 0) {
+    if (buildExitCode !== 0) {
+      // Memory evidence BEFORE the verdict is composed, so the
+      // snapshot lands in the log tail the error carries: this is
+      // the one chance to answer "did the 2048 MB sandbox kill
+      // the build?" from the sandbox itself (round 3, 2026-11-21).
+      await captureBuildMemoryEvidence(provider, sandboxId, runtime);
+      if (buildStatusUnreadable) {
         pushPreviewLog(
           runtime,
-          `[preview] Build process was killed by a signal (exit ${build.exitCode}) — ` +
-            `at the sandbox's 2 vCPU / 2048 MB limits the in-sandbox OOM killer ` +
+          `[preview] Build status became unreadable: ${consecutivePollFailures} consecutive ` +
+            `status checks failed (last error: ${lastPollError}) — the sandbox stopped ` +
+            `answering, so the build's outcome is unknown; the build's output tail and ` +
+            `the memory snapshot above are the evidence`,
+        );
+      } else if (buildTimedOut) {
+        pushPreviewLog(
+          runtime,
+          `[preview] Build exceeded the ${Math.round(buildBudgetMs / 60_000)}-minute ` +
+            `budget and was stopped — the build's output tail above is the evidence`,
+        );
+      } else if (buildExitCode < 0 || buildExitCode === 137 || buildExitCode === 143) {
+        pushPreviewLog(
+          runtime,
+          `[preview] Build process was killed by a signal (exit ${buildExitCode}) — ` +
+            `at the sandbox's 4 vCPU / 8192 MB limits the in-sandbox OOM killer ` +
             `is the leading cause`,
         );
       }
       runtime.status = "failed";
       runtime.errorCode = "preview_build_failed";
       runtime.error = withPreviewLogDiagnostic(
-        `Production build failed in sandbox (exit ${build.exitCode}): ` +
-          `the project did not build, so there is nothing to serve. ` +
-          `Fix the build errors and restart preview.`,
+        buildStatusUnreadable
+          ? `Production build status became unreadable in sandbox: ` +
+              `${consecutivePollFailures} consecutive status checks failed ` +
+              `(last: ${lastPollError}). The detached build may or may not have ` +
+              `finished — the sandbox was too starved or unreachable to report, ` +
+              `so no exit code exists. The build's output tail and a memory ` +
+              `snapshot are in the preview log below. Restart preview to retry.`
+          : `Production build failed in sandbox (exit ${buildExitCode}): ` +
+              `the project did not build, so there is nothing to serve. ` +
+              `Fix the build errors and restart preview.`,
         boundedPreviewLogTail(runtime.logs),
       );
-      pushPreviewLog(runtime, `[preview] Production build failed (exit ${build.exitCode})`);
+      pushPreviewLog(runtime, `[preview] Production build failed (exit ${buildExitCode})`);
       throw new PreviewError("preview_build_failed", runtime.error, {
         cwd: ws.root,
         packageManager: args.packageManager,
-        exitCode: build.exitCode,
+        exitCode: buildExitCode,
       });
     }
     pushPreviewLog(runtime, `[preview] Production build complete — starting production server`);
@@ -477,19 +787,74 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
 
   // Background health probe through the upstream — don't block the
   // response, mirroring the host path.
-  const probe = args.probe ?? probeUpstream;
+  //
+  // Health-fix (2026-11-19), from the failed #1062 live proof where
+  // a production-build start died at this probe while its server
+  // was still alive: (1) the budget is serve-mode sized
+  // (serve-mode.ts) — production gets 300 s because this clock
+  // starts at spawn, while `next start` is still loading on a
+  // build-saturated box; dev keeps 120 s. (2) The default probe's
+  // per-attempt abort is 20 s on the production path (see
+  // PROD_HEALTH_PROBE_ATTEMPT_TIMEOUT_MS); test doubles passed via
+  // args.probe are used untouched. (3) While probing, the preview
+  // log is scanned for the server's own ready line, so the final
+  // verdict can separate "the server booted" from "the first
+  // response never became healthy".
+  const healthProbeTimeoutMs = resolvePreviewHealthProbeTimeoutMs(
+    serveMode,
+    HEALTH_PROBE_TIMEOUT_MS,
+  );
+  const probe =
+    args.probe ??
+    ((origin: string, headers: Record<string, string>) =>
+      probeUpstream(
+        origin,
+        headers,
+        serveMode === "production-build"
+          ? PROD_HEALTH_PROBE_ATTEMPT_TIMEOUT_MS
+          : 3_000,
+      ));
   const upstreamHeaders = { ...runtime.upstream.headers };
   void (async () => {
-    const deadline = Date.now() + HEALTH_PROBE_TIMEOUT_MS;
+    const deadline = Date.now() + healthProbeTimeoutMs;
     let result: SandboxProbeResult = {
       healthy: false,
       authConfigError: false,
       rootRouteMissing: false,
       status: null,
     };
+    let serverReportedReady = false;
+    let readyScanOffset = 0;
+    let lastReadyScanAt = 0;
     while (Date.now() < deadline) {
       result = await probe(endpoint.url, upstreamHeaders).catch(() => result);
       if (result.healthy || result.authConfigError || result.rootRouteMissing) break;
+      // Ready-line scan (throttled to 5 s; scan-local offset — the
+      // shared offsets in logOffsets belong to
+      // tailSandboxPreviewLogs and are not touched here).
+      // Best-effort: a failed read means no boot evidence this
+      // round, never a probe failure.
+      if (!serverReportedReady && Date.now() - lastReadyScanAt >= 5_000) {
+        lastReadyScanAt = Date.now();
+        try {
+          const bytes = await transfer.readFile(sandboxId, LOG_PATH);
+          if (bytes.length > readyScanOffset) {
+            const fresh = new TextDecoder().decode(
+              bytes.slice(readyScanOffset),
+            );
+            readyScanOffset = bytes.length;
+            if (/Ready in|started server on/.test(fresh)) {
+              serverReportedReady = true;
+              pushPreviewLog(
+                runtime,
+                `[preview] Server reported ready in its output — waiting for the first response`,
+              );
+            }
+          }
+        } catch {
+          // No log yet, or the read failed — boot evidence stays absent.
+        }
+      }
       await new Promise((r) => setTimeout(r, HEALTH_PROBE_INTERVAL_MS));
     }
     runtime.lastHealthCheck = Date.now();
@@ -538,7 +903,7 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
         runtime.error = withPreviewLogDiagnostic(
           "The dev server is running inside the sandbox, but its preview " +
             "address did not answer from outside within " +
-            `${HEALTH_PROBE_TIMEOUT_MS / 1000}s. This is a preview ` +
+            `${healthProbeTimeoutMs / 1000}s. This is a preview ` +
             "connection problem, not a dev server failure — the server " +
             "itself is up.",
           boundedPreviewLogTail(runtime.logs),
@@ -552,11 +917,42 @@ export async function startSandboxPreview(args: SandboxPreviewStartArgs): Promis
       } else {
         runtime.status = "failed";
         runtime.errorCode = "preview_port_never_ready";
-        runtime.error = withPreviewLogDiagnostic(
-          `Dev server did not become healthy within ${HEALTH_PROBE_TIMEOUT_MS / 1000}s`,
-          boundedPreviewLogTail(runtime.logs),
-        );
-        pushPreviewLog(runtime, `[preview] Health check failed — timeout`);
+        // Verdict honesty (health-fix): record what the in-guest
+        // ground truth actually established, distinctly. A readable
+        // "not answering" (answering === false) convicts the guest;
+        // an unreadable check (answering === null, or the check
+        // threw and the catch above produced null) must be recorded
+        // as unreadable — the 2026-11-19 proof window had 30 s
+        // channel timeouts on this same path, so "unreadable" was a
+        // live possibility the old single verdict text erased. Boot
+        // evidence from the ready-line scan is recorded too, so a
+        // booted server with an unhealthy first response is not
+        // reported the same as a server that never came up.
+        const bootNote = serverReportedReady
+          ? " The server reported ready in its own output, so it booted — " +
+            "its first response never became healthy."
+          : "";
+        if (groundTruth?.answering === false) {
+          runtime.error = withPreviewLogDiagnostic(
+            `Dev server did not become healthy within ${healthProbeTimeoutMs / 1000}s ` +
+              `(in-sandbox check: guest confirmed not answering locally).${bootNote}`,
+            boundedPreviewLogTail(runtime.logs),
+          );
+          pushPreviewLog(
+            runtime,
+            `[preview] Health check failed — timeout (guest confirmed not answering locally)`,
+          );
+        } else {
+          runtime.error = withPreviewLogDiagnostic(
+            `Dev server did not become healthy within ${healthProbeTimeoutMs / 1000}s ` +
+              `(in-sandbox check unreadable — the guest's local state could not be confirmed).${bootNote}`,
+            boundedPreviewLogTail(runtime.logs),
+          );
+          pushPreviewLog(
+            runtime,
+            `[preview] Health check failed — timeout (in-sandbox check unreadable)`,
+          );
+        }
       }
     }
   })();

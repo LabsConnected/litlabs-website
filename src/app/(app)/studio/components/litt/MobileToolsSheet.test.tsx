@@ -74,4 +74,62 @@ describe("MobileToolsSheet", () => {
     fireEvent.click(screen.getByTestId("mobile-tool-activity"));
     expect(handlers.onOpenActivity).toHaveBeenCalledTimes(1);
   });
+
+  describe("chat-bar cleanup entries (Larry, 2026-11-20)", () => {
+    const baseHandlers = {
+      onOpenCode: vi.fn(),
+      onOpenCanvas: vi.fn(),
+      onOpenPreview: vi.fn(),
+      onOpenFiles: vi.fn(),
+      onOpenTerminal: vi.fn(),
+      onOpenActivity: vi.fn(),
+      onOpenImage: vi.fn(),
+      onOpenVideo: vi.fn(),
+      onOpenAudio: vi.fn(),
+      onOpenMusic: vi.fn(),
+    };
+
+    it("hides the tucked-in entries when their handlers are not provided", () => {
+      render(<MobileToolsSheet {...baseHandlers} />);
+      expect(screen.queryByTestId("mobile-tool-selector")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("mobile-tool-build-status")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("mobile-tool-export-chat")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("mobile-execution-mode")).not.toBeInTheDocument();
+    });
+
+    it("routes Assistant & model, Build status, and Export chat to their handlers", () => {
+      const onOpenSelector = vi.fn();
+      const onOpenBuildStatus = vi.fn();
+      const onExportChat = vi.fn();
+      render(
+        <MobileToolsSheet
+          {...baseHandlers}
+          onOpenSelector={onOpenSelector}
+          onOpenBuildStatus={onOpenBuildStatus}
+          onExportChat={onExportChat}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("mobile-tool-selector"));
+      expect(onOpenSelector).toHaveBeenCalledTimes(1);
+      fireEvent.click(screen.getByTestId("mobile-tool-build-status"));
+      expect(onOpenBuildStatus).toHaveBeenCalledTimes(1);
+      fireEvent.click(screen.getByTestId("mobile-tool-export-chat"));
+      expect(onExportChat).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows the execution mode segmented control and switches modes", () => {
+      const onExecutionModeChange = vi.fn();
+      render(
+        <MobileToolsSheet
+          {...baseHandlers}
+          executionMode="act"
+          onExecutionModeChange={onExecutionModeChange}
+        />,
+      );
+      expect(screen.getByTestId("mobile-execution-mode-act")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByTestId("mobile-execution-mode-plan")).toHaveAttribute("aria-pressed", "false");
+      fireEvent.click(screen.getByTestId("mobile-execution-mode-plan"));
+      expect(onExecutionModeChange).toHaveBeenCalledWith("plan");
+    });
+  });
 });

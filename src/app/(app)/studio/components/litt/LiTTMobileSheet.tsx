@@ -31,12 +31,6 @@ export interface LiTTMobileSheetProps {
   filesContent?: ReactNode;
   /** Optional approval UI rendered full-width at the top of the sheet, above the tabs */
   approvalSlot?: ReactNode;
-  /** Build status control (MobileBuildStatusBar) rendered in the sheet's
-   *  header chrome, under the tab row. Clean-open (Larry, 2026-11-13):
-   *  the opener lives here — in the sheet's own layout flow, on light
-   *  tokens — never as a dark bar over the chat transcript. When omitted,
-   *  no build status row renders. */
-  buildStatusSlot?: ReactNode;
   /** Project context for the slim second header row (mobile density redesign) */
   projectName?: string | null;
   branch?: string | null;
@@ -57,7 +51,6 @@ export default function LiTTMobileSheet({
   liveContent,
   filesContent,
   approvalSlot,
-  buildStatusSlot,
   projectName,
   branch,
   onOpenTools,
@@ -84,12 +77,24 @@ export default function LiTTMobileSheet({
   // Chat-first mobile layout (2026-11-19 card): the bottom work-surface
   // dock is retired on the phone — the sheet owns the full height down
   // to the safe area, staying pinned above the on-screen keyboard.
-  const bottomOffset = MOBILE_BOTTOM_NAV_H + safeBottom + bottomInset;
+  //
+  // Mobile gap fix (Larry, 2026-11-20): the sheet must span the VISUAL
+  // viewport, not the layout viewport. When the Android keyboard opens,
+  // Chrome scrolls the visual viewport over the layout viewport to keep
+  // the focused composer visible, so vv.offsetTop grows > 0. A sheet
+  // anchored at layout top:0 with height vv.height then ends
+  // offsetTop pixels ABOVE the visual viewport's bottom edge, leaving a
+  // band of dimmed backdrop + underlying workspace (media cards) showing
+  // between the composer and the keyboard. Anchor the sheet's top at
+  // vv.offsetTop so its bottom edge lands exactly on the visual
+  // viewport's bottom edge — flush above the keyboard, nothing behind
+  // or below the composer.
+  const topOffset = Math.max(0, Math.round(vv.offsetTop));
   const MIN_SHEET_HEIGHT = 150;
-  // Full-screen sheet: spans from the top of the viewport down to the
-  // bottom offset (safe area + keyboard inset), so it still stays
-  // pinned above the on-screen keyboard.
-  const rawSheetHeight = Math.round(vv.height) + bottomInset - bottomOffset;
+  // While the keyboard is open it covers the bottom safe area, so the
+  // safe-area inset is only subtracted when the keyboard is closed.
+  const rawSheetHeight =
+    Math.round(vv.height) + MOBILE_BOTTOM_NAV_H - (bottomInset > 0 ? 0 : safeBottom);
   // Never let the sheet render at (near-)0px — a bad viewport reading
   // should degrade to "small but usable", not "invisible/unusable".
   const sheetHeight = Math.max(MIN_SHEET_HEIGHT, rawSheetHeight);
@@ -142,9 +147,9 @@ export default function LiTTMobileSheet({
         data-testid="litt-mobile-backdrop"
       />
       <div
-        className="fixed inset-x-0 top-0 z-[10021] flex min-h-0 min-w-0 flex-col overflow-hidden border-t"
+        className="fixed inset-x-0 z-[10021] flex min-h-0 min-w-0 flex-col overflow-hidden border-t"
         style={{
-          top: "0px",
+          top: `${topOffset}px`,
           height: `${sheetHeight}px`,
           backgroundColor: "var(--studio-surface)",
           borderColor: "var(--studio-border)",
@@ -241,7 +246,7 @@ export default function LiTTMobileSheet({
             <button
               type="button"
               onClick={() => onTabChange("live")}
-              className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+              className="flex min-h-11 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
               style={{
                 color: activeTab === "live" ? "var(--color-accent)" : "var(--text-muted)",
                 backgroundColor: activeTab === "live" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
@@ -257,7 +262,7 @@ export default function LiTTMobileSheet({
                 <button
                   type="button"
                   onClick={() => onTabChange("files")}
-                  className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+                  className="flex min-h-11 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
                   style={{
                     color: activeTab === "files" ? "var(--color-accent)" : "var(--text-muted)",
                     backgroundColor: activeTab === "files" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
@@ -271,7 +276,7 @@ export default function LiTTMobileSheet({
                 <button
                   type="button"
                   onClick={() => onTabChange("components")}
-                  className="flex min-h-10 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
+                  className="flex min-h-11 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all"
                   style={{
                     color: activeTab === "components" ? "var(--color-accent)" : "var(--text-muted)",
                     backgroundColor: activeTab === "components" ? "color-mix(in srgb, var(--color-accent) 10%, transparent)" : "transparent",
@@ -287,18 +292,10 @@ export default function LiTTMobileSheet({
           </div>
         )}
 
-        {buildStatusSlot && (
-          <div
-            className="shrink-0 border-b px-2 py-1.5"
-            style={{
-              borderColor: "var(--studio-border)",
-              backgroundColor: "var(--studio-surface)",
-            }}
-            data-testid="litt-mobile-build-status-slot"
-          >
-            {buildStatusSlot}
-          </div>
-        )}
+        {/* Chat-bar cleanup (Larry, 2026-11-20): no build-status strip
+            in the sheet header — the chat screen holds nothing extra.
+            Run status lives in the Build status sheet, opened from the
+            Tools sheet's "Build status" row. */}
 
         <div
           ref={contentRef}

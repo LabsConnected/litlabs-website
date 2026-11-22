@@ -106,6 +106,28 @@ describe("LiTTMobileSheet (real component)", () => {
     });
   });
 
+  it("anchors the sheet to the visual viewport when the browser scrolls it (offsetTop) — no gap above the keyboard", () => {
+    // Android Chrome, keyboard open: the visual viewport shrinks AND
+    // scrolls over the layout viewport to keep the focused composer
+    // visible (offsetTop 140). Regression (Larry, 2026-11-20): a sheet
+    // anchored at layout top:0 ended 140px above the visual bottom,
+    // leaving a band of dimmed backdrop + workspace media cards showing
+    // between the composer and the keyboard.
+    const vv = window.visualViewport as { height: number; width: number; offsetTop: number };
+    vv.height = 500;
+    vv.width = 390;
+    vv.offsetTop = 140;
+    renderSheet();
+
+    const sheet = screen.getByTestId("litt-mobile-sheet");
+    expect(sheet).toHaveStyle({
+      top: "140px",
+      height: "500px",
+    });
+    // Bottom edge = 140 + 500 = 640 = offsetTop + vv.height — exactly
+    // the visual viewport's bottom edge, flush above the keyboard.
+  });
+
   it("shows sub-surface tabs and Back to chat only while a non-chat tab is open", () => {
     const { onTabChange } = renderSheet({
       activeTab: "files",
@@ -176,19 +198,13 @@ describe("LiTTMobileSheet (real component)", () => {
       expect(sheet.style.backgroundColor).not.toContain("0d0916");
     });
 
-    it("renders the build status slot in the sheet chrome when provided", () => {
-      renderSheet({
-        buildStatusSlot: <button type="button" data-testid="build-status-control">Build status</button>,
-      });
-      const slot = screen.getByTestId("litt-mobile-build-status-slot");
-      expect(slot).toContainElement(screen.getByTestId("build-status-control"));
-      // Chrome, not content: the slot is outside the sheet's content panels.
-      expect(screen.getByTestId("litt-mobile-sheet-content")).not.toContainElement(slot);
-    });
-
-    it("omits the build status row when no slot is provided", () => {
+    it("renders no build status strip in the sheet chrome (chat-bar cleanup, 2026-11-20)", () => {
+      // The "Idle LiTT · ACT" strip that sat under the project name is
+      // gone — the chat screen holds nothing extra. Run status lives in
+      // the Build status sheet, opened from the Tools sheet.
       renderSheet();
       expect(screen.queryByTestId("litt-mobile-build-status-slot")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("mobile-build-status")).not.toBeInTheDocument();
     });
 
     it("falls back to the LiTT label when no project name is provided", () => {

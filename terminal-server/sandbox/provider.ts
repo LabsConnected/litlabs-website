@@ -31,8 +31,8 @@ export interface SandboxResourceLimits {
 
 /** Keep in sync with DEFAULT_SANDBOX_LIMITS in src/lib/terminal-v1/types.ts. */
 export const DEFAULT_SANDBOX_LIMITS: SandboxResourceLimits = {
-  cpuVcpus: 2,
-  memoryMB: 2048,
+  cpuVcpus: 4,
+  memoryMB: 8192,
   processLimit: 100,
   diskGB: 5,
   idleTimeoutMinutes: 15,

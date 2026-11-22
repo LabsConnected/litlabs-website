@@ -106,7 +106,7 @@ describe("buildSandboxInstallEnv (round 12)", () => {
     // The cap must leave real headroom under the enforced ceiling —
     // a cap at (or above) the limit would be no shaping at all.
     expect(SANDBOX_INSTALL_NODE_HEAP_MB * 1024 * 1024).toBeLessThan(SANDBOX_MEMORY_LIMIT_BYTES);
-    expect(SANDBOX_MEMORY_LIMIT_BYTES).toBe(2147483648);
+    expect(SANDBOX_MEMORY_LIMIT_BYTES).toBe(8589934592);
     // And it must actually override the tree .npmrc's 4096 allowance.
     expect(SANDBOX_INSTALL_NODE_HEAP_MB).toBeLessThan(4096);
   });
@@ -160,7 +160,7 @@ describe("logSandboxInstallMemoryEvidence (round 12)", () => {
     expect(logs[0]).toContain("sandbox=sbx-ev-1");
     expect(logs[0]).toContain("exit=0");
     expect(logs[0]).toContain("memory.peak=1048576000");
-    expect(logs[0]).toContain("limit=2147483648");
+    expect(logs[0]).toContain("limit=8589934592");
   });
 
   it("on a signal kill, also captures and logs the kernel OOM lines", async () => {

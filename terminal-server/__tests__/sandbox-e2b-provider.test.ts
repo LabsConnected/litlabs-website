@@ -315,19 +315,19 @@ describe("E2bSandboxProvider — lifecycle", () => {
       workspaceId: "ws-1",
       userId: "user-1",
       projectId: "proj-1",
-      limits: { cpuVcpus: 2, memoryMB: 2048 },
+      limits: { cpuVcpus: 4, memoryMB: 8192 },
     });
 
     expect(instance.provider).toBe("e2b");
     expect(instance.state).toBe("running");
-    expect(instance.limits.cpuVcpus).toBe(2);
-    expect(instance.limits.memoryMB).toBe(2048);
+    expect(instance.limits.cpuVcpus).toBe(4);
+    expect(instance.limits.memoryMB).toBe(8192);
 
     expect(client.creates).toHaveLength(1);
     const createOpts = client.creates[0];
     expect(createOpts.template).toBe("litt-test-template");
-    expect(createOpts.cpuCount).toBe(2);
-    expect(createOpts.memoryMB).toBe(2048);
+    expect(createOpts.cpuCount).toBe(4);
+    expect(createOpts.memoryMB).toBe(8192);
     expect(createOpts.metadata).toEqual({
       littree_user_id: "user-1",
       littree_project_id: "proj-1",
@@ -340,8 +340,8 @@ describe("E2bSandboxProvider — lifecycle", () => {
     expect(JSON.stringify(createOpts)).not.toContain(API_KEY);
 
     const fetched = await provider.get(instance.sandboxId);
-    expect(fetched?.limits.cpuVcpus).toBe(2);
-    expect(fetched?.limits.memoryMB).toBe(2048);
+    expect(fetched?.limits.cpuVcpus).toBe(4);
+    expect(fetched?.limits.memoryMB).toBe(8192);
   });
 
   it("execute sees the final env with the real sandbox id, and maps exit codes", async () => {
@@ -615,7 +615,7 @@ describe("E2bSandboxProvider — egress policy", () => {
       workspaceId: "ws-2",
       userId: "user-2",
       projectId: "proj-2",
-      limits: { cpuVcpus: 2, memoryMB: 2048 },
+      limits: { cpuVcpus: 4, memoryMB: 8192 },
       env: { PROJECT_FLAG: "on" },
     });
 

@@ -393,7 +393,6 @@ vi.mock("../tools/BuilderTool", () => ({ default: () => <div data-testid="builde
 vi.mock("../tools/CanvasTool", () => ({ default: () => <div data-testid="canvas-tool" /> }));
 vi.mock("../tools/AgentTool", () => ({ default: () => <div data-testid="agent-tool" /> }));
 vi.mock("../tools/GalleryTool", () => ({ default: () => <div data-testid="gallery-tool" /> }));
-vi.mock("../tools/AgentsTerminalTool", () => ({ default: () => <div data-testid="terminal-tool" /> }));
 vi.mock("../tools/MissionForge", () => ({ default: () => <div data-testid="mission-forge" /> }));
 vi.mock("../tools/CLIBridgeTool", () => ({ default: () => <div data-testid="cli-bridge" /> }));
 vi.mock("../tools/SpaceTool", () => ({ default: () => <div data-testid="space-tool" /> }));
@@ -1394,26 +1393,27 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       });
     });
 
-    it("mobile chat shows the compact Build status control in the sheet chrome instead of the Mission card stack", async () => {
+    it("mobile chat shows NO build status strip in the sheet chrome (chat-bar cleanup, 2026-11-20)", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
       await renderCommandStudio();
       // The chat sheet is open on entry, already on the Chat tab.
 
-      // Clean-open: one ~36px light status control in the sheet's header
-      // chrome (not a dark bar over the transcript), no card stack.
-      expect(screen.getByTestId("mobile-build-status")).toBeVisible();
-      expect(screen.getByTestId("litt-mobile-build-status-slot")).toContainElement(
-        screen.getByTestId("mobile-build-status"),
-      );
+      // Larry's rule: the chat screen holds nothing extra — no "Idle
+      // LiTT · ACT" strip under the project name, no card stack. Run
+      // status lives in the Build status sheet (Jobs-side surface).
+      expect(screen.queryByTestId("mobile-build-status")).toBeNull();
+      expect(screen.queryByTestId("litt-mobile-build-status-slot")).toBeNull();
       expect(screen.queryByTestId("mission-card-mission")).toBeNull();
       expect(screen.queryByTestId("mission-card-actions")).toBeNull();
     });
 
-    it("mobile Build status control opens the Build sheet with the Mission cards", async () => {
+    it("mobile Build status opens from the Tools sheet with the Mission cards", async () => {
       globalThis.__TEST_VIEWPORT_WIDTH__ = 500;
       const { user } = await renderCommandStudio();
 
-      await user.click(screen.getByTestId("mobile-build-status"));
+      // Menu (Tools sheet) → "Build status" row → the Build sheet.
+      await user.click(screen.getByTestId("litt-mobile-tools-button"));
+      await user.click(screen.getByTestId("mobile-tool-build-status"));
       const sheet = screen.getByTestId("mobile-build-sheet");
       expect(sheet).toBeVisible();
       // The MissionCards surface renders inside the sheet (with no active
