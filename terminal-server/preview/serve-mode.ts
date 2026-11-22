@@ -171,13 +171,34 @@ export function resolvePreviewServeMode(framework: string, fileCount: number): P
 }
 
 /**
- * The production build command, mirroring detectFramework's dev
- * command shape (`<pm> exec next …` — the project's own dev script
- * is bypassed for the same reason: it may hardcode ports or flags
- * that belong to the project's machines, not the preview).
+ * The production build command.
+ *
+ * When the project declares a `build` script, the preview runs it
+ * (`<pm> run build`): the build script is the project's production
+ * build contract — the same one Railway/nixpacks/Vercel run — and
+ * for a monorepo it is the only place the required order is
+ * written down (build the workspace packages first, then the
+ * site). The bare command this function used to always return
+ * (`<pm> exec next build`) skips that order: workspace packages
+ * like @litt/agent-core resolve only through a `dist/` that
+ * exists solely after their own build, `pnpm install` links but
+ * never builds them, and the site build died with "Module not
+ * found: Can't resolve '@litt/agent-core'" (round-6 live proof,
+ * 2026-11-22; PREVIEW-BUILD-PACKAGES-DIAGNOSIS-2026-11-22.md).
+ *
+ * The dev script stays bypassed (it may hardcode ports or flags
+ * that belong to the project's machines, not the preview); a
+ * build script has no port to fight over, so running it is safe
+ * in the sandbox. A project with NO declared build script keeps
+ * the previous bare command exactly.
  */
-export function nextProductionBuildCommand(packageManager: string): string {
-  return `${packageManager} exec next build`;
+export function nextProductionBuildCommand(
+  packageManager: string,
+  buildScript?: string | null,
+): string {
+  return buildScript && buildScript.trim().length > 0
+    ? `${packageManager} run build`
+    : `${packageManager} exec next build`;
 }
 
 /**

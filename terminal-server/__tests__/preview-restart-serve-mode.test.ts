@@ -169,7 +169,11 @@ describe("explicit restart of a production-build preview", () => {
     // resolution classify it production-build.
     const first = await startPreview({ workspaceId, userId: OWNER });
     expect(first.serveMode).toBe("production-build");
-    expect(first.buildCommand).toContain("next build");
+    // The fixture declares scripts.build ("next build"), so the
+    // resolved build command is the project's own build chain
+    // (preview-build-order, 2026-11-22) — it still ends in the
+    // fixture's next build, via pnpm run build.
+    expect(first.buildCommand).toBe("pnpm run build");
     expect(first.command).toContain("next start");
     await waitForStatus("ready");
 
@@ -177,7 +181,7 @@ describe("explicit restart of a production-build preview", () => {
     const second = await restartPreview(workspaceId);
     expect(second).not.toBe(first);
     expect(second.serveMode).toBe("production-build");
-    expect(second.buildCommand).toContain("next build");
+    expect(second.buildCommand).toBe("pnpm run build");
     expect(second.command).toContain("next start");
     await waitForStatus("ready");
 

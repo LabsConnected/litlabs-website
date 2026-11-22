@@ -126,9 +126,27 @@ describe("countProjectFiles — the size signal", () => {
 });
 
 describe("production command composition", () => {
-  it("builds with the project's package manager, bypassing its dev script like the dev command does", () => {
+  it("without a declared build script, builds with the project's package manager directly", () => {
     expect(nextProductionBuildCommand("pnpm")).toBe("pnpm exec next build");
     expect(nextProductionBuildCommand("npm")).toBe("npm exec next build");
+    expect(nextProductionBuildCommand("pnpm", null)).toBe("pnpm exec next build");
+    expect(nextProductionBuildCommand("pnpm", "")).toBe("pnpm exec next build");
+    expect(nextProductionBuildCommand("pnpm", "   ")).toBe("pnpm exec next build");
+  });
+
+  it("with a declared build script, runs the project's own build chain — workspace packages first, in production's order", () => {
+    // The flagship's scripts.build is
+    // "pnpm build:workspace-deps && next build": the workspace
+    // packages (@litt/agent-core, @litt/models) compile BEFORE the
+    // site build, exactly as the production Dockerfile orders it.
+    // The bare `exec next build` skipped that step and the build
+    // died "Can't resolve '@litt/agent-core'" (round-6 proof,
+    // 2026-11-22) because those packages resolve only through a
+    // dist/ that install never produces.
+    expect(
+      nextProductionBuildCommand("pnpm", "pnpm build:workspace-deps && next build"),
+    ).toBe("pnpm run build");
+    expect(nextProductionBuildCommand("npm", "next build")).toBe("npm run build");
   });
 
   it("serves with next start carrying the same $PORT placeholder and hostname as the dev command", () => {
