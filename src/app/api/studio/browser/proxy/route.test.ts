@@ -70,6 +70,24 @@ describe("GET /api/studio/browser/proxy", () => {
     expect(body).toContain("hello");
   });
 
+  it("injects the bootstrap with an absolute proxy URL on the request's own origin", async () => {
+    // Regression (2026-11-22): with a root-relative proxy URL, the
+    // injected <base href="https://example.com/"> made in-page link
+    // clicks resolve the proxy path against the TARGET origin and the
+    // frame loaded a framing-blocked page ("This content is blocked").
+    fetchMock.mockResolvedValue(
+      new Response("<html><head><title>x</title></head><body>hello</body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      }),
+    );
+    const res = await GET(req("?url=https://example.com/"));
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('var PROXY = "https://app.litlabs.net/api/studio/browser/proxy"');
+    expect(body).not.toContain('var PROXY = "/api/studio/browser/proxy"');
+  });
+
   it("passes non-HTML responses through with their content type", async () => {
     fetchMock.mockResolvedValue(
       new Response(new Uint8Array([137, 80, 78, 71]), {
