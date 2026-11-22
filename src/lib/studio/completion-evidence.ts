@@ -659,7 +659,13 @@ function evaluateCompletionState(
   // A preview that demonstrably failed or never became ready cannot support
   // a "complete" verdict on work that produced it. Absent preview evidence
   // is NOT proof of a working preview — file-only and non-preview workflows
-  // never set this field, so they are unaffected.
+  // never set this field, so they are unaffected. Ship requests are also
+  // unaffected by absence specifically: the deployment gate above already
+  // demanded a fetched, verified live URL (deployment.urlVerified), which
+  // is itself live evidence the site works — project.deploy's approval-
+  // resume completion (a separate call from the one that ran the build
+  // preview) legitimately carries deployment evidence with no preview
+  // field at all, and that must stay "complete".
   const preview = evidence.preview ?? null;
   if (preview && !preview.ready) {
     missing.push("working preview");
