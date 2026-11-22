@@ -165,6 +165,14 @@ export interface LaunchFlowResult {
   status: "preview_ready" | "deployed" | "failed" | "cancelled" | "completed";
   previewUrl?: string | null;
   productionUrl?: string | null;
+  /**
+   * True once the flow reached the preview verification phase — i.e. the
+   * build produced runnable artifacts and preview startup was actually
+   * attempted. A "failed" status WITHOUT this flag means the run died
+   * before preview ever launched (build checks, model failure, missing
+   * artifacts), so callers must not report it as a preview failure.
+   */
+  previewAttempted?: boolean;
   finalText: string;
   buildFixResult?: BuildFixLoopResult;
   error?: string;
@@ -687,10 +695,12 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
     : undefined;
 
   let lastAgentLoopResult: AgentLoopResult | undefined;
+  let previewAttempted = false;
 
   const baseResult = (overrides: Partial<LaunchFlowResult>): LaunchFlowResult => ({
     success: false,
     status: "failed",
+    previewAttempted,
     finalText: "Launch did not complete.",
     repairAttempts: 0,
     runtimeRepairAttempts: 0,
@@ -1102,6 +1112,7 @@ export async function runLaunchFlow(options: LaunchFlowOptions): Promise<LaunchF
         lastAgentLoopResult = agentResult;
       }
     }
+    previewAttempted = true;
     emitStep(progress, steps, "Starting live preview...");
     progress.emit({ type: "phase", phase: "preview", step: agentResult.stepsUsed + 1 });
     progress.emit({ type: "preview_start" });
