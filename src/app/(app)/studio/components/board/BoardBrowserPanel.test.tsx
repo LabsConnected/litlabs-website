@@ -2,6 +2,7 @@ import "@testing-library/jest-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { ThemeProvider } from "@/context/ThemeContext";
+import { useStudioBrowserStore } from "../../stores/useStudioBrowserStore";
 import BoardBrowserPanel, { BROWSER_EMBED_WATCHDOG_MS } from "./BoardBrowserPanel";
 
 function wrap(node: React.ReactNode) {
@@ -18,6 +19,9 @@ function navigateTo(value: string) {
 describe("BoardBrowserPanel embed-blocked state", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    // Tab state lives in the shared store now — start each test from
+    // a single fresh tab, as a first mount would see it.
+    useStudioBrowserStore.getState().reset();
   });
 
   afterEach(() => {
@@ -157,6 +161,7 @@ describe("BoardBrowserPanel embed-blocked state", () => {
 describe("BoardBrowserPanel tabs and in-page navigation sync", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    useStudioBrowserStore.getState().reset();
   });
 
   afterEach(() => {
@@ -250,6 +255,42 @@ describe("BoardBrowserPanel tabs and in-page navigation sync", () => {
     act(() => {
       window.dispatchEvent(event);
     });
+    expect(screen.getByTestId("board-browser-input")).toHaveValue("https://example.com");
+  });
+});
+
+describe("BoardBrowserPanel tab state across remounts (layout flips)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    useStudioBrowserStore.getState().reset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("keeps tabs, history, and the current page when the panel unmounts and remounts", () => {
+    const first = wrap(<BoardBrowserPanel />);
+    navigateTo("example.com");
+    fireEvent.load(screen.getByTestId("board-browser-frame"));
+    fireEvent.click(screen.getByTestId("board-browser-new-tab"));
+    navigateTo("news.site");
+
+    // A layout flip (Board → Regular → Board) unmounts the panel and
+    // mounts it elsewhere; the store keeps the session, so the user
+    // must NOT come back to a fresh "New tab" (live defect 2026-11-22).
+    first.unmount();
+    wrap(<BoardBrowserPanel />);
+
+    expect(screen.getAllByTestId("board-browser-tab")).toHaveLength(2);
+    expect(screen.getByTestId("board-browser-input")).toHaveValue("https://news.site");
+    expect(screen.getByTestId("board-browser-frame")).toHaveAttribute(
+      "src",
+      "/api/studio/browser/proxy?url=https%3A%2F%2Fnews.site",
+    );
+
+    fireEvent.click(screen.getAllByTestId("board-browser-tab")[0]);
     expect(screen.getByTestId("board-browser-input")).toHaveValue("https://example.com");
   });
 });

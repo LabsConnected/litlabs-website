@@ -504,6 +504,7 @@ describe("Dock tab open semantics", () => {
         terminalContent={<div>terminal</div>}
         inspectorContent={<div>inspector</div>}
         mediaContent={<div>media</div>}
+        browserContent={<div>browser</div>}
       />,
     );
     expect(screen.queryByTestId("dock-tab-terminal")).toBeNull();
@@ -531,6 +532,7 @@ describe("Dock tab open semantics", () => {
         terminalContent={<div>terminal</div>}
         inspectorContent={<div>inspector</div>}
         mediaContent={<div>media</div>}
+        browserContent={<div>browser</div>}
       />,
     );
     // Terminal tab active and visible while Activity content stays mounted

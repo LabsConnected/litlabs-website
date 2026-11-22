@@ -25,6 +25,7 @@ import {
 import {
   Activity,
   Clapperboard,
+  Globe,
   Maximize2,
   Minimize2,
   PanelBottom,
@@ -41,7 +42,8 @@ export type StudioDockTab =
   | "activity"
   | "terminal"
   | "inspector"
-  | "media";
+  | "media"
+  | "browser";
 
 export interface StudioDockProps {
   open: boolean;
@@ -60,6 +62,10 @@ export interface StudioDockProps {
   terminalContent: ReactNode;
   inspectorContent: ReactNode;
   mediaContent: ReactNode;
+  /** The embedded web browser (Regular layout's Browser home; in the
+      shell this slot carries a jump panel to the board Browser panel,
+      so the browser itself still exists exactly once). */
+  browserContent: ReactNode;
   /** True while an agent run is in flight — pulses the Activity tab */
   activityPulse?: boolean;
   /** True when a terminal command failed — badges the Terminal tab */
@@ -87,6 +93,7 @@ const DOCK_TABS: {
   { id: "terminal", label: "Terminal", icon: SquareTerminal },
   { id: "inspector", label: "Inspector", icon: ScanSearch },
   { id: "media", label: "Media", icon: Clapperboard },
+  { id: "browser", label: "Browser", icon: Globe },
 ];
 
 export default function StudioDock({
@@ -102,6 +109,7 @@ export default function StudioDock({
   terminalContent,
   inspectorContent,
   mediaContent,
+  browserContent,
   activityPulse = false,
   terminalBadge = false,
 }: StudioDockProps) {
@@ -268,6 +276,7 @@ export default function StudioDock({
       </div>
     ),
     media: mediaContent,
+    browser: browserContent,
   };
 
   return (
@@ -416,7 +425,9 @@ export default function StudioDock({
                     ? "Workspace ready · Terminal session not started"
                     : t.id === "media"
                       ? "Media not loaded"
-                      : "No activity yet"}
+                      : t.id === "browser"
+                        ? "Browser not loaded"
+                        : "No activity yet"}
                 </div>
               )}
             </div>

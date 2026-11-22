@@ -1,7 +1,10 @@
 "use client";
 
 /**
- * BoardBrowserPanel — a real embedded browser on the board.
+ * BoardBrowserPanel — a real embedded browser, shared by both
+ * layouts: a board panel in the Board layout and a StudioDock tab in
+ * the Regular layout. It is one surface with one home per layout —
+ * never mounted twice at once.
  *
  * How it renders pages (rewritten 2026-11-20, Larry's "#2 priority"):
  * The panel used to point an iframe straight at the typed URL and
@@ -32,7 +35,9 @@
  *
  * Tabs: each tab keeps its own history; switching tabs reloads that
  * tab's current page (page state is not kept alive across switches —
- * history and address are).
+ * history and address are). Tab state lives in the studio browser
+ * store (stores/useStudioBrowserStore), not in this component: a
+ * layout flip unmounts this panel, and the tabs must survive it.
  *
  * Blocked/failed handling: a bounded load watchdog (plus iframe error)
  * still guards every load; when it expires the panel shows an honest
@@ -42,10 +47,20 @@
  * Token-bound surfaces; no pink.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { ArrowLeft, ArrowRight, ExternalLink, Globe, Plus, RefreshCw, X } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { BROWSER_PROXY_MESSAGE_SOURCE, browserProxyUrl } from "@/lib/studio/browser-proxy";
+import {
+  normalizeBrowserUrl,
+  studioBrowserTabCurrentUrl as tabCurrentUrl,
+  studioBrowserTabLabel as tabLabel,
+  useStudioBrowserStore,
+} from "../../stores/useStudioBrowserStore";
+
+// Kept on this module's surface for existing importers
+// (BoardPanels.test.tsx reads it from here).
+export { normalizeBrowserUrl };
 
 /**
  * Generous bound for a proxied page to signal a usable load before the
@@ -53,59 +68,16 @@ import { BROWSER_PROXY_MESSAGE_SOURCE, browserProxyUrl } from "@/lib/studio/brow
  */
 export const BROWSER_EMBED_WATCHDOG_MS = 8000;
 
-type EmbedStatus = "loading" | "loaded" | "blocked";
-
-interface BrowserTabState {
-  id: number;
-  history: string[];
-  historyIndex: number;
-  input: string;
-  reloadKey: number;
-  /** Proxy URL the frame should load; null when the tab has no page yet. */
-  frameSrc: string | null;
-  status: EmbedStatus;
-}
-
-/** Normalize a typed address into a loadable URL, or null if empty. */
-export function normalizeBrowserUrl(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  if (/^about:/i.test(trimmed)) return trimmed;
-  return `https://${trimmed}`;
-}
-
-function tabCurrentUrl(tab: BrowserTabState): string | null {
-  return tab.historyIndex >= 0 ? tab.history[tab.historyIndex] : null;
-}
-
-function tabLabel(tab: BrowserTabState): string {
-  const url = tabCurrentUrl(tab);
-  if (!url) return "New tab";
-  try {
-    return new URL(url).hostname || url;
-  } catch {
-    return url;
-  }
-}
-
-let nextTabId = 1;
-function freshTab(): BrowserTabState {
-  return {
-    id: nextTabId++,
-    history: [],
-    historyIndex: -1,
-    input: "",
-    reloadKey: 0,
-    frameSrc: null,
-    status: "loaded",
-  };
-}
-
 export default function BoardBrowserPanel() {
   const { tokens } = useTheme();
-  const [tabs, setTabs] = useState<BrowserTabState[]>(() => [freshTab()]);
-  const [activeTabId, setActiveTabId] = useState<number>(() => tabs[0]?.id ?? 1);
+  // Tab state lives in the store (see its header comment) so a layout
+  // flip — which unmounts this panel — does not lose the user's tabs.
+  const tabs = useStudioBrowserStore((s) => s.tabs);
+  const activeTabId = useStudioBrowserStore((s) => s.activeTabId);
+  const updateTab = useStudioBrowserStore((s) => s.updateTab);
+  const setActiveTabId = useStudioBrowserStore((s) => s.setActiveTabId);
+  const addTab = useStudioBrowserStore((s) => s.addTab);
+  const closeTab = useStudioBrowserStore((s) => s.closeTab);
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const frameNodeRef = useRef<HTMLIFrameElement | null>(null);
   // Mirror of tabs for use inside the message listener without
@@ -122,10 +94,6 @@ export default function BoardBrowserPanel() {
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
   const currentUrl = activeTab ? tabCurrentUrl(activeTab) : null;
-
-  const updateTab = (tabId: number, patch: Partial<BrowserTabState>) => {
-    setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, ...patch } : t)));
-  };
 
   const clearWatchdog = () => {
     if (watchdogRef.current !== null) {
@@ -239,29 +207,6 @@ export default function BoardBrowserPanel() {
       input: url,
       frameSrc: browserProxyUrl(url),
     });
-  };
-
-  const addTab = () => {
-    const tab = freshTab();
-    setTabs((prev) => [...prev, tab]);
-    setActiveTabId(tab.id);
-  };
-
-  const closeTab = (tabId: number) => {
-    const idx = tabs.findIndex((t) => t.id === tabId);
-    if (idx < 0) return;
-    const next = tabs.filter((t) => t.id !== tabId);
-    if (next.length === 0) {
-      const replacement = freshTab();
-      setTabs([replacement]);
-      setActiveTabId(replacement.id);
-      return;
-    }
-    if (tabId === activeTabId) {
-      const neighbor = next[Math.min(idx, next.length - 1)];
-      setActiveTabId(neighbor.id);
-    }
-    setTabs(next);
   };
 
   // React's onError prop alone is not reliably delivered for <iframe>

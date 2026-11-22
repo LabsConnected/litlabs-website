@@ -43,6 +43,7 @@ vi.mock("../ActionRunStatusPanel", () => ({
 }));
 import BoardBrowserPanel, { normalizeBrowserUrl } from "./BoardBrowserPanel";
 import { useExecutionStore, type ExecutionEvent } from "../../stores/useExecutionStore";
+import { useStudioBrowserStore } from "../../stores/useStudioBrowserStore";
 
 function wrap(node: React.ReactNode) {
   return render(<ThemeProvider>{node}</ThemeProvider>);
@@ -54,6 +55,9 @@ function executionEvent(id: string, summary: string): ExecutionEvent {
 
 beforeEach(() => {
   useExecutionStore.setState({ phase: "idle", isRunning: false, events: [], checkpoint: null });
+  // Browser tab state is store-backed (shared across layouts) — keep
+  // this suite hermetic like the execution store above.
+  useStudioBrowserStore.getState().reset();
 });
 
 afterEach(() => {
