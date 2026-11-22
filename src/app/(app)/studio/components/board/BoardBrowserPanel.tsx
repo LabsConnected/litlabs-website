@@ -28,6 +28,19 @@
  *     documents; that script postMessages each navigation back, so the
  *     address bar and history stay truthful and back/forward work for
  *     pages reached by clicking, not just by typing.
+ *   - Remounts (layout flips, tab switches, refresh) restore the
+ *     frame from the tab's CURRENT history entry — never from the
+ *     stored frameSrc alone. frameSrc names the last panel-driven
+ *     load, and in-page navigation advances history without touching
+ *     it, so a remounted frame fed from frameSrc would reload an
+ *     older page, whose `landed` report would then replace the
+ *     newest history entry with that old URL. The panel snapshots
+ *     the current entry's proxy URL when a frame instance mounts
+ *     and loads that until the next panel-driven navigation (the
+ *     tab's frameGeneration) makes frameSrc authoritative again.
+ *     In-page navigation changes neither the snapshot nor the
+ *     generation, so restoring never forces a second load
+ *     mid-session: the frame navigates itself.
  *   - Messages are trusted only when they come from this panel's own
  *     frame window and carry the proxy's source marker — a proxied
  *     document runs in an opaque origin, so origin alone proves
@@ -47,7 +60,7 @@
  * Token-bound surfaces; no pink.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, ExternalLink, Globe, Plus, RefreshCw, X } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { BROWSER_PROXY_MESSAGE_SOURCE, browserProxyUrl } from "@/lib/studio/browser-proxy";
@@ -56,6 +69,7 @@ import {
   studioBrowserTabCurrentUrl as tabCurrentUrl,
   studioBrowserTabLabel as tabLabel,
   useStudioBrowserStore,
+  type StudioBrowserTab,
 } from "../../stores/useStudioBrowserStore";
 
 // Kept on this module's surface for existing importers
@@ -94,6 +108,49 @@ export default function BoardBrowserPanel() {
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
   const currentUrl = activeTab ? tabCurrentUrl(activeTab) : null;
+
+  // Frame-instance restore (see the header's Navigation model). A
+  // frame instance is one mount of the iframe element: the panel
+  // mounting, a tab switch, or a reloadKey bump — all of which
+  // change frameInstanceKey. When an instance mounts, snapshot the
+  // proxy URL for the tab's CURRENT history entry (restoreSrc); the
+  // frame loads the snapshot while the tab's frameGeneration is the
+  // one captured here, and the stored frameSrc takes over again as
+  // soon as a panel-driven navigation bumps the generation. Before
+  // the snapshot effect lands (the first render of a remount) the
+  // frame already derives restoreSrc directly, so a stale frameSrc
+  // is never even briefly loaded.
+  const frameInstanceKey = `${activeTab?.id ?? "none"}:${activeTab?.reloadKey ?? 0}`;
+  const restoreSrc = activeTab
+    ? currentUrl
+      ? browserProxyUrl(currentUrl)
+      : activeTab.frameSrc
+    : null;
+  const [frameMount, setFrameMount] = useState<{
+    key: string;
+    generation: number;
+    src: string | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!activeTab) return;
+    setFrameMount({
+      key: frameInstanceKey,
+      generation: activeTab.frameGeneration,
+      src: restoreSrc,
+    });
+    // Snapshot once per frame instance. In-page navigation changes
+    // history (and therefore restoreSrc) but must NOT re-snapshot:
+    // the frame is already showing that page itself, and feeding
+    // the new entry back as its src would force a second load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frameInstanceKey]);
+  const effectiveFrameSrc = !activeTab
+    ? null
+    : frameMount && frameMount.key === frameInstanceKey
+      ? activeTab.frameGeneration === frameMount.generation
+        ? frameMount.src
+        : activeTab.frameSrc
+      : restoreSrc;
 
   const clearWatchdog = () => {
     if (watchdogRef.current !== null) {
@@ -175,6 +232,26 @@ export default function BoardBrowserPanel() {
 
   if (!activeTab) return null;
 
+  // Every panel-driven navigation records the new frameSrc AND
+  // bumps frameGeneration, which is what makes frameSrc
+  // authoritative over the mount snapshot again. When the target's
+  // proxy URL equals the src the frame already carries (Back to a
+  // page the frame reached by an in-page click, or re-entering the
+  // current address), the src string would not change and the frame
+  // would not move — bump reloadKey too, so a fresh frame instance
+  // actually loads it (its mount snapshot is the target entry).
+  const panelLoadPatch = (url: string): Partial<StudioBrowserTab> => {
+    const frameSrc = browserProxyUrl(url);
+    return {
+      input: url,
+      frameSrc,
+      frameGeneration: activeTab.frameGeneration + 1,
+      ...(frameSrc === effectiveFrameSrc
+        ? { reloadKey: activeTab.reloadKey + 1 }
+        : {}),
+    };
+  };
+
   const navigate = (raw: string) => {
     const url = normalizeBrowserUrl(raw);
     if (!url) return;
@@ -182,8 +259,7 @@ export default function BoardBrowserPanel() {
     updateTab(activeTab.id, {
       history,
       historyIndex: history.length - 1,
-      input: url,
-      frameSrc: browserProxyUrl(url),
+      ...panelLoadPatch(url),
     });
   };
 
@@ -193,8 +269,7 @@ export default function BoardBrowserPanel() {
     const url = activeTab.history[next] ?? "";
     updateTab(activeTab.id, {
       historyIndex: next,
-      input: url,
-      frameSrc: browserProxyUrl(url),
+      ...panelLoadPatch(url),
     });
   };
 
@@ -204,8 +279,7 @@ export default function BoardBrowserPanel() {
     const url = activeTab.history[next] ?? "";
     updateTab(activeTab.id, {
       historyIndex: next,
-      input: url,
-      frameSrc: browserProxyUrl(url),
+      ...panelLoadPatch(url),
     });
   };
 
@@ -407,7 +481,7 @@ export default function BoardBrowserPanel() {
               key={`${activeTab.id}:${activeTab.reloadKey}`}
               data-testid="board-browser-frame"
               title="Board browser"
-              src={activeTab.frameSrc ?? undefined}
+              src={effectiveFrameSrc ?? undefined}
               className="min-h-0 flex-1 border-0"
               style={{ backgroundColor: "#FFFFFF" }}
               sandbox="allow-scripts allow-forms allow-popups allow-modals"

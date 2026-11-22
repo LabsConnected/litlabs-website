@@ -13,9 +13,16 @@
  * instead — module-scoped and layout-independent, the same pattern
  * the terminal log store uses — so tabs, history, and the address
  * bar survive flips, dock closes, and panel closes. On remount the
- * panel reloads the active tab's current page from its stored frame
- * src, matching the panel's documented tab model (history and
- * address are kept; live page state is not).
+ * panel restores the frame from the active tab's CURRENT history
+ * entry, matching the panel's documented tab model (history and
+ * address are kept; live page state is not). Restoring from the
+ * stored frameSrc would not be enough: frameSrc names only the
+ * last panel-driven load, while in-page navigation advances
+ * history without touching it — a remounted frame fed from
+ * frameSrc would reload an older page, whose `landed` report
+ * would then replace the newest history entry with that old URL.
+ * The tab's frameGeneration (below) is how the panel tells a
+ * frameSrc it must honor from a stale one it must restore over.
  *
  * Only one real panel instance is ever mounted: the Board layout
  * mounts it as a board panel, the Regular layout as a dock tab, and
@@ -33,8 +40,25 @@ export interface StudioBrowserTab {
   historyIndex: number;
   input: string;
   reloadKey: number;
-  /** Proxy URL the frame should load; null when the tab has no page yet. */
+  /**
+   * Proxy URL of the last PANEL-DRIVEN load (address bar, back,
+   * forward); null when the tab has no page yet. In-page navigation
+   * deliberately does NOT update this — the frame navigates itself,
+   * and rewriting the src would force a second load — so after an
+   * in-page navigation this can name an older page than the current
+   * history entry until the next panel-driven navigation.
+   */
   frameSrc: string | null;
+  /**
+   * Bumped by every panel-driven navigation write (the ones that
+   * set frameSrc). In-page navigation never bumps it. The panel
+   * snapshots the generation when a frame instance mounts: while
+   * the generation is unchanged, the stored frameSrc may be stale
+   * relative to history and the frame restores from the current
+   * history entry instead; once the generation moves, frameSrc is
+   * authoritative again.
+   */
+  frameGeneration: number;
   status: StudioBrowserEmbedStatus;
 }
 
@@ -70,6 +94,7 @@ export function freshStudioBrowserTab(): StudioBrowserTab {
     input: "",
     reloadKey: 0,
     frameSrc: null,
+    frameGeneration: 0,
     status: "loaded",
   };
 }

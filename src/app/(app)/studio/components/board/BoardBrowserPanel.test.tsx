@@ -270,6 +270,17 @@ describe("BoardBrowserPanel tab state across remounts (layout flips)", () => {
     vi.useRealTimers();
   });
 
+  function postFromFrame(data: unknown) {
+    const frame = screen.getByTestId("board-browser-frame") as HTMLIFrameElement;
+    const event = new MessageEvent("message", {
+      data,
+      source: frame.contentWindow as unknown as MessageEventSource,
+    });
+    act(() => {
+      window.dispatchEvent(event);
+    });
+  }
+
   it("keeps tabs, history, and the current page when the panel unmounts and remounts", () => {
     const first = wrap(<BoardBrowserPanel />);
     navigateTo("example.com");
@@ -292,5 +303,68 @@ describe("BoardBrowserPanel tab state across remounts (layout flips)", () => {
 
     fireEvent.click(screen.getAllByTestId("board-browser-tab")[0]);
     expect(screen.getByTestId("board-browser-input")).toHaveValue("https://example.com");
+  });
+
+  it("restores the page reached by an in-page link — not the stale pre-click frame src — when the panel remounts", () => {
+    const first = wrap(<BoardBrowserPanel />);
+    navigateTo("example.com");
+    fireEvent.load(screen.getByTestId("board-browser-frame"));
+
+    // Follow a link inside the page. The frame navigates itself and
+    // posts "navigate": history and the address bar advance, but the
+    // stored frameSrc still names the pre-click page — and the frame
+    // must NOT be force-reloaded for it (its src stays put).
+    postFromFrame({
+      source: "litt-browser",
+      type: "navigate",
+      url: "https://example.com/about",
+    });
+    expect(screen.getByTestId("board-browser-input")).toHaveValue(
+      "https://example.com/about",
+    );
+    expect(screen.getByTestId("board-browser-frame")).toHaveAttribute(
+      "src",
+      "/api/studio/browser/proxy?url=https%3A%2F%2Fexample.com",
+    );
+
+    // Layout flip: unmount + remount. The restored frame must load
+    // the CURRENT history entry (the post-click page), not the
+    // stale frameSrc.
+    first.unmount();
+    wrap(<BoardBrowserPanel />);
+    expect(screen.getByTestId("board-browser-input")).toHaveValue(
+      "https://example.com/about",
+    );
+    expect(screen.getByTestId("board-browser-frame")).toHaveAttribute(
+      "src",
+      "/api/studio/browser/proxy?url=https%3A%2F%2Fexample.com%2Fabout",
+    );
+
+    // The remounted frame's "landed" report names the page it
+    // actually loaded, so it cannot replace the newest history
+    // entry with the older pre-click URL: history stays intact.
+    postFromFrame({
+      source: "litt-browser",
+      type: "landed",
+      url: "https://example.com/about",
+    });
+    const tab = useStudioBrowserStore.getState().tabs[0];
+    expect(tab.history).toEqual([
+      "https://example.com",
+      "https://example.com/about",
+    ]);
+    expect(tab.historyIndex).toBe(1);
+
+    // Back still reaches the pre-click page and loads it.
+    const back = screen.getByTestId("board-browser-back");
+    expect(back).not.toBeDisabled();
+    fireEvent.click(back);
+    expect(screen.getByTestId("board-browser-input")).toHaveValue(
+      "https://example.com",
+    );
+    expect(screen.getByTestId("board-browser-frame")).toHaveAttribute(
+      "src",
+      "/api/studio/browser/proxy?url=https%3A%2F%2Fexample.com",
+    );
   });
 });
