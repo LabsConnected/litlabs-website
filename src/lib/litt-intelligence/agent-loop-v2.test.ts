@@ -1588,12 +1588,58 @@ describe("runAgentLoopV2 — build capability guard", () => {
     };
   }
 
+  it("requires a tool call after reads until a build write lands", async () => {
+    const writeFile = vi.fn(async () => undefined);
+    const transport = { ...transportWithRead, writeFile } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(readOnlyStep("nvidia/nemotron-3.5-super-vl:free", "openrouter", 1))
+      .mockResolvedValueOnce({
+        text: "[]",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "@cf/mistralai/mistral-small-3.1-24b-instruct",
+        provider: "cloudflare",
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{
+          toolCallId: "tc-write",
+          toolId: "files.write",
+          inputs: { projectId: "p-test", path: "index.html", content: "<h1>Updated</h1>" },
+        }],
+        finishReason: "tool_calls",
+        model: "@cf/mistralai/mistral-small-3.1-24b-instruct",
+        provider: "cloudflare",
+      })
+      .mockResolvedValueOnce({
+        text: "Done.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "@cf/mistralai/mistral-small-3.1-24b-instruct",
+        provider: "cloudflare",
+      });
+
+    const result = await runAgentLoopV2("Update the existing site footer and save index.html", transport, {
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+      isStaticWorkspace: true,
+      maxSteps: 8,
+      requireToolCallOnFirstStep: true,
+      buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+    });
+
+    expect(vi.mocked(callLLMWithTools).mock.calls[1][3]).toMatchObject({ toolChoice: "required" });
+    expect(writeFile).toHaveBeenCalledWith("index.html", "<h1>Updated</h1>");
+    expect(result.failedHonestly).toBeUndefined();
+  });
+
   it("rules out a read-only model after 3 zero-write steps and switches the build model", async () => {
     vi.mocked(callLLMWithTools)
       .mockResolvedValueOnce(readOnlyStep("cohere/north-mini-code:free", "openrouter", 1))
       .mockResolvedValueOnce(readOnlyStep("cohere/north-mini-code:free", "openrouter", 2))
       .mockResolvedValueOnce(readOnlyStep("cohere/north-mini-code:free", "openrouter", 3))
-      .mockResolvedValueOnce({
+      .mockResolvedValue({
         text: "Done — wrote the files.",
         toolCalls: [],
         finishReason: "stop",
@@ -1629,8 +1675,10 @@ describe("runAgentLoopV2 — build capability guard", () => {
     const fourthCall = vi.mocked(callLLMWithTools).mock.calls[3];
     expect(fourthCall[3]).toMatchObject({ model: "gemini-2.5-flash" });
 
-    // The run continued the same conversation instead of failing.
-    expect(result.failedHonestly).toContain("no successful file-writing operation");
+    // The replacement's prose-only completion is also rejected after a
+    // bounded nudge, because this request still has no landed write.
+    expect(fourthCall[3]).toMatchObject({ toolChoice: "required" });
+    expect(result.failedHonestly).toBeDefined();
     expect(result.modelFailed).toBeUndefined();
   });
 

@@ -2227,7 +2227,13 @@ async function runAgentLoopV2Inner(
           model: requestedModel,
           temperature: 0.15,
           maxTokens: 4096,
-          toolChoice: cfg.requireToolCallOnFirstStep && !emittedToolCalls ? "required" : "auto",
+          // A BUILD request is not satisfied by reads alone. Keep native
+          // tool calling required until a mutation lands, so a fallback
+          // provider cannot close the turn with prose after only inspecting
+          // files. The bounded zero-call nudge below handles a provider that
+          // ignores this setting.
+          toolChoice: (cfg.buildCapabilityGuard && !hasInterveningMutation) ||
+            (cfg.requireToolCallOnFirstStep && !emittedToolCalls) ? "required" : "auto",
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,
@@ -2375,9 +2381,10 @@ async function runAgentLoopV2Inner(
         // prose-only reply can never be the final answer — bounded nudges
         // then an honest failure, never a silent fake-complete.
         requiredToolCallPending:
-          (cfg.requireToolCallOnFirstStep === true || isLocalSmallLane()) &&
-          !emittedToolCalls &&
-          !hasInterveningMutation,
+          !hasInterveningMutation && !pendingPatchRejection && (
+            cfg.buildCapabilityGuard != null ||
+            ((cfg.requireToolCallOnFirstStep === true || isLocalSmallLane()) && !emittedToolCalls)
+          ),
         // Prose approval-asks can only stall a turn that was dispatched
         // to execute: on chat/plan turns the same wording is a valid
         // final answer, not a missing tool call. Execution intent rides
@@ -4401,7 +4408,8 @@ async function resumeAgentLoopV2Inner(
           model: cfg.model,
           temperature: 0.15,
           maxTokens: 4096,
-          toolChoice: cfg.requireToolCallOnFirstStep && !emittedToolCalls ? "required" : "auto",
+          toolChoice: (cfg.buildCapabilityGuard && !hasInterveningMutation) ||
+            (cfg.requireToolCallOnFirstStep && !emittedToolCalls) ? "required" : "auto",
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,
@@ -4496,9 +4504,10 @@ async function resumeAgentLoopV2Inner(
         // prose-only reply can never be the final answer — bounded nudges
         // then an honest failure, never a silent fake-complete.
         requiredToolCallPending:
-          (cfg.requireToolCallOnFirstStep === true || isLocalSmallLane()) &&
-          !emittedToolCalls &&
-          !hasInterveningMutation,
+          !hasInterveningMutation && (
+            cfg.buildCapabilityGuard != null ||
+            ((cfg.requireToolCallOnFirstStep === true || isLocalSmallLane()) && !emittedToolCalls)
+          ),
         // Prose approval-asks can only stall a turn that was dispatched
         // to execute: on chat/plan turns the same wording is a valid
         // final answer, not a missing tool call. Execution intent rides
