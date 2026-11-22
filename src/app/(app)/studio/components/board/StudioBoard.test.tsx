@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { ThemeProvider } from "@/context/ThemeContext";
 import StudioBoard from "./StudioBoard";
+import { overviewViewport, panelsBoundingBox } from "./board-layout";
 import { useBoardLayoutStore } from "../../stores/useBoardLayoutStore";
 import { useBoardSettingsStore } from "../../stores/useBoardSettingsStore";
 import { boardScopeKey } from "./board-types";
@@ -318,6 +319,74 @@ describe("StudioBoard Board Settings wiring (Amendment 5)", () => {
     useBoardSettingsStore.getState().setDefaultZoomPercent(150);
     renderBoard();
     expect(store.getState().scopes[SCOPE].viewport).toEqual({ panX: 24, panY: 12, scale: 1 });
+  });
+});
+
+describe("StudioBoard fit on open (2026-11-22)", () => {
+  const CONTAINER = { width: 1920, height: 999 };
+
+  // jsdom measures every element 0×0; give the board a real measured
+  // container (clientWidth/clientHeight live on Element.prototype in
+  // jsdom) and hand the original descriptors back afterwards.
+  function mockMeasuredContainer() {
+    const widthDesc = Object.getOwnPropertyDescriptor(Element.prototype, "clientWidth");
+    const heightDesc = Object.getOwnPropertyDescriptor(Element.prototype, "clientHeight");
+    Object.defineProperty(Element.prototype, "clientWidth", {
+      configurable: true,
+      get: () => CONTAINER.width,
+    });
+    Object.defineProperty(Element.prototype, "clientHeight", {
+      configurable: true,
+      get: () => CONTAINER.height,
+    });
+    return () => {
+      if (widthDesc) Object.defineProperty(Element.prototype, "clientWidth", widthDesc);
+      if (heightDesc) Object.defineProperty(Element.prototype, "clientHeight", heightDesc);
+    };
+  }
+
+  it("a project switch to an untouched scope whose seeded default zoom overflows still gets fitted", () => {
+    const restoreSize = mockMeasuredContainer();
+    try {
+      // Board Settings default zoom: an untouched scope's seed
+      // viewport (100%) is seeded up to 150% when the board opens it.
+      useBoardSettingsStore.getState().setDefaultZoomPercent(150);
+      const view = (projectId: string) => (
+        <ThemeProvider>
+          <StudioBoard userId={USER} projectId={projectId} projectType="website" />
+        </ThemeProvider>
+      );
+      const { rerender } = render(view(PROJECT));
+      // A project switch keeps StudioBoard mounted — only the prop
+      // changes, and the container size is already measured.
+      const PROJECT2 = "project_2";
+      const SCOPE2 = boardScopeKey(USER, PROJECT2);
+      rerender(view(PROJECT2));
+
+      const layout2 = store.getState().scopes[SCOPE2];
+      // The default panels fit the measured container at 100% but
+      // overflow at the seeded 150%. The fit must judge the POST-SEED
+      // camera (the store's current scope, after the zoom seed ran),
+      // not the stale pre-seed render — judging the stale camera used
+      // to mark this scope as fitted and leave panels off-screen.
+      const bbox = panelsBoundingBox(layout2.panels)!;
+      const { panX, panY, scale } = layout2.viewport;
+      expect(scale).toBeLessThan(1.5);
+      expect(layout2.viewport).toEqual(overviewViewport(layout2.panels, CONTAINER));
+      expect(bbox.x * scale + panX).toBeGreaterThanOrEqual(0);
+      expect(bbox.y * scale + panY).toBeGreaterThanOrEqual(0);
+      expect((bbox.x + bbox.width) * scale + panX).toBeLessThanOrEqual(CONTAINER.width + 1);
+      expect((bbox.y + bbox.height) * scale + panY).toBeLessThanOrEqual(CONTAINER.height + 1);
+      // Camera only: the switched-to scope's saved rects are still the
+      // untouched defaults, exactly like the first project's.
+      const rectsOf = (s: string) =>
+        Object.fromEntries(
+          Object.entries(store.getState().scopes[s].panels).map(([id, p]) => [id, p.rect]),
+        );
+      expect(rectsOf(SCOPE2)).toEqual(rectsOf(SCOPE));
+    } finally {
+      restoreSize();
+    }
   });
 });
 
