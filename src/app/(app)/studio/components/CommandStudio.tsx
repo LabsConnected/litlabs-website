@@ -93,6 +93,7 @@ import { createApprovalOutcomeGuard } from "../lib/approval-outcome-guard";
 import { StudioActivityPanel, StudioInspector, type StudioInspectorData } from "./StudioWorkspaceFrame";
 import StudioEntrySkeleton, { StudioEntryClassicSkeleton } from "./StudioEntrySkeleton";
 import StudioBoard from "./board/StudioBoard";
+import BoardBrowserPanel from "./board/BoardBrowserPanel";
 import BoardPanelBindings from "./board/BoardPanelBindings";
 import BoardChatPanel from "./board/BoardChatPanel";
 import ChatJobsView from "./ChatJobsView";
@@ -740,6 +741,7 @@ function CommandStudioContent() {
         // approvals/changes/plans live in the chat panel's Jobs tab.
         inspector: "chat",
         media: "media",
+        browser: "browser",
       };
       summonBoardPanel(panelByTab[tab]);
       return;
@@ -1252,7 +1254,7 @@ function CommandStudioContent() {
   const mobileSurfaceLabel = (() => {
     if (dockOpen) {
       return (
-        { activity: "Activity", terminal: "Terminal", inspector: "Inspector", media: "Media" }[dockTab] ??
+        { activity: "Activity", terminal: "Terminal", inspector: "Inspector", media: "Media", browser: "Browser" }[dockTab] ??
         "Tools"
       );
     }
@@ -3748,8 +3750,10 @@ function CommandStudioContent() {
 
   // The shell's bottom panel (Phase 2): the existing StudioDock with
   // Terminal/Output/Activity homes. Activity carries its real content;
-  // Terminal and Inspector jump to their single homes. Files is not a
-  // dock tab anymore — it lives in the LiTT panel's top row.
+  // Terminal, Inspector, and Browser jump to their single homes (the
+  // Browser's home is its board panel — the dock never mounts a second
+  // one). Files is not a dock tab anymore — it lives in the LiTT
+  // panel's top row.
   const shellBottomDock = (
     <StudioDock
       open={shellDockOpen}
@@ -3789,6 +3793,13 @@ function CommandStudioContent() {
         "dock-inspector-jump",
       )}
       mediaContent={<MediaUtilityDock />}
+      browserContent={dockJumpPanel(
+        "Browser",
+        "The web browser lives on the board as its own panel, so its tabs and pages stay in one place.",
+        "Open browser",
+        () => { setShellDockOpen(false); summonBoardPanel("browser"); },
+        "dock-browser-jump",
+      )}
     />
   );
 
@@ -4551,6 +4562,7 @@ function CommandStudioContent() {
                 />
               }
               mediaContent={<MediaUtilityDock />}
+              browserContent={<BoardBrowserPanel />}
             />
             </div>
           </main>

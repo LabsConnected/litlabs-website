@@ -17,6 +17,7 @@ function renderDock(overrides: Partial<React.ComponentProps<typeof StudioDock>> 
     terminalContent: <div data-testid="terminal-slot">terminal</div>,
     inspectorContent: <div data-testid="inspector-slot">inspector</div>,
     mediaContent: <div data-testid="media-slot">media</div>,
+    browserContent: <div data-testid="browser-slot">browser</div>,
     ...overrides,
   };
   return { props, ...render(<StudioDock {...props} />) };
@@ -28,10 +29,10 @@ describe("StudioDock", () => {
     vi.clearAllMocks();
   });
 
-  it("renders all four tabs (Files retired to the LiTT panel top row)", () => {
+  it("renders all five tabs (Files retired to the LiTT panel top row; Browser is the Regular layout's browser home)", () => {
     renderDock();
     expect(screen.getByTestId("studio-dock")).toBeDefined();
-    for (const id of ["activity", "terminal", "inspector", "media"]) {
+    for (const id of ["activity", "terminal", "inspector", "media", "browser"]) {
       const tab = screen.getByTestId(`dock-tab-${id}`);
       expect(tab).toBeDefined();
       expect(tab.getAttribute("aria-selected")).toBe(
@@ -141,6 +142,7 @@ describe("StudioDock", () => {
       "terminal",
       "inspector",
       "media",
+      "browser",
     ];
     for (const tab of tabs) {
       const { unmount } = renderDock({ activeTab: tab });

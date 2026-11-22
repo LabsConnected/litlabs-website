@@ -1,7 +1,10 @@
 "use client";
 
 /**
- * BoardBrowserPanel — a real embedded browser on the board.
+ * BoardBrowserPanel — a real embedded browser, shared by both
+ * layouts: a board panel in the Board layout and a StudioDock tab in
+ * the Regular layout. It is one surface with one home per layout —
+ * never mounted twice at once.
  *
  * How it renders pages (rewritten 2026-11-20, Larry's "#2 priority"):
  * The panel used to point an iframe straight at the typed URL and
@@ -25,6 +28,19 @@
  *     documents; that script postMessages each navigation back, so the
  *     address bar and history stay truthful and back/forward work for
  *     pages reached by clicking, not just by typing.
+ *   - Remounts (layout flips, tab switches, refresh) restore the
+ *     frame from the tab's CURRENT history entry — never from the
+ *     stored frameSrc alone. frameSrc names the last panel-driven
+ *     load, and in-page navigation advances history without touching
+ *     it, so a remounted frame fed from frameSrc would reload an
+ *     older page, whose `landed` report would then replace the
+ *     newest history entry with that old URL. The panel snapshots
+ *     the current entry's proxy URL when a frame instance mounts
+ *     and loads that until the next panel-driven navigation (the
+ *     tab's frameGeneration) makes frameSrc authoritative again.
+ *     In-page navigation changes neither the snapshot nor the
+ *     generation, so restoring never forces a second load
+ *     mid-session: the frame navigates itself.
  *   - Messages are trusted only when they come from this panel's own
  *     frame window and carry the proxy's source marker — a proxied
  *     document runs in an opaque origin, so origin alone proves
@@ -32,7 +48,9 @@
  *
  * Tabs: each tab keeps its own history; switching tabs reloads that
  * tab's current page (page state is not kept alive across switches —
- * history and address are).
+ * history and address are). Tab state lives in the studio browser
+ * store (stores/useStudioBrowserStore), not in this component: a
+ * layout flip unmounts this panel, and the tabs must survive it.
  *
  * Blocked/failed handling: a bounded load watchdog (plus iframe error)
  * still guards every load; when it expires the panel shows an honest
@@ -46,6 +64,17 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, ExternalLink, Globe, Plus, RefreshCw, X } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { BROWSER_PROXY_MESSAGE_SOURCE, browserProxyUrl } from "@/lib/studio/browser-proxy";
+import {
+  normalizeBrowserUrl,
+  studioBrowserTabCurrentUrl as tabCurrentUrl,
+  studioBrowserTabLabel as tabLabel,
+  useStudioBrowserStore,
+  type StudioBrowserTab,
+} from "../../stores/useStudioBrowserStore";
+
+// Kept on this module's surface for existing importers
+// (BoardPanels.test.tsx reads it from here).
+export { normalizeBrowserUrl };
 
 /**
  * Generous bound for a proxied page to signal a usable load before the
@@ -53,59 +82,16 @@ import { BROWSER_PROXY_MESSAGE_SOURCE, browserProxyUrl } from "@/lib/studio/brow
  */
 export const BROWSER_EMBED_WATCHDOG_MS = 8000;
 
-type EmbedStatus = "loading" | "loaded" | "blocked";
-
-interface BrowserTabState {
-  id: number;
-  history: string[];
-  historyIndex: number;
-  input: string;
-  reloadKey: number;
-  /** Proxy URL the frame should load; null when the tab has no page yet. */
-  frameSrc: string | null;
-  status: EmbedStatus;
-}
-
-/** Normalize a typed address into a loadable URL, or null if empty. */
-export function normalizeBrowserUrl(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  if (/^about:/i.test(trimmed)) return trimmed;
-  return `https://${trimmed}`;
-}
-
-function tabCurrentUrl(tab: BrowserTabState): string | null {
-  return tab.historyIndex >= 0 ? tab.history[tab.historyIndex] : null;
-}
-
-function tabLabel(tab: BrowserTabState): string {
-  const url = tabCurrentUrl(tab);
-  if (!url) return "New tab";
-  try {
-    return new URL(url).hostname || url;
-  } catch {
-    return url;
-  }
-}
-
-let nextTabId = 1;
-function freshTab(): BrowserTabState {
-  return {
-    id: nextTabId++,
-    history: [],
-    historyIndex: -1,
-    input: "",
-    reloadKey: 0,
-    frameSrc: null,
-    status: "loaded",
-  };
-}
-
 export default function BoardBrowserPanel() {
   const { tokens } = useTheme();
-  const [tabs, setTabs] = useState<BrowserTabState[]>(() => [freshTab()]);
-  const [activeTabId, setActiveTabId] = useState<number>(() => tabs[0]?.id ?? 1);
+  // Tab state lives in the store (see its header comment) so a layout
+  // flip — which unmounts this panel — does not lose the user's tabs.
+  const tabs = useStudioBrowserStore((s) => s.tabs);
+  const activeTabId = useStudioBrowserStore((s) => s.activeTabId);
+  const updateTab = useStudioBrowserStore((s) => s.updateTab);
+  const setActiveTabId = useStudioBrowserStore((s) => s.setActiveTabId);
+  const addTab = useStudioBrowserStore((s) => s.addTab);
+  const closeTab = useStudioBrowserStore((s) => s.closeTab);
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const frameNodeRef = useRef<HTMLIFrameElement | null>(null);
   // Mirror of tabs for use inside the message listener without
@@ -123,9 +109,48 @@ export default function BoardBrowserPanel() {
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
   const currentUrl = activeTab ? tabCurrentUrl(activeTab) : null;
 
-  const updateTab = (tabId: number, patch: Partial<BrowserTabState>) => {
-    setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, ...patch } : t)));
-  };
+  // Frame-instance restore (see the header's Navigation model). A
+  // frame instance is one mount of the iframe element: the panel
+  // mounting, a tab switch, or a reloadKey bump — all of which
+  // change frameInstanceKey. When an instance mounts, snapshot the
+  // proxy URL for the tab's CURRENT history entry (restoreSrc); the
+  // frame loads the snapshot while the tab's frameGeneration is the
+  // one captured here, and the stored frameSrc takes over again as
+  // soon as a panel-driven navigation bumps the generation. Before
+  // the snapshot effect lands (the first render of a remount) the
+  // frame already derives restoreSrc directly, so a stale frameSrc
+  // is never even briefly loaded.
+  const frameInstanceKey = `${activeTab?.id ?? "none"}:${activeTab?.reloadKey ?? 0}`;
+  const restoreSrc = activeTab
+    ? currentUrl
+      ? browserProxyUrl(currentUrl)
+      : activeTab.frameSrc
+    : null;
+  const [frameMount, setFrameMount] = useState<{
+    key: string;
+    generation: number;
+    src: string | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!activeTab) return;
+    setFrameMount({
+      key: frameInstanceKey,
+      generation: activeTab.frameGeneration,
+      src: restoreSrc,
+    });
+    // Snapshot once per frame instance. In-page navigation changes
+    // history (and therefore restoreSrc) but must NOT re-snapshot:
+    // the frame is already showing that page itself, and feeding
+    // the new entry back as its src would force a second load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frameInstanceKey]);
+  const effectiveFrameSrc = !activeTab
+    ? null
+    : frameMount && frameMount.key === frameInstanceKey
+      ? activeTab.frameGeneration === frameMount.generation
+        ? frameMount.src
+        : activeTab.frameSrc
+      : restoreSrc;
 
   const clearWatchdog = () => {
     if (watchdogRef.current !== null) {
@@ -144,14 +169,28 @@ export default function BoardBrowserPanel() {
 
   // Arm the watchdog for panel-driven loads: a new frame src, a
   // refresh (reloadKey remounts the frame), or switching to a tab that
-  // has a page in flight.
+  // has a page in flight. frameGeneration is a dep on purpose: it is
+  // the one value that changes on EVERY panel-driven load request,
+  // including Back/Forward to a page whose proxy URL the stored
+  // frameSrc already names (the remount-restore case: the frame was
+  // restored from the history snapshot, frameSrc still names the
+  // older page, and the patch finds frameSrc unchanged and reloadKey
+  // unbumped because the target differs from effectiveFrameSrc).
+  // Without it, leaving the blocked state after such a Back changed
+  // nothing this effect watches, so the failure screen stayed up
+  // until Try again.
   useEffect(() => {
     if (!activeTab || !activeTab.frameSrc) return;
     updateTab(activeTab.id, { status: "loading" });
     armWatchdog(activeTab.id);
     return clearWatchdog;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab?.id, activeTab?.frameSrc, activeTab?.reloadKey]);
+  }, [
+    activeTab?.id,
+    activeTab?.frameSrc,
+    activeTab?.reloadKey,
+    activeTab?.frameGeneration,
+  ]);
 
   // In-page navigation sync from the proxied document's bootstrap.
   useEffect(() => {
@@ -207,6 +246,26 @@ export default function BoardBrowserPanel() {
 
   if (!activeTab) return null;
 
+  // Every panel-driven navigation records the new frameSrc AND
+  // bumps frameGeneration, which is what makes frameSrc
+  // authoritative over the mount snapshot again. When the target's
+  // proxy URL equals the src the frame already carries (Back to a
+  // page the frame reached by an in-page click, or re-entering the
+  // current address), the src string would not change and the frame
+  // would not move — bump reloadKey too, so a fresh frame instance
+  // actually loads it (its mount snapshot is the target entry).
+  const panelLoadPatch = (url: string): Partial<StudioBrowserTab> => {
+    const frameSrc = browserProxyUrl(url);
+    return {
+      input: url,
+      frameSrc,
+      frameGeneration: activeTab.frameGeneration + 1,
+      ...(frameSrc === effectiveFrameSrc
+        ? { reloadKey: activeTab.reloadKey + 1 }
+        : {}),
+    };
+  };
+
   const navigate = (raw: string) => {
     const url = normalizeBrowserUrl(raw);
     if (!url) return;
@@ -214,8 +273,7 @@ export default function BoardBrowserPanel() {
     updateTab(activeTab.id, {
       history,
       historyIndex: history.length - 1,
-      input: url,
-      frameSrc: browserProxyUrl(url),
+      ...panelLoadPatch(url),
     });
   };
 
@@ -225,8 +283,7 @@ export default function BoardBrowserPanel() {
     const url = activeTab.history[next] ?? "";
     updateTab(activeTab.id, {
       historyIndex: next,
-      input: url,
-      frameSrc: browserProxyUrl(url),
+      ...panelLoadPatch(url),
     });
   };
 
@@ -236,32 +293,8 @@ export default function BoardBrowserPanel() {
     const url = activeTab.history[next] ?? "";
     updateTab(activeTab.id, {
       historyIndex: next,
-      input: url,
-      frameSrc: browserProxyUrl(url),
+      ...panelLoadPatch(url),
     });
-  };
-
-  const addTab = () => {
-    const tab = freshTab();
-    setTabs((prev) => [...prev, tab]);
-    setActiveTabId(tab.id);
-  };
-
-  const closeTab = (tabId: number) => {
-    const idx = tabs.findIndex((t) => t.id === tabId);
-    if (idx < 0) return;
-    const next = tabs.filter((t) => t.id !== tabId);
-    if (next.length === 0) {
-      const replacement = freshTab();
-      setTabs([replacement]);
-      setActiveTabId(replacement.id);
-      return;
-    }
-    if (tabId === activeTabId) {
-      const neighbor = next[Math.min(idx, next.length - 1)];
-      setActiveTabId(neighbor.id);
-    }
-    setTabs(next);
   };
 
   // React's onError prop alone is not reliably delivered for <iframe>
@@ -462,7 +495,7 @@ export default function BoardBrowserPanel() {
               key={`${activeTab.id}:${activeTab.reloadKey}`}
               data-testid="board-browser-frame"
               title="Board browser"
-              src={activeTab.frameSrc ?? undefined}
+              src={effectiveFrameSrc ?? undefined}
               className="min-h-0 flex-1 border-0"
               style={{ backgroundColor: "#FFFFFF" }}
               sandbox="allow-scripts allow-forms allow-popups allow-modals"
