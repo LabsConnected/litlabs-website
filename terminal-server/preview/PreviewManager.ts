@@ -245,9 +245,10 @@ export interface PreviewRuntime {
   serveMode?: PreviewServeMode;
   /**
    * The production build command for serveMode
-   * "production-build" (`<pm> exec next build`), recorded with
-   * the serve mode so a recreation rebuilds before it re-serves.
-   * Null in dev mode.
+   * "production-build" (the project's declared build script via
+   * `<pm> run build`, or `<pm> exec next build` when it declares
+   * none), recorded with the serve mode so a recreation rebuilds
+   * before it re-serves. Null in dev mode.
    */
   buildCommand?: string | null;
 }
@@ -952,6 +953,13 @@ interface FrameworkInfo {
   framework: string;
   command: string;
   packageManager: string;
+  /**
+   * The project's declared `scripts.build`, when package.json has
+   * one. Read by detection so the production-build serve mode can
+   * run the project's own build chain (serve-mode.ts); null when
+   * the project declares none (or detection was caller-supplied).
+   */
+  buildScript: string | null;
 }
 
 function detectFramework(root: string): FrameworkInfo {
@@ -973,11 +981,14 @@ function detectFramework(root: string): FrameworkInfo {
 
   // Read package.json scripts for dev command
   let devScript: string | null = null;
+  let buildScript: string | null = null;
   let declaredPm: string | null = null;
   if (hasPkgJson) {
     try {
       const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf-8"));
       devScript = pkg?.scripts?.dev ?? null;
+      buildScript =
+        typeof pkg?.scripts?.build === "string" ? pkg.scripts.build : null;
       // packageManager field (e.g. "pnpm@9.15.0") takes precedence
       if (typeof pkg?.packageManager === "string") {
         const m = pkg.packageManager.match(/^([a-z]+)/i);
@@ -1002,27 +1013,28 @@ function detectFramework(root: string): FrameworkInfo {
       framework: "nextjs",
       command: `${nextBin} dev --port $PORT --hostname ${previewBindHost()}`,
       packageManager,
+      buildScript,
     };
   }
 
   if (hasViteConfig || (hasPkgJson && devScript?.includes("vite"))) {
-    return { framework: "vite", command: `${packageManager} dev`, packageManager };
+    return { framework: "vite", command: `${packageManager} dev`, packageManager, buildScript };
   }
 
   if (hasIndexHtml && !hasPkgJson) {
-    return { framework: "static", command: "npx --yes serve -s . -l $PORT", packageManager: "npx" };
+    return { framework: "static", command: "npx --yes serve -s . -l $PORT", packageManager: "npx", buildScript };
   }
 
   if (hasPkgJson && devScript) {
-    return { framework: "node", command: `${packageManager} dev`, packageManager };
+    return { framework: "node", command: `${packageManager} dev`, packageManager, buildScript };
   }
 
   // Fallback: static server if index.html exists
   if (hasIndexHtml) {
-    return { framework: "static", command: "npx --yes serve -s . -l $PORT", packageManager: "npx" };
+    return { framework: "static", command: "npx --yes serve -s . -l $PORT", packageManager: "npx", buildScript };
   }
 
-  return { framework: "unknown", command: "", packageManager };
+  return { framework: "unknown", command: "", packageManager, buildScript };
 }
 
 // ─── Health probing ────────────────────────────────────────────────
@@ -1298,6 +1310,7 @@ async function startSandboxPreviewBranch(
           framework: input.framework,
           command: input.command,
           packageManager: input.packageManager ?? "pnpm",
+          buildScript: null,
         }
       : detectFramework(ws.root);
 
@@ -1315,7 +1328,10 @@ async function startSandboxPreviewBranch(
     const fileCount = countProjectFiles(ws.root);
     serveMode = resolvePreviewServeMode(detected.framework, fileCount);
     if (serveMode === "production-build") {
-      buildCommand = nextProductionBuildCommand(detected.packageManager);
+      buildCommand = nextProductionBuildCommand(
+        detected.packageManager,
+        detected.buildScript,
+      );
       detected.command = nextProductionStartCommand(
         detected.packageManager,
         previewBindHost(),
@@ -1581,6 +1597,7 @@ export async function startPreview(input: PreviewStartInput): Promise<PreviewRun
         framework: input.framework,
         command: input.command,
         packageManager: input.packageManager ?? "pnpm",
+        buildScript: null,
       }
     : detectFramework(ws.root);
 
