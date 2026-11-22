@@ -367,4 +367,68 @@ describe("BoardBrowserPanel tab state across remounts (layout flips)", () => {
       "/api/studio/browser/proxy?url=https%3A%2F%2Fexample.com",
     );
   });
+
+  it("Back from a restored page that timed out loads the previous page and clears the blocked state", () => {
+    const first = wrap(<BoardBrowserPanel />);
+    navigateTo("example.com");
+    fireEvent.load(screen.getByTestId("board-browser-frame"));
+
+    // Follow an in-page link: history advances to the new page while
+    // the stored frameSrc keeps naming the pre-click page.
+    postFromFrame({
+      source: "litt-browser",
+      type: "navigate",
+      url: "https://example.com/about",
+    });
+    postFromFrame({
+      source: "litt-browser",
+      type: "landed",
+      url: "https://example.com/about",
+    });
+
+    // Layout flip: the remounted frame restores the post-click page.
+    first.unmount();
+    wrap(<BoardBrowserPanel />);
+    expect(screen.getByTestId("board-browser-frame")).toHaveAttribute(
+      "src",
+      "/api/studio/browser/proxy?url=https%3A%2F%2Fexample.com%2Fabout",
+    );
+
+    // This time the restored page never signals a load: the watchdog
+    // expires and the panel lands on the failure screen for it.
+    act(() => {
+      vi.advanceTimersByTime(BROWSER_EMBED_WATCHDOG_MS + 1);
+    });
+    expect(screen.getByTestId("board-browser-blocked")).toBeInTheDocument();
+    expect(screen.getByTestId("board-browser-blocked-url")).toHaveTextContent(
+      "https://example.com/about",
+    );
+    expect(screen.queryByTestId("board-browser-frame")).toBeNull();
+
+    // Back targets the pre-click page. Its proxy URL differs from the
+    // restored frame's snapshot src, so no reloadKey bump happens —
+    // and the stored frameSrc already named this page, so it does not
+    // change either. Only frameGeneration moves. The panel must
+    // still treat it as a fresh load: failure screen gone, frame
+    // back, showing the previous page.
+    fireEvent.click(screen.getByTestId("board-browser-back"));
+    expect(screen.getByTestId("board-browser-input")).toHaveValue(
+      "https://example.com",
+    );
+    expect(screen.queryByTestId("board-browser-blocked")).toBeNull();
+    const frame = screen.getByTestId("board-browser-frame");
+    expect(frame).toHaveAttribute(
+      "src",
+      "/api/studio/browser/proxy?url=https%3A%2F%2Fexample.com",
+    );
+    expect(screen.getByTestId("board-browser-loading")).toBeInTheDocument();
+
+    // The re-requested page loads and stays loaded.
+    fireEvent.load(frame);
+    act(() => {
+      vi.advanceTimersByTime(BROWSER_EMBED_WATCHDOG_MS + 5000);
+    });
+    expect(screen.queryByTestId("board-browser-blocked")).toBeNull();
+    expect(screen.getByTestId("board-browser-frame")).toBeInTheDocument();
+  });
 });

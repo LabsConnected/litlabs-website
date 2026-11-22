@@ -169,14 +169,28 @@ export default function BoardBrowserPanel() {
 
   // Arm the watchdog for panel-driven loads: a new frame src, a
   // refresh (reloadKey remounts the frame), or switching to a tab that
-  // has a page in flight.
+  // has a page in flight. frameGeneration is a dep on purpose: it is
+  // the one value that changes on EVERY panel-driven load request,
+  // including Back/Forward to a page whose proxy URL the stored
+  // frameSrc already names (the remount-restore case: the frame was
+  // restored from the history snapshot, frameSrc still names the
+  // older page, and the patch finds frameSrc unchanged and reloadKey
+  // unbumped because the target differs from effectiveFrameSrc).
+  // Without it, leaving the blocked state after such a Back changed
+  // nothing this effect watches, so the failure screen stayed up
+  // until Try again.
   useEffect(() => {
     if (!activeTab || !activeTab.frameSrc) return;
     updateTab(activeTab.id, { status: "loading" });
     armWatchdog(activeTab.id);
     return clearWatchdog;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab?.id, activeTab?.frameSrc, activeTab?.reloadKey]);
+  }, [
+    activeTab?.id,
+    activeTab?.frameSrc,
+    activeTab?.reloadKey,
+    activeTab?.frameGeneration,
+  ]);
 
   // In-page navigation sync from the proxied document's bootstrap.
   useEffect(() => {
