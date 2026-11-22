@@ -6,6 +6,7 @@ import {
   clampRectInsideArea,
   defaultBoardLayout,
   findOpenPosition,
+  fitOnOpenViewport,
   overviewViewport,
   panelsBoundingBox,
   rectsOverlap,
@@ -358,5 +359,61 @@ describe("overviewViewport", () => {
       panY: 0,
       scale: 1,
     });
+  });
+});
+
+describe("fitOnOpenViewport", () => {
+  it("returns null when every open panel already fits at the stored camera", () => {
+    const layout = defaultBoardLayout("website");
+    // A container comfortably larger than the default arrangement.
+    const fit = fitOnOpenViewport(
+      layout.panels,
+      { panX: 0, panY: 0, scale: 1 },
+      { width: 3840, height: 2160 },
+    );
+    expect(fit).toBeNull();
+  });
+
+  it("frames everything when the arrangement overflows the container at 100%", () => {
+    const layout = defaultBoardLayout("website");
+    const container = { width: 800, height: 600 };
+    const fit = fitOnOpenViewport(layout.panels, { panX: 0, panY: 0, scale: 1 }, container);
+    expect(fit).not.toBeNull();
+    // Same framing the zoom control's Fit entry computes.
+    expect(fit).toEqual(overviewViewport(layout.panels, container));
+    expect(fit!.scale).toBeLessThan(1);
+    // The whole bounding box lands inside the container.
+    const bbox = panelsBoundingBox(layout.panels)!;
+    expect(bbox.x * fit!.scale + fit!.panX).toBeGreaterThanOrEqual(0);
+    expect(bbox.y * fit!.scale + fit!.panY).toBeGreaterThanOrEqual(0);
+    expect((bbox.x + bbox.width) * fit!.scale + fit!.panX).toBeLessThanOrEqual(container.width + 1);
+    expect((bbox.y + bbox.height) * fit!.scale + fit!.panY).toBeLessThanOrEqual(container.height + 1);
+  });
+
+  it("rescues a stored camera that was panned away from the panels", () => {
+    const layout = defaultBoardLayout("website");
+    const container = { width: 1920, height: 999 };
+    // Panels would fit at this scale, but the stored pan leaves them
+    // off the left edge — overflow, so fit applies.
+    const fit = fitOnOpenViewport(layout.panels, { panX: -4000, panY: 0, scale: 1 }, container);
+    expect(fit).toEqual(overviewViewport(layout.panels, container));
+  });
+
+  it("returns null for an unmeasured container and when no panel is open", () => {
+    const layout = defaultBoardLayout("website");
+    expect(
+      fitOnOpenViewport(layout.panels, { panX: 0, panY: 0, scale: 1 }, { width: 0, height: 0 }),
+    ).toBeNull();
+    for (const panel of Object.values(layout.panels)) panel.open = false;
+    expect(
+      fitOnOpenViewport(layout.panels, { panX: 0, panY: 0, scale: 1 }, { width: 800, height: 600 }),
+    ).toBeNull();
+  });
+
+  it("never rewrites a panel rect — the decision is camera-only", () => {
+    const layout = defaultBoardLayout("website");
+    const before = JSON.stringify(layout.panels);
+    fitOnOpenViewport(layout.panels, { panX: 0, panY: 0, scale: 1 }, { width: 800, height: 600 });
+    expect(JSON.stringify(layout.panels)).toBe(before);
   });
 });

@@ -336,3 +336,42 @@ export function overviewViewport(
   const panY = margin + (availH - bbox.height * scale) / 2 - bbox.y * scale;
   return { panX: Math.round(panX), panY: Math.round(panY), scale: Math.round(scale * 1000) / 1000 };
 }
+
+/**
+ * Fit on open (Larry, 2026-11-22): the camera a board should start
+ * with when it first mounts. Returns null when every open panel
+ * already fits inside the container at the stored viewport — the
+ * stored camera is then left exactly as it is. Otherwise returns the
+ * same framing the zoom control's "Fit" entry computes
+ * (overviewViewport), so the board opens showing everything instead
+ * of panels stranded past the window's edges at 100%.
+ *
+ * CAMERA ONLY: this never rewrites a panel rect — saved positions
+ * and sizes move only on user action (standing rule). Pure.
+ */
+export function fitOnOpenViewport(
+  panels: Record<BoardPanelId, BoardPanelState>,
+  viewport: BoardViewport,
+  container: { width: number; height: number },
+): BoardViewport | null {
+  if (container.width <= 0 || container.height <= 0) return null;
+  const bbox = panelsBoundingBox(panels);
+  if (!bbox) return null;
+  const scale = viewport.scale || 1;
+  const left = bbox.x * scale + viewport.panX;
+  const top = bbox.y * scale + viewport.panY;
+  const right = (bbox.x + bbox.width) * scale + viewport.panX;
+  const bottom = (bbox.y + bbox.height) * scale + viewport.panY;
+  // 1px of slack so a bbox that lands exactly on the container edge
+  // (rounding) counts as fitting and the stored camera survives.
+  const EPSILON = 1;
+  if (
+    left >= -EPSILON &&
+    top >= -EPSILON &&
+    right <= container.width + EPSILON &&
+    bottom <= container.height + EPSILON
+  ) {
+    return null;
+  }
+  return overviewViewport(panels, container);
+}
