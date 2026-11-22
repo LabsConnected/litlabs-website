@@ -614,6 +614,7 @@ describe("Launch Flow: failed build → repair → preview", () => {
     expect(result.repairAttempts).toBe(3);
     expect(result.finalText).toContain("did not pass all checks");
     expect(result.finalText).toContain("Module not found");
+    expect(result.previewAttempted).toBe(false);
     expect(options.transport.startPreview).not.toHaveBeenCalled();
   });
 });
@@ -664,6 +665,9 @@ describe("Launch Flow: model failure", () => {
     expect(result.status).toBe("failed");
     expect(result.finalText).toContain("could not complete the repair");
     expect(result.finalText).toContain("http_402");
+    // The preview phase was reached — the flag distinguishes this from
+    // pre-preview failures so callers can report it as a preview failure.
+    expect(result.previewAttempted).toBe(true);
     expect(runAgentLoop).toHaveBeenCalledTimes(2); // initial + first repair only
   });
 });

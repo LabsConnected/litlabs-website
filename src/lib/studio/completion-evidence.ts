@@ -122,8 +122,24 @@ export interface WorkspaceChangeEvidence {
   evidenceSource?: "git-diff" | "volume-listing";
 }
 
+/**
+ * What the preview subsystem actually reports — started/ready only when the
+ * preview process verified itself, never from a tool's self-report. Absent
+ * when no preview was attempted; a build that never launched a preview
+ * cannot use that absence to claim a working site.
+ */
+export interface PreviewEvidence {
+  /** The preview process was launched. */
+  started: boolean;
+  /** The preview verified itself ready and serving. */
+  ready: boolean;
+  /** Failed or timed out — a failed preview can never support "complete". */
+  failed?: boolean;
+}
+
 export interface ExecutionEvidence {
   toolCalls: ToolCallEvidence[];
+  preview?: PreviewEvidence | null;
   deployment?: DeploymentEvidence | null;
   /**
    * Absent when no checkpoint existed (no mutation was ever attempted) or
@@ -638,6 +654,29 @@ function evaluateCompletionState(
               : "The deployment succeeded but its live URL was not verified.",
       };
     }
+  }
+
+  // A preview that demonstrably failed or never became ready cannot support
+  // a "complete" verdict on work that produced it. Absent preview evidence
+  // is NOT proof of a working preview — file-only and non-preview workflows
+  // never set this field, so they are unaffected. Ship requests are also
+  // unaffected by absence specifically: the deployment gate above already
+  // demanded a fetched, verified live URL (deployment.urlVerified), which
+  // is itself live evidence the site works — project.deploy's approval-
+  // resume completion (a separate call from the one that ran the build
+  // preview) legitimately carries deployment evidence with no preview
+  // field at all, and that must stay "complete".
+  const preview = evidence.preview ?? null;
+  if (preview && !preview.ready) {
+    missing.push("working preview");
+    return {
+      ...base,
+      state: preview.failed ? "failed" : "partial",
+      missing,
+      reason: preview.failed
+        ? "The required preview failed — the generated site cannot be verified working."
+        : "The required preview never reported ready — the generated site is unverified.",
+    };
   }
 
   return {

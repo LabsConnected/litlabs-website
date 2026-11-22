@@ -428,3 +428,116 @@ describe("partial writes, failed tools, interrupted runs", () => {
     expect(verdict.state).toBe("failed");
   });
 });
+
+/* ── Preview evidence: a build can never claim a working site while its
+   required preview failed or never became ready ── */
+
+describe("preview evidence gates the complete verdict", () => {
+  const req = requirementForMode("build");
+  const mutatingOk = { toolId: "edit_file", success: true, mutating: true, persisted: true };
+
+  it("completes when the preview verified itself ready", () => {
+    const verdict = evaluateCompletion(req, {
+      toolCalls: [mutatingOk],
+      preview: { started: true, ready: true },
+    });
+    expect(verdict.state).toBe("complete");
+  });
+
+  it("fails when the preview demonstrably failed", () => {
+    const verdict = evaluateCompletion(req, {
+      toolCalls: [mutatingOk],
+      preview: { started: true, ready: false, failed: true },
+    });
+    expect(verdict.state).toBe("failed");
+    expect(verdict.missing).toContain("working preview");
+  });
+
+  it("is partial when the preview started but never became ready (timeout)", () => {
+    const verdict = evaluateCompletion(req, {
+      toolCalls: [mutatingOk],
+      preview: { started: true, ready: false },
+    });
+    expect(verdict.state).toBe("partial");
+    expect(verdict.missing).toContain("working preview");
+  });
+
+  it("is partial when the preview was attempted but never started", () => {
+    const verdict = evaluateCompletion(req, {
+      toolCalls: [mutatingOk],
+      preview: { started: false, ready: false },
+    });
+    expect(verdict.state).toBe("partial");
+  });
+
+  it("leaves file-only and non-preview workflows unaffected (absent evidence)", () => {
+    const verdict = evaluateCompletion(req, { toolCalls: [mutatingOk] });
+    expect(verdict.state).toBe("complete");
+  });
+});
+
+/* ── Ship mode: a verified deployment must never be allowed to paper over
+   a preview that failed, never became ready, or was never checked at all.
+   This is the exact "never tell customers their website is working unless
+   live evidence confirms it" guarantee for the ship path specifically —
+   the build-mode tests above don't exercise requirement.deployment. ── */
+
+describe("preview evidence gates ship completion (deployment cannot override it)", () => {
+  const shipReq = requirementForMode("ship");
+  const mutatingOk = { toolId: "edit_file", success: true, mutating: true, persisted: true };
+  const verifiedDeployment = {
+    started: true,
+    succeeded: true,
+    url: "https://example.com",
+    urlVerified: true,
+  };
+
+  it("a ship request cannot complete when the required preview verification fails", () => {
+    const verdict = evaluateCompletion(shipReq, {
+      toolCalls: [mutatingOk],
+      deployment: verifiedDeployment,
+      preview: { started: true, ready: false, failed: true },
+    });
+    expect(verdict.state).not.toBe("complete");
+    expect(verdict.state).toBe("failed");
+  });
+
+  it("an unready (timed-out) preview produces partial, not complete, even with a verified deployment", () => {
+    const verdict = evaluateCompletion(shipReq, {
+      toolCalls: [mutatingOk],
+      deployment: verifiedDeployment,
+      preview: { started: true, ready: false },
+    });
+    expect(verdict.state).toBe("partial");
+  });
+
+  it("successful deployment evidence cannot override a failed preview", () => {
+    const verdict = evaluateCompletion(shipReq, {
+      toolCalls: [mutatingOk],
+      deployment: verifiedDeployment,
+      preview: { started: true, ready: false, failed: true },
+    });
+    expect(verdict.state).toBe("failed");
+    expect(verdict.reason).toMatch(/preview/i);
+  });
+
+  it("a verified deployment with no preview evidence still completes (approval-resume deploy path)", () => {
+    // project.deploy's approval-resume completion runs in a separate call
+    // from the one that ran the build preview, and legitimately carries no
+    // `preview` field at all. Its own urlVerified:true IS the live evidence
+    // Larry's rule demands — the deployment gate above already required a
+    // fetched, verified URL before this point, so absence of the separate
+    // `preview` signal must not downgrade it.
+    const verdict = evaluateCompletion(shipReq, {
+      toolCalls: [mutatingOk],
+      deployment: verifiedDeployment,
+    });
+    expect(verdict.state).toBe("complete");
+  });
+
+  it("file-only build requests remain unaffected by the ship-mode preview gate", () => {
+    const buildReq = requirementForMode("build");
+    const verdict = evaluateCompletion(buildReq, { toolCalls: [mutatingOk] });
+    expect(verdict.state).toBe("complete");
+  });
+});
