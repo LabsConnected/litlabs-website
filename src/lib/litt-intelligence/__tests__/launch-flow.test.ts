@@ -633,7 +633,9 @@ describe("Launch Flow: model failure", () => {
 
     expect(result.success).toBe(false);
     expect(result.status).toBe("failed");
-    expect(result.finalText).toContain("http_402");
+    // Raw provider detail stays in diagnostics, not user-facing chat text.
+    expect(result.finalText).not.toContain("http_402");
+    expect(result.finalText).toContain("could not complete the request");
     expect(result.error).toContain("http_402");
     expect(options.transport.startPreview).not.toHaveBeenCalled();
     // A model failure must not reach the deploy gate either.
@@ -663,7 +665,8 @@ describe("Launch Flow: model failure", () => {
     expect(result.success).toBe(false);
     expect(result.status).toBe("failed");
     expect(result.finalText).toContain("could not complete the repair");
-    expect(result.finalText).toContain("http_402");
+    expect(result.finalText).not.toContain("http_402");
+    expect(result.error).toContain("http_402");
     expect(runAgentLoop).toHaveBeenCalledTimes(2); // initial + first repair only
   });
 });
@@ -1751,5 +1754,75 @@ describe("Launch Flow: media-generation runs", () => {
     expect(result.success).toBe(false);
     expect(result.error).toBe("MEDIA_NOT_COMPLETED");
     expect(result.finalText).toContain("The image provider failed");
+  });
+});
+
+// ─── Tests: user-facing error hygiene (2026-11-19) ─────────────────
+
+describe("Launch Flow: user-facing error hygiene", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    toolRegistry.clear();
+    registerInternalTools();
+  });
+
+  it("media-only run cannot claim success when the workspace diff verifies nothing changed", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult({
+      // The tool reported success, but the persisted diff proves no file
+      // landed — self-report alone must not settle the run as completed.
+      workspaceChange: { status: "unchanged" },
+      finalText: "",
+      buildFixResult: undefined,
+      toolCalls: [{ toolId: "image.generate", success: true, summary: "Image generated and saved to project", mutating: true }],
+    }));
+    const options = makeOptions({
+      userMessage: "Make a pic of a bike",
+      runAgentLoop,
+      requiresExecution: true,
+      mediaOnly: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(result.success).toBe(false);
+    expect(result.status).toBe("failed");
+    expect(result.error).toBe("MEDIA_NOT_COMPLETED");
+    expect(result.finalText).toContain("no file change was verified");
+  });
+
+  it("media-only run still completes when the workspace diff confirms the change", async () => {
+    const runAgentLoop = vi.fn().mockResolvedValue(successAgentResult({
+      workspaceChange: { status: "changed", files: ["public/assets/images/bike.png"] },
+      finalText: "Here is your bike: ![bike](https://img.test/bike.png)",
+      buildFixResult: undefined,
+      toolCalls: [{ toolId: "image.generate", success: true, summary: "Image generated and saved to project", mutating: true }],
+    }));
+    const options = makeOptions({
+      userMessage: "Make a pic of a bike",
+      runAgentLoop,
+      requiresExecution: true,
+      mediaOnly: true,
+    });
+
+    const result = await runLaunchFlow(options);
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe("completed");
+  });
+
+  it("an unexpected launch exception never leaks its raw message into chat text", async () => {
+    const runAgentLoop = vi.fn().mockRejectedValue(
+      new Error("fetch failed: connect ECONNREFUSED 10.0.0.4:443 sk-live-secret"),
+    );
+    const options = makeOptions({ runAgentLoop });
+
+    const result = await runLaunchFlow(options);
+
+    expect(result.success).toBe(false);
+    expect(result.finalText).not.toContain("ECONNREFUSED");
+    expect(result.finalText).not.toContain("sk-live-secret");
+    expect(result.finalText).toContain("unexpected error");
+    // Diagnostics keep the real cause.
+    expect(result.error).toContain("ECONNREFUSED");
   });
 });
