@@ -344,8 +344,12 @@ describe("runAgentLoopV2 — invalid apply_patch never reaches the approval gate
       enableBuildFix: false,
     });
 
-    // The third read is the post-write persisted-change verification.
-    expect(transportWithFile.readFile).toHaveBeenCalledTimes(3);
+    // Reads: patch validation, recovery re-read, post-write
+    // verification — plus, since ACC-01 F2, the full-overwrite gate's
+    // two probes of the target (the loop's pre-approval check and the
+    // handler's enforcement floor; the gate reads the existing file on
+    // any lane, not just the small lane).
+    expect(transportWithFile.readFile).toHaveBeenCalledTimes(5);
     expect(writeFile).toHaveBeenCalledWith("index.html", "<footer>Ember Roast · Freshly roasted.</footer>");
     expect(result.pendingApproval).toBeUndefined();
     expect(result.finalText).toContain("updated safely");
@@ -2110,6 +2114,7 @@ describe("runAgentLoopV2 — mutation read-back coverage (gitless/static workspa
 
     expect(result.toolCalls.find((t) => t.toolId === "files.mkdir")?.persisted).toBe(false);
   });
+
 
   // project.insert_asset and preview.start sit outside the AUTO
   // auto-approve set — they pause at a gate, then the approved resume

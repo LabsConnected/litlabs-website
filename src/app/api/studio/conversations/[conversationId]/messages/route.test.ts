@@ -87,7 +87,12 @@ vi.mock("@/lib/agent-runtime", () => ({
 }));
 
 vi.mock("@/lib/agent-billing", () => ({
-  reserveCredits: vi.fn(),
+  // ACC-01 F6: the route now reserves for built-in agents too, so the
+  // default mock must resolve a successful reservation — tests that
+  // exercise billing set their own resolved values.
+  reserveCredits: vi.fn(() =>
+    Promise.resolve({ ok: true, runId: "billing-run-1", reservationId: "res-1", reservedCredits: 0 }),
+  ),
   // The route calls settleRun(...).catch(...) — must return a promise.
   settleRun: vi.fn(() => Promise.resolve({ ok: true })),
   estimateCredits: vi.fn(() => 0),
@@ -201,7 +206,7 @@ import { persistMemory, recallMemories } from "@/lib/studio/memory-service";
 import { isValidAgentSlug } from "@/lib/studio/agent-registry";
 import { resolveRuntimeAgent } from "@/lib/agent-runtime";
 import { parseAgentSelection } from "@/lib/agent-selection";
-import { reserveCredits, settleRun } from "@/lib/agent-billing";
+import { reserveCredits, settleRun, estimateCredits } from "@/lib/agent-billing";
 import { buildPrompt } from "@/lib/litt-runtime";
 
 // ── Helpers ──
@@ -2591,5 +2596,152 @@ describe("POST /api/studio/conversations/[conversationId]/messages — marketpla
       "proj-123",
       expect.objectContaining({ agentSlug: "litt" }),
     );
+  });
+});
+
+// ── ACC-01 F6: built-in Studio agents must reserve and settle ──
+// Regression: before the fix, the reserve was gated on a marketplace
+// agentInstanceId, so the default built-in agent never entered billing
+// at all — a full acceptance journey (3 runs, 15 model calls) debited 0.
+describe("POST /api/studio/conversations/[conversationId]/messages — built-in agent billing (ACC-01 F6)", () => {
+  const routeParams = { params: Promise.resolve({ conversationId: "conv-123" }) };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetExecutionRegistryForTests();
+
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
+    vi.mocked(getConversation).mockResolvedValue({
+      id: "conv-123",
+      projectId: "proj-123",
+      revision: 1,
+      activeAgentSlug: "litt",
+      ownerId: "user_123",
+    } as any);
+    vi.mocked(buildStudioContext).mockResolvedValue({} as any);
+    vi.mocked(buildCanonicalRuntimeContext).mockResolvedValue({
+      workspaceExecutionAvailable: true,
+      workspaceId: "ws-123",
+      executionMode: "auto",
+    } as any);
+    vi.mocked(insertMessage).mockImplementation(async (args: any) => ({
+      message: { id: `msg-${args.role}`, ...args },
+      duplicate: false,
+      error: null,
+    }) as any);
+    vi.mocked(updateMessageStatus).mockResolvedValue(true as any);
+    actionRuntimeMocks.createActionRun.mockResolvedValue({
+      id: "action-run-123",
+      userId: "user_123",
+      projectId: "proj-123",
+      conversationId: "conv-123",
+      kind: "composite",
+      status: "queued",
+    } as any);
+    actionRuntimeMocks.transitionActionRunEventActivity.mockResolvedValue({} as any);
+    actionRuntimeMocks.transitionActionRun.mockResolvedValue({} as any);
+    actionRuntimeMocks.requestActionRunCancellation.mockResolvedValue({} as any);
+    vi.mocked(createWorkspaceTransport).mockResolvedValue({
+      projectId: "proj-123",
+      userId: "user_123",
+      workspaceId: "ws-123",
+    } as any);
+
+    // Real credit formula so settle amounts are meaningfully nonzero.
+    vi.mocked(estimateCredits).mockImplementation(
+      (input: number, output: number, per1k: number, perRun: number) =>
+        perRun + Math.ceil((input + output) / 1000) * per1k,
+    );
+    vi.mocked(reserveCredits).mockResolvedValue({
+      ok: true,
+      runId: "billing-run-builtin",
+      reservationId: "res-builtin",
+      reservedCredits: 12,
+    } as any);
+    vi.mocked(settleRun).mockResolvedValue({ ok: true } as any);
+  });
+
+  const successfulLaunch = () => {
+    vi.mocked(runLaunchFlow).mockImplementation(async (opts: any) => {
+      opts.progress.emit({ type: "finished", totalSteps: 1, totalDurationMs: 500 });
+      return {
+        success: true,
+        status: "preview_ready",
+        previewUrl: "https://preview.example.com",
+        productionUrl: null,
+        finalText: "I built your landing page and started a preview.",
+        agentLoopResult: {
+          stepsUsed: 1,
+          toolCalls: [
+            { toolId: "files.write", toolCallId: "tc1", inputs: { path: "index.html" }, success: true, mutating: true, summary: "saved", paths: ["index.html"] },
+          ],
+          workspaceChange: { status: "changed", files: ["index.html"], checkpointSha: "abc1234", rollbackAvailable: true },
+          cancelled: false,
+          pendingApproval: null,
+        } as any,
+        cancelled: false,
+        totalDurationMs: 500,
+      } as any;
+    });
+  };
+
+  it("reserves under builtin:litt and settles a positive amount on completion", async () => {
+    successfulLaunch();
+
+    const res = await POST(makeRequest({}), routeParams);
+    expect(res.status).toBe(200);
+    await readSSE(res);
+
+    expect(reserveCredits).toHaveBeenCalledTimes(1);
+    const reserveCtx = vi.mocked(reserveCredits).mock.calls[0][0] as any;
+    expect(reserveCtx.clerkId).toBe("clerk_123");
+    expect(reserveCtx.agentInstanceId).toBe("builtin:litt");
+    expect(reserveCtx.agentId).toBeNull();
+    expect(reserveCtx.agentVersionId).toBeNull();
+
+    expect(settleRun).toHaveBeenCalledTimes(1);
+    const [runId, result, reserved, reservationId] = vi.mocked(settleRun).mock.calls[0] as any[];
+    expect(runId).toBe("billing-run-builtin");
+    expect(result.status).toBe("completed");
+    expect(result.actualCredits).toBeGreaterThan(0);
+    expect(reserved).toBe(12);
+    expect(reservationId).toBe("res-builtin");
+  });
+
+  it("returns 402 before any model work when a built-in run cannot reserve", async () => {
+    vi.mocked(reserveCredits).mockResolvedValue({
+      ok: false,
+      status: 402,
+      error: "Insufficient LiTTBits balance",
+    } as any);
+
+    const res = await POST(makeRequest({}), routeParams);
+    expect(res.status).toBe(402);
+    expect(runLaunchFlow).not.toHaveBeenCalled();
+    expect(settleRun).not.toHaveBeenCalled();
+  });
+
+  it("still reserves under the marketplace instance id when one is selected", async () => {
+    successfulLaunch();
+    vi.mocked(parseAgentSelection).mockReturnValue({ kind: "instance", id: "inst-1" } as any);
+    vi.mocked(resolveRuntimeAgent).mockResolvedValue({
+      ok: true,
+      agent: {
+        agentInstanceId: "inst-1",
+        agentId: "tpl-uuid-1",
+        templateSlug: "researcher",
+        agentVersionId: "ver-1",
+        model: "test-model",
+        memoryNamespace: "ns-1",
+      },
+    } as any);
+
+    const res = await POST(makeRequest({ agentInstanceId: "inst-1" }), routeParams);
+    expect(res.status).toBe(200);
+    await readSSE(res);
+
+    const reserveCtx = vi.mocked(reserveCredits).mock.calls[0][0] as any;
+    expect(reserveCtx.agentInstanceId).toBe("inst-1");
+    expect(reserveCtx.agentId).toBe("tpl-uuid-1");
   });
 });

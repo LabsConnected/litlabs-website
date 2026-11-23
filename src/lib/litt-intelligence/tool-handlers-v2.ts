@@ -83,13 +83,6 @@ export const handleFilesRead: ToolHandler = async (inputs, transport) => {
 // rejected with an actionable error so the model retries with
 // files.read + apply_patch (targeted change, existing markup preserved).
 
-/** True when the small-model lane is active — mirrors isLocalSmallLane()
- *  in agent-loop-v2 (kept inline to avoid an import cycle). */
-function localSmallLaneActive(): boolean {
-  if (process.env.LITT_LOCAL_SMALL === "1") return true;
-  return /coder|fast|:(2|4|8)k$/i.test(process.env.OLLAMA_MODEL ?? "");
-}
-
 /**
  * External resource references in a document head — stylesheet links and
  * src'd scripts (framework CDNs, font loads). These are the markers a
@@ -156,10 +149,21 @@ export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
   const badTailwind = tailwindViolation(content, path);
   if (badTailwind) return { success: false, error: badTailwind };
 
-  // Destructive-rewrite guard (small lane): a full rewrite that strips an
-  // existing file's structure/styling is rejected BEFORE it lands, with an
+  // Destructive-rewrite guard: a full rewrite that strips an existing
+  // file's structure/styling is rejected BEFORE it lands, with an
   // actionable error so the model repairs via files.read + apply_patch.
-  if (localSmallLaneActive()) {
+  //
+  // ACC-01 F2: this guard — and the full-overwrite gate below — used to
+  // run only on the local small lane (localSmallLaneActive()). The
+  // acceptance failure happened on the CLOUD lane: asked for a one-line
+  // edit, the model regenerated the whole page from scratch (new generic
+  // template; the site's name, menu, and hours gone) and the write
+  // landed unchecked. Whole-page regeneration in answer to an edit is
+  // not a small-model-only failure mode, so the guards now protect
+  // every lane. Legitimate full rebuilds remain available: the model
+  // re-emits with allowOverwrite: true when the user explicitly asked
+  // for the whole page to be rebuilt.
+  {
     try {
       const prev = await transport.readFile(path);
       // The LITT-WELCOME-SCREEN scaffold is styled boilerplate that exists
@@ -188,7 +192,7 @@ export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
             return { success: false, error: violation };
           }
         } else {
-          // Full-overwrite gate (small lane): a rewrite that KEEPS the
+          // Full-overwrite gate: a rewrite that KEEPS the
           // structure passes destructiveRewriteViolation yet can still
           // silently drop the requested edit (confirmed live: 11KB
           // rewrite, edit missing). Structural guards can't detect a

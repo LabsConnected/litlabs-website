@@ -454,7 +454,29 @@ export function destructiveRewriteViolation(prev: string, next: string): string 
 }
 
 /**
- * Full-overwrite gate for the local small lane. A 1.5B-class model answers
+ * Fraction of the existing file's substantive lines (trimmed, ≥3 chars,
+ * deduped) that survive verbatim in the proposed content — the
+ * measurable difference between an edit-style rewrite (derived from the
+ * current file) and a blind regeneration (new copy throughout).
+ */
+export function contentLineRetention(prev: string, next: string): number {
+  const lines = new Set(
+    prev
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length >= 3),
+  );
+  if (lines.size === 0) return 1;
+  let kept = 0;
+  for (const line of lines) {
+    if (next.includes(line)) kept += 1;
+  }
+  return kept / lines.size;
+}
+
+/**
+ * Full-overwrite gate (all lanes since ACC-01 F2; originally the local
+ * small lane, where it was first proven). A 1.5B-class model answers
  * "change the footer text" by regenerating the whole document — and drops
  * the requested text (confirmed live: an 11KB rewrite landed with the edit
  * silently missing). Structural styling guards can't detect a missing
@@ -463,7 +485,10 @@ export function destructiveRewriteViolation(prev: string, next: string): string 
  * retry to apply_patch. Applies to files.write AND site.compose — a
  * recompose over an existing page is the same destructive overwrite.
  * Returns null for new files, non-HTML targets, the replaceable
- * LITT-WELCOME-SCREEN scaffold, and declared overwrites.
+ * LITT-WELCOME-SCREEN scaffold, declared overwrites, empty existing
+ * files, and edit-style rewrites that preserve most of the existing
+ * file's substantive lines (contentLineRetention >= 0.5 — the
+ * patch-recovery fallback's shape, never a blind regeneration's).
  */
 export async function existingPageOverwriteError(
   inputs: { path?: unknown; allowOverwrite?: unknown },
@@ -481,6 +506,15 @@ export async function existingPageOverwriteError(
     return null; // Unreadable target = a new file — nothing to preserve.
   }
   if (prev.includes("LITT-WELCOME-SCREEN")) return null;
+  // An empty (or whitespace-only) existing file holds nothing to
+  // preserve — the first real write into it is a creation, not an
+  // overwrite. (Matters now that the gate runs on every lane: a
+  // user-created empty index.html must not demand allowOverwrite.)
+  if (!prev.trim()) return null;
+  // A tag-less existing file is not a page document — there is no page
+  // structure or styled content for an overwrite to destroy, so the
+  // gate does not engage (placeholder text files, stub contents).
+  if (!/<[a-z][\s\S]*?>/i.test(prev)) return null;
   // A provably destructive rewrite (structure/styling stripped) is owned by
   // the merge-or-refuse path in handleFilesWrite — refusing here would
   // preempt a repairable merge that is supposed to land.
@@ -488,6 +522,17 @@ export async function existingPageOverwriteError(
     typeof (inputs as { content?: unknown }).content === "string" &&
     destructiveRewriteViolation(prev, (inputs as { content: string }).content)
   ) {
+    return null;
+  }
+  // An edit-style rewrite is not a blind regeneration: when the new
+  // content preserves most of the existing file's substantive lines,
+  // the write was derived from the current file (the patch-recovery
+  // fallback writes exactly this shape — the full current content with
+  // the edit applied — and a rewrite of identical content is a no-op).
+  // The ACC-01 failure this gate stops shares almost nothing with the
+  // page it replaced: new brand, new copy, every real line gone.
+  const nextContent = (inputs as { content?: unknown }).content;
+  if (typeof nextContent === "string" && contentLineRetention(prev, nextContent) >= 0.5) {
     return null;
   }
   return (
@@ -511,9 +556,9 @@ export async function existingPageOverwriteError(
  * apply_patch-only guard never saw it. The approval gate freezes inputs,
  * so a placeholder write can only persist the token verbatim.
  *
- * The local small lane's full-overwrite gate lives in
- * existingPageOverwriteError — the loop applies it to files.write and
- * site.compose separately (it needs the workspace transport).
+ * The full-overwrite gate lives in existingPageOverwriteError — the
+ * loop applies it to files.write and site.compose separately (it needs
+ * the workspace transport).
  */
 export function validateFilesWriteInputs(inputs: FilesWriteInputs): string | null {
   const path = typeof inputs.path === "string" ? inputs.path : null;

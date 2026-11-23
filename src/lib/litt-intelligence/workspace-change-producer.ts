@@ -315,3 +315,62 @@ export async function workspaceChangeFromVolumeListing(
     evidenceSource: "volume-listing",
   };
 }
+
+/**
+ * ACC-01 F1 — direct-read evidence fallback, the last resort after the
+ * git probe and the volume listing both fail to answer.
+ *
+ * The acceptance's first build verifiably wrote a correct index.html,
+ * yet the run settled with workspaceChange "unknown" and was reported
+ * FAILED ("could not verify whether files changed"): the static
+ * workspace could produce no checkpoint diff, and the listing fallback
+ * could not confirm the file either. But the file itself was readable
+ * the whole time — the Files panel showed it. When every structural
+ * probe fails, read the paths the run's successful mutations declared
+ * directly: a declared path that reads back is real, persisted work.
+ * Same epistemic standard as the volume-listing fallback (the claim
+ * comes from the run's own successful mutations; presence corroborates
+ * it), through the one channel that demonstrably reaches the volume.
+ * Only upgrades an "unknown" primary; never manufactures a change for
+ * a path that does not read back.
+ */
+export interface DirectReadFallback {
+  /** Workspace-relative paths the run's successful mutations declared. */
+  candidatePaths: string[];
+  /** Read one workspace file (the Files-panel read path). */
+  readFile: (path: string) => Promise<{ content: string }>;
+}
+
+export async function workspaceChangeFromDirectReads(
+  primary: WorkspaceChangeEvidence,
+  fallback: DirectReadFallback,
+): Promise<WorkspaceChangeEvidence> {
+  if (primary.status !== "unknown") return primary;
+
+  const candidates = [
+    ...new Set(
+      fallback.candidatePaths
+        .map((p) => p.replace(/\\/g, "/").replace(/^\/+/, ""))
+        .filter((p) => p.length > 0),
+    ),
+  ];
+  if (candidates.length === 0) return primary;
+
+  const verified: string[] = [];
+  for (const path of candidates) {
+    try {
+      const { content } = await fallback.readFile(path);
+      if (typeof content === "string") verified.push(path);
+    } catch {
+      // Not readable — not verified. Other candidates may still answer.
+    }
+  }
+  if (verified.length === 0) return primary;
+
+  return {
+    status: "changed",
+    files: verified.sort(),
+    rollbackAvailable: false,
+    evidenceSource: "direct-read",
+  };
+}

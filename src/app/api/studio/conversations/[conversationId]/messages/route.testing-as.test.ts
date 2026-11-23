@@ -85,7 +85,12 @@ vi.mock("@/lib/agent-runtime", () => ({
 }));
 
 vi.mock("@/lib/agent-billing", () => ({
-  reserveCredits: vi.fn(),
+  // ACC-01 F6: the route now reserves for built-in agents too, so the
+  // default mock must resolve a successful reservation — tests that
+  // exercise billing set their own resolved values.
+  reserveCredits: vi.fn(() =>
+    Promise.resolve({ ok: true, runId: "billing-run-1", reservationId: "res-1", reservedCredits: 0 }),
+  ),
   settleRun: vi.fn(() => Promise.resolve({ ok: true })),
   estimateCredits: vi.fn(() => 0),
 }));

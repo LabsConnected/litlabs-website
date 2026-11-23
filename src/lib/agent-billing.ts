@@ -19,7 +19,7 @@
  * if it returns { ok: false, status: 402 }.
  */
 
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabaseAdmin, getSupabaseAdmin } from "@/lib/supabase";
 import { isBillingExempt, type SimulatedPlan } from "@/lib/owner";
 import { emitUsageEvent } from "@/lib/metering";
 import { calculateLlmCost } from "@/lib/llm-cost-engine";
@@ -707,6 +707,149 @@ export function estimateCredits(
 ): number {
   const tokenCost = Math.ceil((inputTokens + outputTokens) / 1000) * per1kTokens;
   return perRun + tokenCost;
+}
+
+// ── Approval-resume billing (ACC-01 F6) ─────────────────────────────
+//
+// A run that pauses for approval settles its original reservation as
+// released at pause time (the messages route maps awaiting_approval to a
+// non-completed settle). The approvals route then resumes the work in a
+// NEW request — historically with no billing operation at all, so the
+// post-approval segment (in ACC-01: the approved edit and the approved
+// deploy) completed verified work and charged nothing. These helpers let
+// the resume re-reserve under the SAME billing identity the original run
+// used and settle at the resumed run's true terminal state.
+//
+// Engagement rule: resume billing engages only when the conversation
+// already has an agent-billing run — proof the original turn billed.
+// Conversations whose original turn never billed (pre-fix history) keep
+// the legacy no-op behavior instead of inventing a charge identity.
+
+export interface ResumeBillingHandle {
+  runId: string;
+  reservationId: string | null;
+  reservedCredits: number;
+  inputTokens: number;
+}
+
+export type ReserveResumeResult =
+  | { engaged: false }
+  | { engaged: true; ok: true; handle: ResumeBillingHandle }
+  | { engaged: true; ok: false; status: number; error: string };
+
+export async function reserveResumeCredits(params: {
+  clerkId: string;
+  conversationId: string;
+  pausedRunId: string;
+  /** Estimated input tokens for the resumed segment (system prompt + paused history). */
+  estimatedInputTokens: number;
+}): Promise<ReserveResumeResult> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return { engaged: false };
+
+  try {
+    const { data: user } = await admin
+      .from("users")
+      .select("id")
+      .eq("clerk_id", params.clerkId)
+      .maybeSingle();
+    if (!user) return { engaged: false };
+
+    // The original run's billing identity: agent_name carries the instance
+    // id (`builtin:<slug>` for built-in Studio agents, the marketplace
+    // instance id otherwise); input carries agent/model/provider.
+    const { data: priorRuns } = await admin
+      .from("agent_runs")
+      .select("agent_name, input")
+      .eq("user_id", user.id)
+      .filter("input->>conversation_id", "eq", params.conversationId)
+      .order("started_at", { ascending: false })
+      .limit(1);
+    const prior = (priorRuns ?? [])[0] as
+      | { agent_name?: unknown; input?: Record<string, unknown> | null }
+      | undefined;
+    if (!prior || typeof prior.agent_name !== "string" || !prior.agent_name) {
+      return { engaged: false };
+    }
+    const priorInput = (prior.input ?? {}) as Record<string, unknown>;
+
+    const estimatedTokens = Math.max(0, Math.floor(params.estimatedInputTokens)) + 2048;
+    const estimatedCost = estimateCredits(estimatedTokens, 0, 1, 1);
+    const reserveResult = await reserveCredits(
+      {
+        clerkId: params.clerkId,
+        agentInstanceId: prior.agent_name,
+        agentId: typeof priorInput.agent_id === "string" ? priorInput.agent_id : null,
+        agentVersionId:
+          typeof priorInput.agent_version_id === "string" ? priorInput.agent_version_id : null,
+        conversationId: params.conversationId,
+        idempotencyKey: `approval-resume:${params.pausedRunId}`,
+        model: typeof priorInput.model === "string" ? priorInput.model : undefined,
+        provider: typeof priorInput.provider === "string" ? priorInput.provider : undefined,
+      },
+      estimatedCost,
+    );
+    if (!reserveResult.ok) {
+      return {
+        engaged: true,
+        ok: false,
+        status: reserveResult.status ?? 402,
+        error: reserveResult.error ?? "Insufficient LiTTBits balance",
+      };
+    }
+    return {
+      engaged: true,
+      ok: true,
+      handle: {
+        runId: reserveResult.runId as string,
+        reservationId: reserveResult.reservationId,
+        reservedCredits: reserveResult.reservedCredits,
+        inputTokens: Math.max(0, Math.floor(params.estimatedInputTokens)),
+      },
+    };
+  } catch {
+    // Billing identity lookup must never break an approval resume on its
+    // own — degrade to the legacy uncharged resume rather than strand a
+    // user-approved run. (A reserve FAILURE after a successful lookup is
+    // NOT degraded: it returns ok:false above and the route fails the
+    // resume honestly, because charging was demonstrably engaged.)
+    return { engaged: false };
+  }
+}
+
+/**
+ * Settle a resume reservation at the resumed run's terminal state.
+ * Completed work charges the same size-based estimate the messages route
+ * uses; failed/cancelled segments release the hold in full. Best-effort
+ * by design: settleRun records a reconciliation row on any unconfirmed
+ * outcome, and a billing hiccup must not corrupt the resume's canonical
+ * outcome write.
+ */
+export async function settleResumeCredits(
+  handle: ResumeBillingHandle,
+  result: {
+    outputTokens: number;
+    status: "completed" | "failed" | "cancelled";
+    error?: string;
+  },
+): Promise<void> {
+  const outputTokens = Math.max(0, Math.floor(result.outputTokens));
+  const actualCredits =
+    result.status === "completed"
+      ? estimateCredits(handle.inputTokens, outputTokens, 1, 1)
+      : 0;
+  await settleRun(
+    handle.runId,
+    {
+      inputTokens: handle.inputTokens,
+      outputTokens,
+      actualCredits,
+      status: result.status,
+      error: result.error,
+    },
+    handle.reservedCredits,
+    handle.reservationId,
+  ).catch(() => undefined);
 }
 
 // ── Legacy compatibility ──────────────────────────────────────────

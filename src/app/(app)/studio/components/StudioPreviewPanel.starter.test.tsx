@@ -105,6 +105,65 @@ describe("StudioPreviewPanel starter-template honesty", () => {
     expect(screen.queryByTestId("preview-starter-notice")).toBeNull();
   });
 
+  it("clears the starter label when a build lands after the panel mounted (ACC-01 F3)", async () => {
+    // ACC-01 sequence: the panel mounted on a brand-new project (truth:
+    // starter), the build then landed real content, and the header kept
+    // claiming "nothing has been built" over the built site — the
+    // workspace truth was fetched once at mount and never refreshed.
+    // Runtime state transitions must refetch it.
+    let workspaceStateCalls = 0;
+    let previewCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/workspace-state")) {
+        workspaceStateCalls += 1;
+        return workspaceStateCalls <= 2
+          ? jsonResponse({ scaffolded: true, touched: false, starterContent: true })
+          : jsonResponse({ scaffolded: false, touched: true, starterContent: false });
+      }
+      // Only the preview STATUS endpoint is sequenced — other fetches
+      // (publish controls, the frame probe) get the ready payload.
+      if (url.includes("/studio-projects/") && url.includes("/preview")) {
+        previewCalls += 1;
+        if (previewCalls === 1) {
+          return jsonResponse({ runtimeStatus: "starting", previewUrl: null, runtimeError: null, framework: "static" });
+        }
+      }
+      return jsonResponse(STATIC_READY);
+    });
+    renderPanel();
+
+    // The start poll (3s) drives starting → ready; the ready transition
+    // refetches the workspace truth, which now reports real content.
+    await waitFor(
+      () => {
+        expect(screen.getAllByText("Static View ready").length).toBeGreaterThan(0);
+      },
+      { timeout: 8000 },
+    );
+    expect(screen.queryByTestId("preview-starter-notice")).toBeNull();
+    expect(workspaceStateCalls).toBeGreaterThanOrEqual(3);
+  }, 12000);
+
+  it("opens the static preview URL in a new tab, not the dead runtime URL (ACC-01 F3)", async () => {
+    mockFetch({ scaffolded: false, touched: true, starterContent: false }, STATIC_READY);
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    renderPanel();
+
+    const button = await screen.findByTestId("preview-open-external");
+    fireEvent.click(button);
+
+    // The iframe displays /api/preview/<id>/index.html for static
+    // projects; the button previously opened the raw runtime
+    // previewUrl (a dev server that does not exist for static sites),
+    // so the new tab showed nothing.
+    expect(openSpy).toHaveBeenCalledWith(
+      "/api/preview/project-1/index.html",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
+
   it("static previews report selection as unavailable immediately — no doomed bridge handshake", async () => {
     mockFetch({ scaffolded: false, touched: true, starterContent: false }, STATIC_READY);
     renderPanel();

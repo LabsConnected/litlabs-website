@@ -119,7 +119,7 @@ export interface WorkspaceChangeEvidence {
    * enumerating the workspace volume directly (the Files panel's read
    * path) — real files, but no diff and no rollback.
    */
-  evidenceSource?: "git-diff" | "volume-listing";
+  evidenceSource?: "git-diff" | "volume-listing" | "direct-read";
 }
 
 /**

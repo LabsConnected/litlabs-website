@@ -769,6 +769,26 @@ describe("regenerate() Retry honesty", () => {
     expect(regenerateBodies).toHaveLength(0);
   });
 
+  it("re-runs when the pressed id is missing from the store entirely (ACC-01 F1 dead Retry)", async () => {
+    canonicalMessages = [
+      makeMsg({ id: "u1", role: "user", content: PROMPT, clientRequestId: "req-1" }),
+      makeMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: "u1", clientRequestId: "req-1" }),
+    ];
+    // ACC-01 shape: the transcript rendered the failed turn under an id
+    // the store's list no longer holds (identity mixing after an
+    // approval resume). The old gate returned before canonical
+    // resolution — Retry did nothing at all: no run, no error.
+    const result = await renderAndSeed([
+      makeChatMsg({ id: "u1", role: "user", content: PROMPT, status: "completed" }),
+    ]);
+
+    await act(async () => { await result.current.regenerate("transcript-ghost-id"); });
+
+    expect(postMessageBodies).toHaveLength(1);
+    expect(postMessageBodies[0].message).toBe(PROMPT);
+    expect(regenerateBodies).toHaveLength(0);
+  });
+
   it("says honestly that it couldn't re-run when the linkage exists nowhere, and never calls the chat-only regenerate", async () => {
     canonicalMessages = [
       makeMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: null }),
