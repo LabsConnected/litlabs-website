@@ -218,3 +218,39 @@ describe("security fault-injection regressions", () => {
     expect(state.simulate).not.toHaveBeenCalled();
   });
 });
+
+describe("agent dispatch contract (W4 typed outcome)", () => {
+  const dispatchPayload = { mode: "agent", from: "litt", to: "litt", message: "Review probe" };
+
+  it.each([["chat", chat], ["unified", unified]] as const)("records an entitled non-simulated %s dispatch exactly once and answers with the receipt", async (_name, route) => {
+    state.caller = "bob";
+    state.entitlement.mockResolvedValue({ allowed: true, reason: undefined });
+    const response = await route(request("/api/chat", dispatchPayload));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.sent).toEqual({ id: "message" });
+    expect(body.from).toEqual({ id: "litt", name: "LiTT" });
+    expect(body.to).toEqual({ id: "litt", name: "LiTT" });
+    expect(body.received).toBeUndefined();
+    expect(state.dispatch).toHaveBeenCalledTimes(1);
+    expect(state.dispatch.mock.calls[0].slice(0, 3)).toEqual(["litt", "litt", "Review probe"]);
+    // Dispatch is the free path: no spend, no charge, no model call.
+    expect(state.spend).not.toHaveBeenCalled();
+    expect(state.charge).not.toHaveBeenCalled();
+    expect(state.metered).not.toHaveBeenCalled();
+  });
+
+  it.each([["chat", chat], ["unified", unified]] as const)("returns a two-message conversation for an entitled simulated %s reply", async (_name, route) => {
+    state.caller = "bob";
+    state.entitlement.mockResolvedValue({ allowed: true, reason: undefined });
+    const response = await route(request("/api/chat", agentPayload));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.conversation).toHaveLength(2);
+    expect(body.sent).toEqual({ id: "message" });
+    expect(body.received).toEqual({ id: "message" });
+    expect(state.dispatch).toHaveBeenCalledTimes(2);
+    // The recorded reply carries the model text, not the outcome object.
+    expect(state.dispatch.mock.calls[1].slice(0, 4)).toEqual(["litt", "litt", "authorized reply", "chat"]);
+  });
+});

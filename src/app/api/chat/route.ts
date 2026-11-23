@@ -117,7 +117,7 @@ async function handler(req: NextRequest) {
 
     // If simulating, generate a response
     if (body.simulateResponse) {
-      const reply = orchestrator.sendMessage(to, from, response, "chat");
+      const reply = orchestrator.sendMessage(to, from, response.kind === "reply" ? response.text : "", "chat");
 
       return NextResponse.json({
         sent: agentMessage,

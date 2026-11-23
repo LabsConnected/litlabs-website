@@ -130,7 +130,7 @@ async function handleAgentChat(body: UnifiedChatRequest, clerkId: string) {
   const agentMessage = orchestrator.sendMessage(from, to, message, messageType, metadata);
 
   if (simulateResponse) {
-    const reply = orchestrator.sendMessage(to, from, response, "chat");
+    const reply = orchestrator.sendMessage(to, from, response.kind === "reply" ? response.text : "", "chat");
 
     return NextResponse.json({
       sent: agentMessage,
