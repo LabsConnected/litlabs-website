@@ -36,6 +36,30 @@ describe("buildProxyBootstrapScript", () => {
     expect(script).toContain('"litt-browser"');
   });
 
+  it("never navigates the frame itself: clicks and GET submits only report 'navigate' to the panel", () => {
+    // Round 3: the proxied document runs in an opaque origin (CSP
+    // sandbox without allow-same-origin), so a self-navigation goes
+    // out as a cross-site request, the SameSite=Lax session cookies
+    // are withheld, and the auth-gated proxy's answer is a page the
+    // frame must refuse. The bootstrap must therefore contain no
+    // self-navigation assignment at all — the panel drives the load
+    // from the 'navigate' message, parent-side.
+    const script = buildProxyBootstrapScript(
+      "https://example.com/final",
+      "https://app.litlabs.net",
+    );
+    expect(script).not.toContain("location.href");
+    expect(script).not.toContain("location.assign");
+    expect(script).not.toContain("location.replace");
+    // Link clicks and GET form submits still report their target.
+    expect(script).toContain("post('navigate', abs)");
+    expect(script).toContain("post('navigate', dest)");
+    // And the escape hatches are unchanged: _blank links and POST
+    // forms are reported as external, never navigated in-frame.
+    expect(script).toContain("post('external', abs)");
+    expect(script).toContain("post('external', action)");
+  });
+
   it("uses an absolute proxy URL when the app origin is supplied", () => {
     // The injected <base href="<target URL>"> would resolve a
     // root-relative proxy URL against the target origin — the

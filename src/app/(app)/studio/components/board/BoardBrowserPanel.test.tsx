@@ -237,6 +237,43 @@ describe("BoardBrowserPanel tabs and in-page navigation sync", () => {
     expect(screen.getByTestId("board-browser-input")).toHaveValue("https://example.com");
   });
 
+  it("drives the frame load itself when the proxied document posts an in-page navigation", () => {
+    wrap(<BoardBrowserPanel />);
+    navigateTo("example.com");
+    fireEvent.load(screen.getByTestId("board-browser-frame"));
+    const generationBefore = useStudioBrowserStore.getState().tabs[0].frameGeneration;
+
+    // Round 3: the bootstrap no longer navigates the frame (a
+    // self-navigation from the sandboxed opaque origin loses the
+    // session cookies and the auth-gated proxy's answer is
+    // blocked). The panel must drive the load from the message,
+    // exactly like an address-bar navigation: frameSrc moves to
+    // the destination's proxy URL, the generation bumps, and
+    // history gains exactly one entry.
+    postFromFrame({ source: "litt-browser", type: "navigate", url: "https://example.com/about" });
+
+    expect(screen.getByTestId("board-browser-frame")).toHaveAttribute(
+      "src",
+      "/api/studio/browser/proxy?url=https%3A%2F%2Fexample.com%2Fabout",
+    );
+    const tab = useStudioBrowserStore.getState().tabs[0];
+    expect(tab.frameSrc).toBe(
+      "/api/studio/browser/proxy?url=https%3A%2F%2Fexample.com%2Fabout",
+    );
+    expect(tab.frameGeneration).toBe(generationBefore + 1);
+    expect(tab.history).toEqual(["https://example.com", "https://example.com/about"]);
+    expect(tab.historyIndex).toBe(1);
+    expect(tab.status).toBe("loading");
+
+    // The driven load lands: the new document's report settles the
+    // tab without touching history again.
+    postFromFrame({ source: "litt-browser", type: "landed", url: "https://example.com/about" });
+    const settled = useStudioBrowserStore.getState().tabs[0];
+    expect(settled.status).toBe("loaded");
+    expect(settled.history).toEqual(["https://example.com", "https://example.com/about"]);
+    expect(settled.historyIndex).toBe(1);
+  });
+
   it("corrects the address bar when the frame reports a redirect landing", () => {
     wrap(<BoardBrowserPanel />);
     navigateTo("example.com");
@@ -305,15 +342,16 @@ describe("BoardBrowserPanel tab state across remounts (layout flips)", () => {
     expect(screen.getByTestId("board-browser-input")).toHaveValue("https://example.com");
   });
 
-  it("restores the page reached by an in-page link — not the stale pre-click frame src — when the panel remounts", () => {
+  it("restores the page reached by an in-page link — not the pre-click page — when the panel remounts", () => {
     const first = wrap(<BoardBrowserPanel />);
     navigateTo("example.com");
     fireEvent.load(screen.getByTestId("board-browser-frame"));
 
-    // Follow a link inside the page. The frame navigates itself and
-    // posts "navigate": history and the address bar advance, but the
-    // stored frameSrc still names the pre-click page — and the frame
-    // must NOT be force-reloaded for it (its src stays put).
+    // Follow a link inside the page. The proxied document posts
+    // "navigate" and the panel drives the load itself (round 3 —
+    // the document cannot navigate itself without losing the
+    // session): history, the address bar, and the frame src all
+    // advance to the post-click page together.
     postFromFrame({
       source: "litt-browser",
       type: "navigate",
@@ -324,12 +362,12 @@ describe("BoardBrowserPanel tab state across remounts (layout flips)", () => {
     );
     expect(screen.getByTestId("board-browser-frame")).toHaveAttribute(
       "src",
-      "/api/studio/browser/proxy?url=https%3A%2F%2Fexample.com",
+      "/api/studio/browser/proxy?url=https%3A%2F%2Fexample.com%2Fabout",
     );
 
     // Layout flip: unmount + remount. The restored frame must load
     // the CURRENT history entry (the post-click page), not the
-    // stale frameSrc.
+    // pre-click page.
     first.unmount();
     wrap(<BoardBrowserPanel />);
     expect(screen.getByTestId("board-browser-input")).toHaveValue(
@@ -373,8 +411,8 @@ describe("BoardBrowserPanel tab state across remounts (layout flips)", () => {
     navigateTo("example.com");
     fireEvent.load(screen.getByTestId("board-browser-frame"));
 
-    // Follow an in-page link: history advances to the new page while
-    // the stored frameSrc keeps naming the pre-click page.
+    // Follow an in-page link: the panel drives the load, so history
+    // and the stored frameSrc advance to the new page together.
     postFromFrame({
       source: "litt-browser",
       type: "navigate",
@@ -406,11 +444,10 @@ describe("BoardBrowserPanel tab state across remounts (layout flips)", () => {
     expect(screen.queryByTestId("board-browser-frame")).toBeNull();
 
     // Back targets the pre-click page. Its proxy URL differs from the
-    // restored frame's snapshot src, so no reloadKey bump happens —
-    // and the stored frameSrc already named this page, so it does not
-    // change either. Only frameGeneration moves. The panel must
-    // still treat it as a fresh load: failure screen gone, frame
-    // back, showing the previous page.
+    // restored frame's snapshot src, so no reloadKey bump happens;
+    // frameSrc and frameGeneration move instead, and the load guard
+    // keys on both — the panel must treat it as a fresh load:
+    // failure screen gone, frame back, showing the previous page.
     fireEvent.click(screen.getByTestId("board-browser-back"));
     expect(screen.getByTestId("board-browser-input")).toHaveValue(
       "https://example.com",

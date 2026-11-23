@@ -16,12 +16,13 @@
  * panel restores the frame from the active tab's CURRENT history
  * entry, matching the panel's documented tab model (history and
  * address are kept; live page state is not). Restoring from the
- * stored frameSrc would not be enough: frameSrc names only the
- * last panel-driven load, while in-page navigation advances
- * history without touching it — a remounted frame fed from
- * frameSrc would reload an older page, whose `landed` report
- * would then replace the newest history entry with that old URL.
- * The tab's frameGeneration (below) is how the panel tells a
+ * stored frameSrc alone would not be enough: a `landed` redirect
+ * correction can replace the current history entry with the URL
+ * the frame actually reached, leaving frameSrc naming the
+ * pre-redirect page — a remounted frame fed from frameSrc would
+ * reload that older page, whose `landed` report would then
+ * replace the newest history entry with that old URL again. The
+ * tab's frameGeneration (below) is how the panel tells a
  * frameSrc it must honor from a stale one it must restore over.
  *
  * Only one real panel instance is ever mounted: the Board layout
@@ -41,22 +42,23 @@ export interface StudioBrowserTab {
   input: string;
   reloadKey: number;
   /**
-   * Proxy URL of the last PANEL-DRIVEN load (address bar, back,
-   * forward); null when the tab has no page yet. In-page navigation
-   * deliberately does NOT update this — the frame navigates itself,
-   * and rewriting the src would force a second load — so after an
-   * in-page navigation this can name an older page than the current
-   * history entry until the next panel-driven navigation.
+   * Proxy URL of the last load the panel drove (address bar, back,
+   * forward — and in-page clicks / GET form submits, which the
+   * panel drives from the bootstrap's `navigate` message; the
+   * proxied document never navigates itself). Null when the tab
+   * has no page yet. This names the URL the panel asked for, so a
+   * `landed` redirect correction can leave it naming an older page
+   * than the current history entry until the next driven load.
    */
   frameSrc: string | null;
   /**
    * Bumped by every panel-driven navigation write (the ones that
-   * set frameSrc). In-page navigation never bumps it. The panel
-   * snapshots the generation when a frame instance mounts: while
-   * the generation is unchanged, the stored frameSrc may be stale
-   * relative to history and the frame restores from the current
-   * history entry instead; once the generation moves, frameSrc is
-   * authoritative again.
+   * set frameSrc), including the loads driven for in-page
+   * navigations. The panel snapshots the generation when a frame
+   * instance mounts: while the generation is unchanged, the stored
+   * frameSrc may be stale relative to history and the frame
+   * restores from the current history entry instead; once the
+   * generation moves, frameSrc is authoritative again.
    */
   frameGeneration: number;
   status: StudioBrowserEmbedStatus;
