@@ -33,6 +33,8 @@ describe("page-edit prompts — execution routing (ACC-01 F2)", () => {
       note: "page-is-wrong + put back",
     },
     { msg: "Fix the homepage: it lost the Harbor Lights name, the drinks, and the hours.", note: "fix + homepage (pre-existing)" },
+    { msg: "What happened? Restore the page to the previous version.", note: "question sentence + explicit restore command (Greptile round 2)" },
+    { msg: "What happened? The wrong page is showing — it should be Harbor Lights Coffee.", note: "question sentence + wrong-page correction (Greptile round 2)" },
   ];
 
   for (const { msg, note } of CASES) {

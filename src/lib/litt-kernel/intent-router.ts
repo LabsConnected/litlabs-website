@@ -316,6 +316,14 @@ const MODE_PATTERNS: ModePattern[] = [
       // above: "How do I restore the page?" asks for an explanation, it
       // is not a correction directive (Greptile, PR #1103).
       /^(?!\s*(how|what|why|when|where|which|who|explain|describe|tell\s+me|show\s+me)\b)[\s\S]*?\b(put back|restore|bring back|revert)\b[\s\S]{0,100}\b(name|hours|menu|drinks?|prices?|page|site|homepage|content|text|title|paragraph|line|heading)\b/i,
+      // …but a question SENTENCE followed by an explicit command is a
+      // command: "What happened? Restore the page to the previous
+      // version." The whole-message exclusion above rejects it, so a
+      // correction that opens a later sentence matches here (Greptile,
+      // PR #1103, second round). A teaching question keeps its verb
+      // mid-sentence, so it still cannot match.
+      /(?:[.!?]\s+)(put back|restore|bring back|revert)\b[\s\S]{0,100}\b(name|hours|menu|drinks?|prices?|page|site|homepage|content|text|title|paragraph|line|heading)\b/i,
+      /(?:[.!?]\s+)[\s\S]{0,60}?\bwrong\s+(page|site|website|homepage|web ?page|content|version|file)\b[\s\S]{0,120}\b(should be|should have|put back|fix|restore|instead)\b/i,
       // Placement commands use everyday verbs rather than edit-vocabulary —
       // "put this image on my homepage", "add that picture to the hero",
       // "insert the image into this page". Without this they fell into
