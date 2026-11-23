@@ -20,6 +20,7 @@ import type { AgentSlug, MessageStatus } from "@/lib/studio/types";
 import { parseAgentSelection } from "@/lib/agent-selection";
 import { resolveRuntimeAgent, type RuntimeAgent } from "@/lib/agent-runtime";
 import { reserveCredits, settleRun, estimateCredits } from "@/lib/agent-billing";
+import { slugToMode } from "@/lib/litt-intelligence/agent-identity";
 import { getCreditBalances } from "@/lib/wallet-ledger";
 import { runWithMeteringContext } from "@/lib/metering";
 import {
@@ -1039,6 +1040,10 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         messageId: assistantMessage.id,
         idempotencyKey: clientRequestId,
         model: runtimeAgent?.model,
+        // agent_runs.agent_mode is CHECK-constrained to LiTT agent modes —
+        // never a model name (F7: model strings violated the constraint and
+        // the run-row insert was rejected, surfacing as a billing failure).
+        agentMode: slugToMode(agentSlug),
         // Simulation-aware billing: agent-billing's isBillingExempt
         // check receives the resolved simulation, so under a simulated
         // tier (including Zero-LiTTBits) the reservation actually

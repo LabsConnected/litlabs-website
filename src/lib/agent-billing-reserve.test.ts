@@ -101,3 +101,28 @@ describe("reservation cleanup after a run-row insert fails", () => {
     expect(db.reconciliations).toMatchObject([{ reason: "run_insert_existing_reservation" }]);
   });
 });
+
+describe("agent_runs.agent_mode (F7 — CHECK constraint: standard|builder|research|spark)", () => {
+  beforeEach(() => {
+    db.release.mockReset();
+    db.reconciliations = [];
+    db.reserveReason = "reserved";
+    db.runError = { message: "agent_runs insert failed", code: "" };
+    db.insertedRun = null;
+  });
+
+  it("never writes the model name into agent_mode", async () => {
+    await reserveCredits({ ...context, model: "gemini-2.5-flash" }, 5);
+    expect(db.insertedRun?.agent_mode).toBe("standard");
+  });
+
+  it("writes the caller-supplied valid agentMode", async () => {
+    await reserveCredits({ ...context, agentMode: "spark" }, 5);
+    expect(db.insertedRun?.agent_mode).toBe("spark");
+  });
+
+  it("falls back to standard for an invalid agentMode", async () => {
+    await reserveCredits({ ...context, agentMode: "gemini-2.5-flash" }, 5);
+    expect(db.insertedRun?.agent_mode).toBe("standard");
+  });
+});

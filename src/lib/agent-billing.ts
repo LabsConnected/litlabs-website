@@ -23,6 +23,7 @@ import { supabaseAdmin, getSupabaseAdmin } from "@/lib/supabase";
 import { isBillingExempt, type SimulatedPlan } from "@/lib/owner";
 import { emitUsageEvent } from "@/lib/metering";
 import { calculateLlmCost } from "@/lib/llm-cost-engine";
+import { DEFAULT_AGENT_MODE, isValidAgentMode } from "@/lib/litt-intelligence/agent-identity";
 
 export interface AgentRunContext {
   clerkId: string;
@@ -34,6 +35,10 @@ export interface AgentRunContext {
   idempotencyKey: string;
   model?: string;
   provider?: string;
+  /** LiTT agent mode for agent_runs.agent_mode — must be a valid AgentMode
+   *  ('standard' | 'builder' | 'research' | 'spark'); anything else falls
+   *  back to DEFAULT_AGENT_MODE. Never pass a model name here. */
+  agentMode?: string;
   /** Optional owner simulation override for billing-exempt checks. */
   simulation?: SimulatedPlan | null;
 }
@@ -195,7 +200,7 @@ export async function reserveCredits(
         task: ctx.idempotencyKey,
         idempotency_key: ctx.idempotencyKey,
         status: "running",
-        agent_mode: ctx.model ?? "default",
+        agent_mode: isValidAgentMode(ctx.agentMode) ? ctx.agentMode : DEFAULT_AGENT_MODE,
         input: {
           agent_id: ctx.agentId,
           agent_version_id: ctx.agentVersionId,
@@ -314,7 +319,7 @@ export async function reserveCredits(
       task: ctx.idempotencyKey,
       idempotency_key: ctx.idempotencyKey,
       status: "running",
-      agent_mode: ctx.model ?? "default",
+      agent_mode: isValidAgentMode(ctx.agentMode) ? ctx.agentMode : DEFAULT_AGENT_MODE,
       input: {
         agent_id: ctx.agentId,
         agent_version_id: ctx.agentVersionId,
