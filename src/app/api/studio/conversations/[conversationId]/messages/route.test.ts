@@ -2698,6 +2698,10 @@ describe("POST /api/studio/conversations/[conversationId]/messages — built-in 
     expect(reserveCtx.agentInstanceId).toBe("builtin:litt");
     expect(reserveCtx.agentId).toBeNull();
     expect(reserveCtx.agentVersionId).toBeNull();
+    // F7: agent_runs.agent_mode is CHECK-constrained to LiTT agent modes —
+    // the reserve context must carry a valid mode, never the model name.
+    expect(reserveCtx.agentMode).toBe("standard");
+    expect(reserveCtx.model ?? "").not.toBe(reserveCtx.agentMode);
 
     expect(settleRun).toHaveBeenCalledTimes(1);
     const [runId, result, reserved, reservationId] = vi.mocked(settleRun).mock.calls[0] as any[];
