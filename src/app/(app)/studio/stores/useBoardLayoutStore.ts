@@ -536,6 +536,31 @@ export const useBoardLayoutStore = create<BoardLayoutStore>()(
 );
 
 /**
+ * Cross-window sync (live defect, Larry 2026-11-22): persist writes
+ * the WHOLE layout record on every change, and zustand/persist never
+ * listens for writes made by other windows. Two Studio windows on
+ * the same browser profile therefore diverge — each keeps the layout
+ * it loaded at open — and whichever window writes last wins,
+ * wholesale. Restoring a maximized panel in one window looked saved
+ * (it was), but an older window still holding the maximized snapshot
+ * later made an unrelated write of its own (the board's mount
+ * effects write the viewport without any user gesture) and silently
+ * overwrote the restore; the next reload showed the panel maximized
+ * again. When another window writes the board key, re-read it here,
+ * so every window's next write builds on the latest saved layout
+ * instead of resurrecting a stale one. The browser delivers the
+ * storage event to every window EXCEPT the one that wrote, so the
+ * writer never re-reads its own save.
+ */
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event.key === BOARD_LAYOUT_STORAGE_KEY) {
+      void useBoardLayoutStore.persist.rehydrate();
+    }
+  });
+}
+
+/**
  * Legacy per-user board toggle (B2 transition rule). The board-only
  * shell no longer reads it — the board is simply what Studio is — but
  * the persisted field and this hook stay for compatibility with any
