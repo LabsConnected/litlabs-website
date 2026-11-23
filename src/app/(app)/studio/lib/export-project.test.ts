@@ -15,8 +15,13 @@ import { downloadProjectExport } from "./export-project";
  * (revocation deferred), and the server's honest error otherwise.
  */
 
-const zipResponse = (init?: { filename?: string; fileCount?: string }) =>
-  new Response(new Blob(["PK\x03\x04 fake zip"], { type: "application/zip" }), {
+const zipResponse = (init?: { filename?: string; fileCount?: string }) => {
+  const zip = buildZip([
+    { name: "index.html", data: Buffer.from("<h1>ok</h1>") },
+    { name: "css/style.css", data: Buffer.from("body{}") },
+    { name: "js/app.js", data: Buffer.from("console.log(1)") },
+  ]);
+  return new Response(new Uint8Array(zip), {
     status: 200,
     headers: {
       "Content-Type": "application/zip",
@@ -24,6 +29,7 @@ const zipResponse = (init?: { filename?: string; fileCount?: string }) =>
       ...(init?.fileCount ? { "X-Export-File-Count": init.fileCount } : {}),
     },
   });
+};
 
 describe("downloadProjectExport (ACC-01 F5)", () => {
   let clickSpy: ReturnType<typeof vi.fn>;

@@ -141,7 +141,7 @@ describe("resumeAgentLoopV2 — approved mutation executes", () => {
     }));
     const result = await resumeAgentLoopV2(makePausedInput({
       toolId: "code.writeFile",
-      inputs: { path: "index.html", content: "<h1>Built</h1>" },
+      inputs: { path: "index.html", content: "<h1>Built</h1>", allowOverwrite: true },
       existingCheckpoint: { checkpointId: "cp-1", label: "Before approved write", gitSha: "a".repeat(40) },
       config: { systemPrompt: "Build the site", userId: "u-test", executionMode: "act", isStaticWorkspace: true,
         enableBuildFix: false, buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
