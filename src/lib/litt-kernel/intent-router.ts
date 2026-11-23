@@ -323,7 +323,13 @@ const MODE_PATTERNS: ModePattern[] = [
       // PR #1103, second round). A teaching question keeps its verb
       // mid-sentence, so it still cannot match.
       /(?:[.!?]\s+)(put back|restore|bring back|revert)\b[\s\S]{0,100}\b(name|hours|menu|drinks?|prices?|page|site|homepage|content|text|title|paragraph|line|heading)\b/i,
-      /(?:[.!?]\s+)[\s\S]{0,60}?\bwrong\s+(page|site|website|homepage|web ?page|content|version|file)\b[\s\S]{0,120}\b(should be|should have|put back|fix|restore|instead)\b/i,
+      // The matched sentence carries its own question guard: "Why did
+      // this happen? Why is the wrong page showing instead of my
+      // site?" is two questions, not a correction (Greptile, PR #1103,
+      // third round). The restore pattern above needs no such guard —
+      // its verb must open the sentence, which a question word
+      // already prevents.
+      /(?:[.!?]\s+)(?!\s*(how|what|why|when|where|which|who|explain|describe|tell\s+me|show\s+me)\b)[\s\S]{0,60}?\bwrong\s+(page|site|website|homepage|web ?page|content|version|file)\b[\s\S]{0,120}\b(should be|should have|put back|fix|restore|instead)\b/i,
       // Placement commands use everyday verbs rather than edit-vocabulary —
       // "put this image on my homepage", "add that picture to the hero",
       // "insert the image into this page". Without this they fell into

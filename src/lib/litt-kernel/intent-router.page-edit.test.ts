@@ -53,6 +53,8 @@ describe("page-edit prompts — execution routing (ACC-01 F2)", () => {
     { msg: "That's the wrong shade of blue for a coffee brand.", note: "wrong + no page noun" },
     { msg: "How do I restore the page?", note: "restore how-to question (Greptile, PR #1103)" },
     { msg: "Explain how to revert the title.", note: "revert explanation request (Greptile, PR #1103)" },
+    { msg: "Why did this happen? Why is the wrong page showing instead of my site?", note: "question sentence after a question (Greptile round 3)" },
+    { msg: "What happened? How do I restore the page?", note: "how-to sentence after a question (Greptile round 3)" },
   ];
 
   for (const { msg, note } of NEGATIVES) {
