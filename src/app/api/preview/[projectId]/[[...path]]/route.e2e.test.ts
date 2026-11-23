@@ -142,7 +142,7 @@ describe("E2E: AI build → static preview (zero subprocesses)", () => {
 
     // 2. AI writes index.html + style.css through the REAL tool handler.
     const w1 = await handleFilesWrite(
-      { path: "index.html", content: '<html><head><link rel="stylesheet" href="style.css"></head><body><h1>V1</h1></body></html>' },
+      { path: "index.html", content: "<html>\n<head><link rel=\"stylesheet\" href=\"style.css\"></head>\n<body><h1>V1</h1></body>\n</html>" },
       transport,
     );
     expect(w1.success).toBe(true);
@@ -168,9 +168,13 @@ describe("E2E: AI build → static preview (zero subprocesses)", () => {
     expect(pCss.headers.get("Content-Type")).toContain("text/css");
     expect(await pCss.text()).toBe("h1 { color: blue; }");
 
-    // 5+6. AI edits → preview returns updated content.
+    // 5+6. AI edits → preview returns updated content. The edit is an
+    // edit-style rewrite (same document, new heading): since ACC-01 F2 the
+    // files.write handler refuses a blind wholesale regeneration of an
+    // existing page on every lane, so a one-line total replacement is
+    // rejected by design — a real edit retains the page it derives from.
     const w3 = await handleFilesWrite(
-      { path: "index.html", content: '<html><body><h1>V2 updated</h1></body></html>' },
+      { path: "index.html", content: "<html>\n<head><link rel=\"stylesheet\" href=\"style.css\"></head>\n<body><h1>V2 updated</h1></body>\n</html>" },
       transport,
     );
     expect(w3.success).toBe(true);
