@@ -23,24 +23,33 @@
  *   - Panel-driven navigation (address bar, back, forward, refresh,
  *     tab switch) sets the frame's src to the proxy URL for the tab's
  *     current real URL, and is tracked in a per-tab local history.
- *   - In-page navigation (link clicks, GET form submits) is routed
- *     through the proxy by the bootstrap script injected into proxied
- *     documents; that script postMessages each navigation back, so the
- *     address bar and history stay truthful and back/forward work for
- *     pages reached by clicking, not just by typing.
+ *   - In-page navigation (link clicks, GET form submits) is
+ *     intercepted by the bootstrap script injected into proxied
+ *     documents, which postMessages each navigation to the panel;
+ *     the panel then drives the load itself, through the same store
+ *     patch as an address-bar navigation, so the address bar and
+ *     history stay truthful and back/forward work for pages reached
+ *     by clicking, not just by typing. The bootstrap deliberately
+ *     does NOT navigate the frame: the proxied document runs in an
+ *     opaque origin (CSP sandbox without allow-same-origin), so a
+ *     self-navigation goes out as a cross-site request, the
+ *     SameSite=Lax session cookies are withheld, and the auth-gated
+ *     proxy's response is a page the frame must refuse — the
+ *     "This content is blocked" failure on every in-page click
+ *     (round 3, live-proven 2026-11-22). A parent-set src is a
+ *     same-origin request and carries the session, so it loads.
  *   - Remounts (layout flips, tab switches, refresh) restore the
  *     frame from the tab's CURRENT history entry — never from the
- *     stored frameSrc alone. frameSrc names the last panel-driven
- *     load, and in-page navigation advances history without touching
- *     it, so a remounted frame fed from frameSrc would reload an
- *     older page, whose `landed` report would then replace the
- *     newest history entry with that old URL. The panel snapshots
+ *     stored frameSrc alone. frameSrc names the last load the panel
+ *     drove, and a `landed` redirect correction can replace the
+ *     current history entry with the URL the frame actually
+ *     reached, leaving frameSrc naming the pre-redirect page; a
+ *     remounted frame fed from frameSrc would reload that older
+ *     page, whose `landed` report would then replace the newest
+ *     history entry with that old URL again. The panel snapshots
  *     the current entry's proxy URL when a frame instance mounts
  *     and loads that until the next panel-driven navigation (the
  *     tab's frameGeneration) makes frameSrc authoritative again.
- *     In-page navigation changes neither the snapshot nor the
- *     generation, so restoring never forces a second load
- *     mid-session: the frame navigates itself.
  *   - Messages are trusted only when they come from this panel's own
  *     frame window and carry the proxy's source marker — a proxied
  *     document runs in an opaque origin, so origin alone proves
@@ -81,6 +90,37 @@ export { normalizeBrowserUrl };
  * panel presents the couldn't-load state. Exported for tests.
  */
 export const BROWSER_EMBED_WATCHDOG_MS = 8000;
+
+/**
+ * The store patch for a panel-driven load of `url` in `tab`: record
+ * the new frameSrc AND bump frameGeneration, which is what makes
+ * frameSrc authoritative over the frame instance's mount snapshot
+ * again. When the target's proxy URL equals the src the frame
+ * already carries (`effectiveSrc` — e.g. re-entering the current
+ * address, or a link to the page already showing), the src string
+ * would not change and the frame would not move, so bump reloadKey
+ * too: a fresh frame instance then actually loads it (its mount
+ * snapshot is the target entry).
+ *
+ * One implementation for every navigation the panel drives —
+ * address bar, back, forward, and (round 3) the loads it drives on
+ * behalf of in-page clicks and GET form submits. Pure in the tab so
+ * the mount-once message listener can use it from its ref mirrors,
+ * not just the render body.
+ */
+function panelLoadPatchFor(
+  tab: StudioBrowserTab,
+  url: string,
+  effectiveSrc: string | null,
+): Partial<StudioBrowserTab> {
+  const frameSrc = browserProxyUrl(url);
+  return {
+    input: url,
+    frameSrc,
+    frameGeneration: tab.frameGeneration + 1,
+    ...(frameSrc === effectiveSrc ? { reloadKey: tab.reloadKey + 1 } : {}),
+  };
+}
 
 export default function BoardBrowserPanel() {
   const { tokens } = useTheme();
@@ -140,8 +180,9 @@ export default function BoardBrowserPanel() {
     });
     // Snapshot once per frame instance. In-page navigation changes
     // history (and therefore restoreSrc) but must NOT re-snapshot:
-    // the frame is already showing that page itself, and feeding
-    // the new entry back as its src would force a second load.
+    // its load is driven by the generation bump making frameSrc
+    // authoritative, and re-snapshotting mid-session would move
+    // the restore point the generation check compares against.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frameInstanceKey]);
   const effectiveFrameSrc = !activeTab
@@ -151,6 +192,16 @@ export default function BoardBrowserPanel() {
         ? frameMount.src
         : activeTab.frameSrc
       : restoreSrc;
+
+  // Mirror of the frame's current effective src for the message
+  // listener (same pattern as tabsRef above): the patch for an
+  // in-page `navigate` must know whether its proxy URL differs from
+  // the src the frame already carries. Synced after commit, like
+  // the other mirrors — the listener only reads it from an event.
+  const effectiveFrameSrcRef = useRef<string | null>(null);
+  useEffect(() => {
+    effectiveFrameSrcRef.current = effectiveFrameSrc;
+  });
 
   const clearWatchdog = () => {
     if (watchdogRef.current !== null) {
@@ -223,14 +274,29 @@ export default function BoardBrowserPanel() {
         }
         clearWatchdog();
       } else if (data.type === "navigate") {
-        // The frame is already navigating itself (the bootstrap set
-        // its location); record the destination so back/forward and
-        // the address bar stay truthful, and guard the load.
+        // Round 3: the panel drives this load itself, through the
+        // same patch as an address-bar navigation. The bootstrap
+        // used to navigate the frame directly, but the proxied
+        // document runs in an opaque origin, so its self-navigation
+        // went out as a cross-site request, the SameSite=Lax session
+        // cookies were withheld, and the auth-gated proxy answered
+        // with a page the frame must refuse ("This content is
+        // blocked", live-proven 2026-11-22). A parent-driven src
+        // change is a same-origin request and carries the session.
+        // The history push stays exactly as before — one entry per
+        // navigation — with the load patch merged into the same
+        // store write.
+        const patch = panelLoadPatchFor(tab, url, effectiveFrameSrcRef.current);
         if (tabCurrentUrl(tab) !== url) {
           const history = [...tab.history.slice(0, tab.historyIndex + 1), url];
-          updateTab(tabId, { history, historyIndex: history.length - 1, input: url, status: "loading" });
+          updateTab(tabId, {
+            history,
+            historyIndex: history.length - 1,
+            status: "loading",
+            ...patch,
+          });
         } else {
-          updateTab(tabId, { status: "loading" });
+          updateTab(tabId, { status: "loading", ...patch });
         }
         armWatchdog(tabId);
       } else if (data.type === "external") {
@@ -246,25 +312,11 @@ export default function BoardBrowserPanel() {
 
   if (!activeTab) return null;
 
-  // Every panel-driven navigation records the new frameSrc AND
-  // bumps frameGeneration, which is what makes frameSrc
-  // authoritative over the mount snapshot again. When the target's
-  // proxy URL equals the src the frame already carries (Back to a
-  // page the frame reached by an in-page click, or re-entering the
-  // current address), the src string would not change and the frame
-  // would not move — bump reloadKey too, so a fresh frame instance
-  // actually loads it (its mount snapshot is the target entry).
-  const panelLoadPatch = (url: string): Partial<StudioBrowserTab> => {
-    const frameSrc = browserProxyUrl(url);
-    return {
-      input: url,
-      frameSrc,
-      frameGeneration: activeTab.frameGeneration + 1,
-      ...(frameSrc === effectiveFrameSrc
-        ? { reloadKey: activeTab.reloadKey + 1 }
-        : {}),
-    };
-  };
+  // Every panel-driven navigation goes through the one shared
+  // patch (panelLoadPatchFor, above) — the message listener uses it
+  // for in-page navigations too, computed from its ref mirrors.
+  const panelLoadPatch = (url: string): Partial<StudioBrowserTab> =>
+    panelLoadPatchFor(activeTab, url, effectiveFrameSrc);
 
   const navigate = (raw: string) => {
     const url = normalizeBrowserUrl(raw);
