@@ -39,8 +39,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Validate SHA input
+        env:
+          INPUT_SHA: ${{ inputs.sha }}
         run: |
-          if ! [[ "${{ inputs.sha }}" =~ ^[0-9a-f]{40}$ ]]; then
+          if ! [[ "$INPUT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::sha must be a full 40-char lowercase hex commit SHA"
             exit 1
           fi
@@ -96,23 +98,24 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          INPUT_SHA: ${{ inputs.sha }}
         run: |
           # railway up (CLI upload) does NOT inject RAILWAY_GIT_COMMIT_SHA —
           # set it explicitly with --skip-deploys so the upload below is the
           # deployment that picks it up. /health reports commit as the
-          # first 8 chars of this variable.
-          railway variable set RAILWAY_GIT_COMMIT_SHA=${{ inputs.sha }} \
-            --service "$STAGING_SERVICE" \
-            --skip-deploys
-          # Upload from the REPO ROOT: the service builds with
-          # terminal-server/Dockerfile.railway (declared in
-          # terminal-server/railway.json), which expects the monorepo
-          # layout. A project token is already bound to one environment —
-          # passing --environment alongside it 404s; an account token needs
-          # --environment to select staging.
+          # first 8 chars of this variable. A project token is already bound
+          # to one environment — passing --environment alongside it 404s;
+          # an account token needs --environment to select staging.
           if [ -n "$RAILWAY_TOKEN" ]; then
+            railway variable set "RAILWAY_GIT_COMMIT_SHA=$INPUT_SHA" \
+              --service "$STAGING_SERVICE" \
+              --skip-deploys
             railway up --service "$STAGING_SERVICE" --detach
           else
+            railway variable set "RAILWAY_GIT_COMMIT_SHA=$INPUT_SHA" \
+              --service "$STAGING_SERVICE" \
+              --environment "$STAGING_ENVIRONMENT" \
+              --skip-deploys
             railway up --service "$STAGING_SERVICE" --environment "$STAGING_ENVIRONMENT" --detach
           fi
 
