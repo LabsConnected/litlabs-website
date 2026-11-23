@@ -265,6 +265,28 @@ describe("mutation handlers — enforcement floor", () => {
     expect(t.writeFile).toHaveBeenCalledWith("index.html", "<title>Ember Roast — Premium Coffee Roasters</title>");
   });
 
+  it("refuses a destructive full-page rewrite through the direct handler", async () => {
+    const { handleFilesWrite } = await loadHandlers();
+    const original = '<html><head><style>.hero{color:red}</style></head><body><header class="nav">Nav</header><main class="hero"><section>Keep this work</section></main><script src="app.js"></script></body></html>';
+    const t = spyTransport(original);
+    const result = await handleFilesWrite({ path: "index.html", content: "<html><body>New title</body></html>" }, t);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Refusing this full-file rewrite");
+    expect(t.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("does not overwrite an unreadable existing page when the read fails", async () => {
+    const { handleFilesWrite } = await loadHandlers();
+    const t = spyTransport();
+    vi.mocked(t.readFile).mockRejectedValueOnce(new Error("workspace connection failed"));
+    const result = await handleFilesWrite({ path: "index.html", content: "<html>Replacement</html>" }, t);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Could not verify");
+    expect(t.writeFile).not.toHaveBeenCalled();
+  });
+
   it("files.list rejects absolute and parent paths before transport access", async () => {
     const { handleFilesList } = await loadHandlers();
     const t = spyTransport();

@@ -426,7 +426,12 @@ describe("runAgentLoopV2 — patch rejection recovery forcing (acceptance run #3
         disk.set(path, content);
         return { applied: true };
       }),
-      createCheckpointBeforeMutation: vi.fn(async () => null),
+      createCheckpointBeforeMutation: vi.fn(async (label: string) => ({ checkpointId: "cp-1", label, gitSha: "a".repeat(40) })),
+      gitStatus: vi.fn(async () => ({
+        branch: "main", ahead: 0, behind: 0, staged: [], untracked: [],
+        modified: disk.get("index.html") === FOOTER ? [] : ["index.html"],
+        clean: disk.get("index.html") === FOOTER,
+      })),
     } as unknown as WorkspaceTransport;
     return { transport, disk };
   }
@@ -696,13 +701,36 @@ describe("runAgentLoopV2 — build guard verdict vs workspace evidence (Step 6 p
     const transport = shellTransport(false);
     vi.mocked(callLLMWithTools)
       .mockResolvedValueOnce(execReply)
-      .mockResolvedValueOnce(silentReply("Done."));
+      .mockResolvedValue(silentReply("Done."));
 
     const result = await runAgentLoopV2("create a marker file in the project", transport, { ...GUARDED });
 
     expect(result.workspaceChange?.status).toBe("unchanged");
-    expect(result.failedHonestly).toBe("The build produced no successful file-writing operation, so it is not complete.");
-    expect(result.finalText).toBe("The build produced no successful file-writing operation, so it is not complete.");
+    expect(result.failedHonestly).toContain("no files were changed");
+    expect(result.finalText).toBe(result.failedHonestly);
+  });
+
+  it("does not complete a BUILD when a successful write reports no workspace change", async () => {
+    const transport = {
+      ...shellTransport(false),
+      writeFile: vi.fn(async () => undefined),
+      readFile: vi.fn(async () => ({ content: "old content", size: 11 })),
+    } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "", toolCalls: [{ toolCallId: "write", toolId: "files.write",
+          inputs: { projectId: "p-test", path: "index.html", content: "new content" } }],
+        finishReason: "tool_calls", model: "test-model",
+      })
+      .mockResolvedValueOnce(silentReply("Done."));
+
+    const result = await runAgentLoopV2("Build and save index.html", transport, { ...GUARDED });
+
+    expect(result.toolCalls.some((call) => call.toolId === "files.write" && call.success)).toBe(true);
+    expect(result.workspaceChange?.status).toBe("unchanged");
+    expect(result.failedHonestly).toContain("no files were changed");
+    expect(result.finalText).toBe(result.failedHonestly);
+    expect(result.runObservability?.outcome).toBe("failed");
   });
 });
 
@@ -1592,12 +1620,143 @@ describe("runAgentLoopV2 — build capability guard", () => {
     };
   }
 
+  function verifiedWriteTransport(writeFile: (path: string, content: string) => Promise<void>, content: () => string) {
+    return {
+      ...transportWithRead,
+      writeFile,
+      readFile: vi.fn(async () => ({ content: content(), size: content().length })),
+      createCheckpointBeforeMutation: vi.fn(async (label: string) => ({ checkpointId: "cp-1", label, gitSha: "a".repeat(40) })),
+      gitStatus: vi.fn(async () => ({
+        branch: "main", ahead: 0, behind: 0, staged: [], untracked: [],
+        modified: content() === "hello" ? [] : ["index.html"],
+        clean: content() === "hello",
+      })),
+    } as unknown as WorkspaceTransport;
+  }
+
+  it("requires a tool call after reads until a build write lands", async () => {
+    let saved = "hello";
+    const writeFile = vi.fn(async (_path: string, content: string) => { saved = content; });
+    const transport = verifiedWriteTransport(writeFile, () => saved);
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(readOnlyStep("nvidia/nemotron-3.5-super-vl:free", "openrouter", 1))
+      .mockResolvedValueOnce({
+        text: "[]", toolCalls: [], finishReason: "stop",
+        model: "@cf/mistralai/mistral-small-3.1-24b-instruct", provider: "cloudflare",
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{
+          toolCallId: "tc-write", toolId: "files.write",
+          inputs: { projectId: "p-test", path: "index.html", content: "<h1>Updated</h1>" },
+        }],
+        finishReason: "tool_calls",
+        model: "@cf/mistralai/mistral-small-3.1-24b-instruct", provider: "cloudflare",
+      })
+      .mockResolvedValueOnce({
+        text: "Done.", toolCalls: [], finishReason: "stop",
+        model: "@cf/mistralai/mistral-small-3.1-24b-instruct", provider: "cloudflare",
+      });
+
+    const result = await runAgentLoopV2("Update the existing site footer and save index.html", transport, {
+      systemPrompt: "You are LiTT.", executionMode: "auto", enableBuildFix: false,
+      isStaticWorkspace: true, maxSteps: 8, requireToolCallOnFirstStep: true,
+      buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+    });
+
+    expect(vi.mocked(callLLMWithTools).mock.calls[1][3]).toMatchObject({ toolChoice: "required" });
+    expect(writeFile).toHaveBeenCalledWith("index.html", "<h1>Updated</h1>");
+    expect(result.failedHonestly).toBeUndefined();
+  });
+
+  it("keeps a BUILD tool call required after a failed file write", async () => {
+    const writeFile = vi.fn(async () => { throw new Error("disk full"); });
+    const transport = { ...transportWithRead, writeFile } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "", toolCalls: [{ toolCallId: "failed-write", toolId: "files.write",
+          inputs: { projectId: "p-test", path: "index.html", content: "new" } }],
+        finishReason: "tool_calls", model: "gemini-2.5-flash", provider: "gemini",
+      })
+      .mockResolvedValue({
+        text: "Done.", toolCalls: [], finishReason: "stop",
+        model: "gemini-2.5-flash", provider: "gemini",
+      });
+
+    const result = await runAgentLoopV2("Build and save index.html", transport, {
+      systemPrompt: "You are LiTT.", executionMode: "auto", enableBuildFix: false,
+      isStaticWorkspace: true, maxSteps: 8, buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+    });
+
+    expect(vi.mocked(callLLMWithTools).mock.calls[1][3]).toMatchObject({ toolChoice: "required" });
+    expect(result.failedHonestly).toBeDefined();
+  });
+
+  it("does not count an unpersisted file write as a completed BUILD", async () => {
+    const transport = { ...transportWithRead, writeFile: vi.fn(async () => undefined) } as unknown as WorkspaceTransport;
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "", toolCalls: [{ toolCallId: "false-write", toolId: "files.write",
+          inputs: { projectId: "p-test", path: "index.html", content: "new" } }],
+        finishReason: "tool_calls", model: "gemini-2.5-flash", provider: "gemini",
+      })
+      .mockResolvedValue({
+        text: "Done.", toolCalls: [], finishReason: "stop",
+        model: "gemini-2.5-flash", provider: "gemini",
+      });
+
+    const result = await runAgentLoopV2("Build and save index.html", transport, {
+      systemPrompt: "You are LiTT.", executionMode: "auto", enableBuildFix: false,
+      isStaticWorkspace: true, maxSteps: 8, buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+    });
+
+    expect(vi.mocked(callLLMWithTools).mock.calls[1][3]).toMatchObject({ toolChoice: "required" });
+    expect(result.failedHonestly).toBeDefined();
+  });
+
+  it("still requires a tool call after a failed build write", async () => {
+    const writeFile = vi.fn()
+      .mockRejectedValueOnce(new Error("disk unavailable"))
+      .mockResolvedValueOnce(undefined);
+    const transport = { ...transportWithRead, writeFile } as unknown as WorkspaceTransport;
+    const writeCall = (id: string) => ({
+      text: "",
+      toolCalls: [{
+        toolCallId: id,
+        toolId: "files.write",
+        inputs: { projectId: "p-test", path: "index.html", content: "<h1>Recovered</h1>" },
+      }],
+      finishReason: "tool_calls",
+      model: "gemini-2.5-flash",
+      provider: "gemini",
+    });
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(writeCall("tc-failed-write"))
+      .mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "gemini-2.5-flash", provider: "gemini" })
+      .mockResolvedValueOnce(writeCall("tc-recovery-write"))
+      .mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "gemini-2.5-flash", provider: "gemini" });
+
+    const result = await runAgentLoopV2("Build a landing page and save index.html", transport, {
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+      isStaticWorkspace: true,
+      maxSteps: 8,
+      requireToolCallOnFirstStep: true,
+      buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+    });
+
+    expect(vi.mocked(callLLMWithTools).mock.calls[1][3]).toMatchObject({ toolChoice: "required" });
+    expect(writeFile).toHaveBeenCalledTimes(2);
+    expect(result.failedHonestly).toBeUndefined();
+  });
+
   it("rules out a read-only model after 3 zero-write steps and switches the build model", async () => {
     vi.mocked(callLLMWithTools)
       .mockResolvedValueOnce(readOnlyStep("cohere/north-mini-code:free", "openrouter", 1))
       .mockResolvedValueOnce(readOnlyStep("cohere/north-mini-code:free", "openrouter", 2))
       .mockResolvedValueOnce(readOnlyStep("cohere/north-mini-code:free", "openrouter", 3))
-      .mockResolvedValueOnce({
+      .mockResolvedValue({
         text: "Done — wrote the files.",
         toolCalls: [],
         finishReason: "stop",
@@ -1633,8 +1792,10 @@ describe("runAgentLoopV2 — build capability guard", () => {
     const fourthCall = vi.mocked(callLLMWithTools).mock.calls[3];
     expect(fourthCall[3]).toMatchObject({ model: "gemini-2.5-flash" });
 
-    // The run continued the same conversation instead of failing.
-    expect(result.failedHonestly).toContain("no successful file-writing operation");
+    // A replacement provider's prose-only completion is rejected after a
+    // bounded nudge because this build still has no landed write.
+    expect(fourthCall[3]).toMatchObject({ toolChoice: "required" });
+    expect(result.failedHonestly).toBeDefined();
     expect(result.modelFailed).toBeUndefined();
   });
 
@@ -1706,11 +1867,9 @@ describe("runAgentLoopV2 — build capability guard", () => {
         provider: "gemini",
       });
 
-    const writeFile = vi.fn(async () => undefined);
-    const transport = {
-      ...transportWithRead,
-      writeFile,
-    } as unknown as WorkspaceTransport;
+    let saved = "hello";
+    const writeFile = vi.fn(async (_path: string, content: string) => { saved = content; });
+    const transport = verifiedWriteTransport(writeFile, () => saved);
 
     const result = await runAgentLoopV2(
       "build a tiny landing page",
@@ -1731,11 +1890,9 @@ describe("runAgentLoopV2 — build capability guard", () => {
   });
 
   it("the switched build model writes files — guard triggers, next model writes, files land", async () => {
-    const writeFile = vi.fn(async () => undefined);
-    const transport = {
-      ...transportWithRead,
-      writeFile,
-    } as unknown as WorkspaceTransport;
+    let saved = "hello";
+    const writeFile = vi.fn(async (_path: string, content: string) => { saved = content; });
+    const transport = verifiedWriteTransport(writeFile, () => saved);
 
     vi.mocked(callLLMWithTools)
       .mockResolvedValueOnce(readOnlyStep("cohere/north-mini-code:free", "openrouter", 1))
@@ -1851,7 +2008,7 @@ describe("BUILD resume completion evidence", () => {
     vi.mocked(callLLMWithTools).mockResolvedValue({ text: "Done.", toolCalls: [], finishReason: "stop", model: "test" });
     const transport = { ...fakeTransport, mkdir: vi.fn(async () => ({ created: true })) } as unknown as WorkspaceTransport;
     const result = await resumeAgentLoopV2(resumeInput(), transport);
-    expect(result.failedHonestly).toContain("no successful file-writing operation");
+    expect(result.failedHonestly).toContain("no files were changed");
   });
 
   it("bounds a resumed read-only run at three steps", async () => {
@@ -2917,11 +3074,8 @@ describe("runAgentLoopV2 — bounded read-loop recovery (golden follow-up incide
   });
 
   it("repeated MUTATING calls are outside the read-loop watchdog by design", async () => {
-    // hasInterveningMutation flips on the first non-readOnly call — even
-    // a failed one — so the detector only covers the pre-mutation phase
-    // (the golden scenario: reads before any write). A model repeating a
-    // failing patch is never nudged and never watchdog-cancelled; it is
-    // bounded by the step budget instead.
+    // The watchdog only applies to reads. A model repeating a failing patch
+    // is bounded by the step budget instead of a read-loop cancellation.
     const { transport } = makeEditTransport("<html><body><footer>x</footer></body></html>");
     (transport.applyPatch as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("disk full"));
 

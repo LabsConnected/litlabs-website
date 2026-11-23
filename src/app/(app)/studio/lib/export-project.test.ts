@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { buildZip } from "@/lib/studio/zip";
 import { downloadProjectExport } from "./export-project";
 
 /**
@@ -14,8 +15,13 @@ import { downloadProjectExport } from "./export-project";
  * (revocation deferred), and the server's honest error otherwise.
  */
 
-const zipResponse = (init?: { filename?: string; fileCount?: string }) =>
-  new Response(new Blob(["PK\x03\x04 fake zip"], { type: "application/zip" }), {
+const zipResponse = (init?: { filename?: string; fileCount?: string }) => {
+  const zip = buildZip([
+    { name: "index.html", data: Buffer.from("<h1>ok</h1>") },
+    { name: "css/style.css", data: Buffer.from("body{}") },
+    { name: "js/app.js", data: Buffer.from("console.log(1)") },
+  ]);
+  return new Response(new Uint8Array(zip), {
     status: 200,
     headers: {
       "Content-Type": "application/zip",
@@ -23,6 +29,7 @@ const zipResponse = (init?: { filename?: string; fileCount?: string }) =>
       ...(init?.fileCount ? { "X-Export-File-Count": init.fileCount } : {}),
     },
   });
+};
 
 describe("downloadProjectExport (ACC-01 F5)", () => {
   let clickSpy: ReturnType<typeof vi.fn>;
@@ -109,5 +116,68 @@ describe("downloadProjectExport (ACC-01 F5)", () => {
       ok: false,
       error: "Export request failed — check your connection and retry.",
     });
+    expect(clickSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("downloadProjectExport archive validation", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function stubDownloadUrl() {
+    const objectUrl = vi.fn(() => "blob:test");
+    vi.stubGlobal("URL", Object.assign(class extends URL {}, {
+      createObjectURL: objectUrl,
+      revokeObjectURL: vi.fn(),
+    }));
+    return objectUrl;
+  }
+
+  it("rejects a successful HTTP response with a broken archive before starting a download", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("not a ZIP", {
+      status: 200, headers: { "Content-Type": "application/zip" },
+    })));
+    const objectUrl = stubDownloadUrl();
+
+    const result = await downloadProjectExport("project-1");
+
+    expect(result).toMatchObject({ ok: false });
+    expect(objectUrl).not.toHaveBeenCalled();
+  });
+
+  it("rejects an archive that reports skipped files", async () => {
+    stubDownloadUrl();
+    const zip = buildZip([{ name: "index.html", data: Buffer.from("ok") }]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(zip), {
+      status: 200,
+      headers: { "Content-Type": "application/zip", "X-Export-Skipped": "1" },
+    })));
+    const result = await downloadProjectExport("project-1");
+    expect(result).toMatchObject({ ok: false });
+  });
+
+  it("downloads a complete archive and reports its actual file count", async () => {
+    const zip = buildZip([
+      { name: "index.html", data: Buffer.from("<h1>Saved</h1>") },
+      { name: "css/style.css", data: Buffer.from("body { color: red }" ) },
+    ]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(zip), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": 'attachment; filename="site-export.zip"',
+        "X-Export-File-Count": "2",
+      },
+    })));
+    const objectUrl = stubDownloadUrl();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    const result = await downloadProjectExport("project-1");
+
+    expect(result).toEqual({ ok: true, filename: "site-export.zip", fileCount: 2, truncated: false });
+    expect(objectUrl).toHaveBeenCalledOnce();
+    expect(click).toHaveBeenCalledOnce();
   });
 });

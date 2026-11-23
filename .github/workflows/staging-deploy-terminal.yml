@@ -1,0 +1,146 @@
+name: Deploy Terminal Server to Railway Staging
+
+# Manual-dispatch ONLY. Deploys a chosen commit SHA to the Railway STAGING
+# terminal-server service — NEVER production. Companion to
+# staging-deploy.yml (which covers @litlabs/litt-shell). Both must be run
+# with the SAME approved SHA so staging runs one consistent release.
+#
+# Safety: the target service is HARDCODED to the staging terminal-server
+# service inside the litlabs-website project — there is no input that can
+# redirect this workflow at the production litlabs-terminal-server project
+# or any other service, and a guard step rejects production identifiers.
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit SHA (full 40-char hex) to deploy to staging terminal-server"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-terminal-deploy
+  cancel-in-progress: false
+
+env:
+  # The Railway SERVICE name for the in-project staging terminal. This is
+  # deliberately NOT "litlabs-terminal-server" — that is the separate
+  # production project's service and must never be targeted here.
+  STAGING_SERVICE: "terminal-server"
+  STAGING_ENVIRONMENT: staging
+  STAGING_URL: https://terminal-server-staging.up.railway.app
+
+jobs:
+  deploy-staging-terminal:
+    name: Deploy SHA to Railway staging terminal-server
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Validate SHA input
+        env:
+          INPUT_SHA: ${{ inputs.sha }}
+        run: |
+          if ! [[ "$INPUT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::sha must be a full 40-char lowercase hex commit SHA"
+            exit 1
+          fi
+
+      - name: Guard — staging-only target
+        run: |
+          # Both the service and environment are hardcoded to staging
+          # values. Refuse anything that smells like a production
+          # identifier — including the separate production terminal
+          # project/service name.
+          for target in "$STAGING_SERVICE" "$STAGING_ENVIRONMENT"; do
+            case "$target" in
+              *production*|*prod*|litlabs-terminal-server*)
+                echo "::error::refusing to deploy — target resolves to production ($target)"
+                exit 1
+                ;;
+            esac
+          done
+          case "$STAGING_SERVICE" in
+            terminal-server) ;;
+            *) echo "::error::unexpected service $STAGING_SERVICE"; exit 1 ;;
+          esac
+          echo "Deploy target: service=$STAGING_SERVICE env=$STAGING_ENVIRONMENT (staging only)"
+
+      - name: Check Railway credentials
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ] && [ -z "$RAILWAY_API_TOKEN" ]; then
+            echo "::error::No Railway credential — set RAILWAY_TOKEN (project token) or RAILWAY_API_TOKEN (account token)."
+            exit 1
+          fi
+
+      - name: Checkout at requested SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 1
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Diagnose Railway token scope
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+        continue-on-error: true
+        run: |
+          railway status || true
+
+      - name: Deploy to staging terminal-server only
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          INPUT_SHA: ${{ inputs.sha }}
+        run: |
+          # railway up (CLI upload) does NOT inject RAILWAY_GIT_COMMIT_SHA —
+          # set it explicitly with --skip-deploys so the upload below is the
+          # deployment that picks it up. /health reports commit as the
+          # first 8 chars of this variable. A project token is already bound
+          # to one environment — passing --environment alongside it 404s;
+          # an account token needs --environment to select staging.
+          if [ -n "$RAILWAY_TOKEN" ]; then
+            railway variable set "RAILWAY_GIT_COMMIT_SHA=$INPUT_SHA" \
+              --service "$STAGING_SERVICE" \
+              --skip-deploys
+            railway up --service "$STAGING_SERVICE" --detach
+          else
+            railway variable set "RAILWAY_GIT_COMMIT_SHA=$INPUT_SHA" \
+              --service "$STAGING_SERVICE" \
+              --environment "$STAGING_ENVIRONMENT" \
+              --skip-deploys
+            railway up --service "$STAGING_SERVICE" --environment "$STAGING_ENVIRONMENT" --detach
+          fi
+
+      - name: Verify staging terminal health + deployed SHA
+        env:
+          EXPECTED_SHA: ${{ inputs.sha }}
+        run: |
+          # terminal-server /health reports commit = RAILWAY_GIT_COMMIT_SHA
+          # sliced to 8 chars, plus status/readiness and the sandbox
+          # section. Poll for ~20 min before declaring a SHA mismatch.
+          EXPECTED_PREFIX="${EXPECTED_SHA:0:8}"
+          sleep 60
+          for i in $(seq 1 76); do
+            body="$(curl -fsS --max-time 20 \
+              "$STAGING_URL/health" || true)"
+            commit="$(printf '%s' "$body" | jq -r '.commit // ""' 2>/dev/null || true)"
+            status="$(printf '%s' "$body" | jq -r '.status // ""' 2>/dev/null || true)"
+            readiness="$(printf '%s' "$body" | jq -r '.readiness // ""' 2>/dev/null || true)"
+            exec_state="$(printf '%s' "$body" | jq -r '.terminal.execution // ""' 2>/dev/null || true)"
+            echo "poll $i: status=$status readiness=$readiness commit=$commit exec=$exec_state"
+            if [ "$status" = "ok" ] && [ "$commit" = "$EXPECTED_PREFIX" ]; then
+              echo "STAGING_TERMINAL_DEPLOY_VERIFIED sha=$EXPECTED_SHA"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::staging terminal-server did not report expected SHA $EXPECTED_SHA"
+          exit 1

@@ -116,7 +116,11 @@ describe("resumeAgentLoopV2 — approved mutation executes", () => {
     const { transport } = makeTransport();
     transport.writeFile = vi.fn(async () => ({ saved: true }));
     transport.readFile = vi.fn(async () => ({ content: "<h1>Built</h1>", size: 14 }));
+    transport.gitStatus = vi.fn(async () => ({
+      branch: "main", ahead: 0, behind: 0, staged: [], modified: [{ path: "index.html", status: "M" }], untracked: [], clean: false,
+    }));
     const result = await resumeAgentLoopV2(makePausedInput({ toolId: "code.writeFile", inputs: { path: "index.html", content: "<h1>Built</h1>" },
+      existingCheckpoint: { checkpointId: "cp-1", label: "Before approved write", gitSha: "a".repeat(40) },
       config: { systemPrompt: "Build the site", userId: "u-test", executionMode: "act", isStaticWorkspace: true, enableBuildFix: false, buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
         actionContext: { actionRunId: "run-test", userId: "u-test", projectId: "p-test" },
         qualityLoop: { enabled: true, runId: "quality-test", projectId: "p-test", userId: "u-test", userRequest: "Build a Hello Gate 3 webpage with HTML, CSS, and JavaScript" },
@@ -126,6 +130,29 @@ describe("resumeAgentLoopV2 — approved mutation executes", () => {
     expect(transport.writeFile).toHaveBeenCalledWith("index.html", "<h1>Built</h1>");
     expect(result.failedHonestly).toBeUndefined();
     expect(result.qualityLoopState?.state.stages.test.evidence.some((evidence) => evidence.detail?.via === "static-readback")).toBe(true);
+  });
+
+  it("fails a resumed BUILD when an approved write leaves the workspace unchanged", async () => {
+    const { transport } = makeTransport();
+    transport.writeFile = vi.fn(async () => ({ saved: true }));
+    transport.readFile = vi.fn(async () => ({ content: "<h1>Old</h1>", size: 12 }));
+    transport.gitStatus = vi.fn(async () => ({
+      branch: "main", ahead: 0, behind: 0, staged: [], modified: [], untracked: [], clean: true,
+    }));
+    const result = await resumeAgentLoopV2(makePausedInput({
+      toolId: "code.writeFile",
+      inputs: { path: "index.html", content: "<h1>Built</h1>", allowOverwrite: true },
+      existingCheckpoint: { checkpointId: "cp-1", label: "Before approved write", gitSha: "a".repeat(40) },
+      config: { systemPrompt: "Build the site", userId: "u-test", executionMode: "act", isStaticWorkspace: true,
+        enableBuildFix: false, buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+        actionContext: { actionRunId: "run-test", userId: "u-test", projectId: "p-test" } },
+    }), transport);
+
+    expect(transport.writeFile).toHaveBeenCalledTimes(1);
+    expect(result.workspaceChange?.status).toBe("unchanged");
+    expect(result.failedHonestly).toContain("no files were changed");
+    expect(result.finalText).toBe(result.failedHonestly);
+    expect(result.runObservability?.outcome).toBe("failed");
   });
 
   it("executes the approved files.mkdir exactly once with the frozen inputs", async () => {

@@ -14,6 +14,20 @@ export type ExportProjectResult =
 
 type GetToken = (() => Promise<string | null>) | undefined;
 
+async function hasCompleteZipStructure(blob: Blob, expectedCount: number | null): Promise<boolean> {
+  if (blob.size < 52) return false;
+  const first = new DataView(await blob.slice(0, 4).arrayBuffer());
+  const end = new DataView(await blob.slice(blob.size - 22).arrayBuffer());
+  if (first.getUint32(0, true) !== 0x04034b50 || end.getUint32(0, true) !== 0x06054b50) return false;
+  const count = end.getUint16(10, true);
+  const centralSize = end.getUint32(12, true);
+  const centralOffset = end.getUint32(16, true);
+  if (count === 0 || (expectedCount !== null && count !== expectedCount)) return false;
+  if (centralOffset + centralSize !== blob.size - 22 || centralSize < 46) return false;
+  const central = new DataView(await blob.slice(centralOffset, centralOffset + 4).arrayBuffer());
+  return central.getUint32(0, true) === 0x02014b50;
+}
+
 export async function downloadProjectExport(
   projectId: string,
   getToken?: GetToken,
@@ -47,14 +61,21 @@ export async function downloadProjectExport(
   }
 
   const blob = await response.blob();
-  if (blob.size === 0) return { ok: false, error: "Export returned an empty archive" };
+  const reportedCount = response.headers.get("X-Export-File-Count");
+  const fileCount = reportedCount === null ? null : Number(reportedCount);
+  if (response.headers.get("X-Export-Truncated") === "true" ||
+      Number(response.headers.get("X-Export-Skipped") ?? "0") > 0) {
+    return { ok: false, error: "Export was incomplete. Retry after checking project files." };
+  }
+  if (!response.headers.get("Content-Type")?.toLowerCase().includes("application/zip") ||
+      (fileCount !== null && (!Number.isInteger(fileCount) || fileCount < 1)) ||
+      !await hasCompleteZipStructure(blob, fileCount)) {
+    return { ok: false, error: "Export returned an invalid ZIP archive. Retry the download." };
+  }
 
   const disposition = response.headers.get("Content-Disposition") ?? "";
   const nameMatch = /filename="?([^";]+)"?/i.exec(disposition);
   const filename = nameMatch?.[1] ?? `${projectId}.zip`;
-  const fileCountHeader = response.headers.get("X-Export-File-Count");
-  const fileCount = fileCountHeader !== null ? Number(fileCountHeader) : null;
-  const truncated = response.headers.get("X-Export-Truncated") === "true";
 
   const url = URL.createObjectURL(blob);
   try {
@@ -73,7 +94,7 @@ export async function downloadProjectExport(
   return {
     ok: true,
     filename,
-    fileCount: typeof fileCount === "number" && Number.isFinite(fileCount) ? fileCount : null,
-    truncated,
+    fileCount,
+    truncated: false,
   };
 }

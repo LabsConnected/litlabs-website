@@ -99,6 +99,7 @@ defineAction({
   argsSchema: z.object({
     path: z.string().min(1).describe("Workspace-relative file path"),
     content: z.string().describe("Complete literal file content"),
+    allowOverwrite: z.boolean().optional().describe("Set true only when the user explicitly asked to rebuild/replace the whole existing file"),
   }),
   resultType: stationResultSchema,
   mutating: true,
@@ -107,7 +108,7 @@ defineAction({
     if (!projectId) {
       return fail("code.writeFile requires an active project: station context has no projectId.", "not_configured");
     }
-    return writeFileExecute({ projectId, path: args.path, content: args.content }, ctx);
+    return writeFileExecute({ projectId, path: args.path, content: args.content, allowOverwrite: args.allowOverwrite }, ctx);
   },
 });
 setDelegateToolId("code.writeFile", "files.write");
