@@ -255,6 +255,9 @@ describe("LiTT Intelligence — Tool Registry", () => {
   it("files.write executes through the provided workspace transport", async () => {
     const transport = {
       writeFile: vi.fn().mockResolvedValue({ saved: true }),
+      // The destructive-rewrite/overwrite guards read the existing target
+      // first; a confirmed-missing file is a creation, not an overwrite.
+      readFile: vi.fn().mockRejectedValue(new Error("ENOENT: no such file or directory")),
     };
     const result = await toolRegistry.execute(
       "files.write",
