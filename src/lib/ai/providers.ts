@@ -23,7 +23,14 @@ export async function chatWithOllama(messages: ChatMessage[], model = "llama3.2:
 
   if (!res.ok) throw new Error(`Ollama failed: ${res.status}`);
   const data = await res.json();
-  return data.message?.content ?? "";
+  const content: unknown = data.message?.content;
+  // An empty completion is a provider failure, not a successful reply:
+  // throwing lets the callers' catch-fallback try the next provider
+  // instead of surfacing "" as the answer.
+  if (typeof content !== "string" || content.trim() === "") {
+    throw new Error("Ollama returned an empty response.");
+  }
+  return content;
 }
 
 export async function chatWithOpenRouter(messages: ChatMessage[], model = "google/gemini-2.5-flash") {
@@ -48,7 +55,13 @@ export async function chatWithOpenRouter(messages: ChatMessage[], model = "googl
 
   if (!res.ok) throw new Error(`OpenRouter failed: ${res.status}`);
   const data = await res.json();
-  return data.choices?.[0]?.message?.content ?? "";
+  const content: unknown = data.choices?.[0]?.message?.content;
+  // Same rule as Ollama: an empty completion is a provider failure, so
+  // callers fall back or surface an error instead of an empty "reply".
+  if (typeof content !== "string" || content.trim() === "") {
+    throw new Error("OpenRouter returned an empty response.");
+  }
+  return content;
 }
 
 export async function runAI({
