@@ -1380,6 +1380,11 @@ async function readBackMutation(
   if (toolId === "code.refactor") toolId = "apply_patch";
   const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null);
   const r = result && typeof result === "object" ? (result as Record<string, unknown>) : null;
+  // Renderers embed claimed text HTML-escaped; a read-back that only
+  // looks for the raw string marks landed edits as missing (Greptile,
+  // PR #1103 — the F1 false-failure class returning through escaping).
+  const escHtml = (s: string): string =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
   if (toolId === "files.write" || toolId === "files.patch" || toolId === "apply_patch") {
     const path = str(inputs.path);
@@ -1531,16 +1536,20 @@ async function readBackMutation(
       plan.hero && typeof plan.hero === "object"
         ? (plan.hero as Record<string, unknown>)
         : null;
-    const escHtml = (s: string): string =>
-      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     const anchors = [str(plan.title), str(hero?.heading)].filter(
       (a): a is string => !!a,
     );
     if (anchors.length === 0) {
       return { path, verified: content.trim().length > 0, readable: true, contentMatches: null };
     }
+    // validateSitePlan may trim the anchors before rendering, so the
+    // trimmed forms count as present too (Greptile, PR #1103).
     const allPresent = anchors.every(
-      (a) => content.includes(a) || content.includes(escHtml(a)),
+      (a) =>
+        content.includes(a) ||
+        content.includes(escHtml(a)) ||
+        content.includes(a.trim()) ||
+        content.includes(escHtml(a.trim())),
     );
     return { path, verified: allPresent, readable: true, contentMatches: allPresent };
   }
@@ -1564,7 +1573,10 @@ async function readBackMutation(
     }
     const claimed = str(inputs.text) ?? str(inputs.heading) ?? str(inputs.subheading);
     if (!claimed) return { path, verified: true, readable: true, contentMatches: null };
-    const present = content.includes(claimed);
+    // The splice renders the text HTML-escaped — accept the escaped
+    // form as landed, exactly as the compose branch does (Greptile,
+    // PR #1103: "Coffee & pastries" reads back as "Coffee &amp; pastries").
+    const present = content.includes(claimed) || content.includes(escHtml(claimed));
     return { path, verified: present, readable: true, contentMatches: present };
   }
 

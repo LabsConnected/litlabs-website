@@ -1261,7 +1261,11 @@ export default function StudioPreviewPanel({
   const handleCopyUrl = useCallback(async () => {
     if (!effectivePreviewUrl) return;
     try {
-      await navigator.clipboard.writeText(effectivePreviewUrl);
+      // Copy a complete URL: the static preview path is origin-relative,
+      // and pasted text must carry the site address with it (Greptile,
+      // PR #1103). window.open resolves relative paths on its own; the
+      // clipboard cannot.
+      await navigator.clipboard.writeText(new URL(effectivePreviewUrl, window.location.origin).href);
       setUrlCopied(true);
       setTimeout(() => setUrlCopied(false), 2000);
     } catch {

@@ -358,6 +358,12 @@ export default function StudioProjectFiles({
     try {
       const result = await downloadProjectExport(projectId, getToken);
       if (!result.ok) setError(result.error);
+    } catch (exportError) {
+      // downloadProjectExport covers the initial request; a rejection
+      // from reading the body (connection drop, timeout) lands here and
+      // must still surface instead of failing silently (Greptile,
+      // PR #1103).
+      setError(exportError instanceof Error ? exportError.message : "Export failed");
     } finally {
       setExporting(false);
     }

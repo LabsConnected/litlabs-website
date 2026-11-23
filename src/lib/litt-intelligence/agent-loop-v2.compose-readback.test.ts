@@ -186,4 +186,40 @@ describe("runAgentLoopV2 — site.compose / site.patch read-back (ACC-01 F1)", (
     expect(call?.persisted).toBe(true);
     expect(files.get("index.html")).toContain("fresh pastries daily");
   });
+
+  it("site.patch records persisted:true when the patched text is HTML-escaped in the page", async () => {
+    // Greptile, PR #1103: the renderer escapes & as &amp; when splicing
+    // section text, so a raw includes() read-back marked a landed edit
+    // ("Coffee & pastries") as persisted:false and failed the run over a
+    // correct file — the F1 defect class returning through escaping.
+    const { transport, files } = memoryTransport();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolCallReply("tc-compose4", "site.compose", COMPOSE_PLAN))
+      .mockResolvedValueOnce(doneReply);
+    const pausedBuild = await runAgentLoopV2("build a coffee shop page", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+    await approveGate(pausedBuild, transport);
+
+    vi.mocked(callLLMWithTools).mockReset();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolCallReply("tc-patch2", "site.patch", { section: "footer", text: "Coffee & pastries served daily" }))
+      .mockResolvedValueOnce(doneReply);
+    const pausedPatch = await runAgentLoopV2("say coffee and pastries in the footer", transport, {
+      model: "test-model",
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+    });
+    expect(pausedPatch.pendingApproval?.toolId).toBe("site.patch");
+    const result = await approveGate(pausedPatch, transport);
+
+    const call = result.toolCalls.find((t) => t.toolId === "site.patch");
+    expect(call?.success).toBe(true);
+    expect(call?.persisted).toBe(true);
+    expect(files.get("index.html")).toContain("pastries served daily");
+  });
 });

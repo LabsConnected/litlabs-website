@@ -49,6 +49,8 @@ describe("page-edit prompts — execution routing (ACC-01 F2)", () => {
     { msg: "How do I add a line to the welcome paragraph?", note: "how-to question" },
     { msg: "I read the wrong page of the book you recommended.", note: "wrong page, not this project" },
     { msg: "That's the wrong shade of blue for a coffee brand.", note: "wrong + no page noun" },
+    { msg: "How do I restore the page?", note: "restore how-to question (Greptile, PR #1103)" },
+    { msg: "Explain how to revert the title.", note: "revert explanation request (Greptile, PR #1103)" },
   ];
 
   for (const { msg, note } of NEGATIVES) {

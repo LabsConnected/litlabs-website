@@ -311,8 +311,11 @@ const MODE_PATTERNS: ModePattern[] = [
       // directive follows).
       /^(that'?s|this is|it'?s)\b[^.!?]{0,24}\bwrong\s+(page|site|website|homepage|web ?page|content|version|file)\b/i,
       /^the\s+(page|site|website|homepage)\s+is\s+wrong\b/i,
-      /\bwrong\s+(page|site|website|homepage|web ?page|content|version|file)\b[\s\S]{0,120}\b(should be|should have|put back|fix|restore|instead)\b/i,
-      /\b(put back|restore|bring back|revert)\b[\s\S]{0,100}\b(name|hours|menu|drinks?|prices?|page|site|homepage|content|text|title|paragraph|line|heading)\b/i,
+      /^(?!\s*(how|what|why|when|where|which|who|explain|describe|tell\s+me|show\s+me)\b)[\s\S]*?\bwrong\s+(page|site|website|homepage|web ?page|content|version|file)\b[\s\S]{0,120}\b(should be|should have|put back|fix|restore|instead)\b/i,
+      // Question openings are excluded like the content-addition pattern
+      // above: "How do I restore the page?" asks for an explanation, it
+      // is not a correction directive (Greptile, PR #1103).
+      /^(?!\s*(how|what|why|when|where|which|who|explain|describe|tell\s+me|show\s+me)\b)[\s\S]*?\b(put back|restore|bring back|revert)\b[\s\S]{0,100}\b(name|hours|menu|drinks?|prices?|page|site|homepage|content|text|title|paragraph|line|heading)\b/i,
       // Placement commands use everyday verbs rather than edit-vocabulary —
       // "put this image on my homepage", "add that picture to the hero",
       // "insert the image into this page". Without this they fell into
