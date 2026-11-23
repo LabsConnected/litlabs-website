@@ -104,29 +104,39 @@ export function isHtmlContentType(contentType: string | null | undefined): boole
  * The bootstrap script injected into proxied HTML documents. It:
  *   - announces the URL the document actually landed on (`landed`), so
  *     the panel can correct its address bar after redirects;
- *   - intercepts link clicks and routes them back through the proxy,
- *     announcing each one (`navigate`) so the panel's history, address
+ *   - intercepts link clicks and announces each one (`navigate`) so
+ *     the panel can drive the load itself and its history, address
  *     bar, and back/forward buttons track in-page navigation;
- *   - routes GET form submits through the proxy the same way, and
- *     reports POST forms as `external` (the panel offers a real tab)
- *     instead of letting the frame silently escape the proxy.
- * Messages carry `source: "litt-browser"` and are only trusted by the
- * panel when they come from the panel's own frame window.
+ *   - reports GET form submits as `navigate` the same way, and POST
+ *     forms as `external` (the panel offers a real tab) instead of
+ *     letting the frame silently escape the proxy.
+ * The script never navigates the frame itself — see the proxyBase
+ * comment below for why a self-navigation cannot work from inside a
+ * sandboxed document. Messages carry `source: "litt-browser"` and
+ * are only trusted by the panel when they come from the panel's own
+ * frame window.
  */
 export function buildProxyBootstrapScript(finalUrl: string, proxyOrigin?: string): string {
   // JSON-encode the URL for safe embedding; escape `<` so a URL can
   // never break out of the script element.
   const targetJson = JSON.stringify(finalUrl).replace(/</g, "\\u003c");
-  // The proxy URL the bootstrap navigates the frame to MUST be absolute
-  // when the app origin is known: injectProxyBootstrap inserts
+  // The embedded proxy base stays ABSOLUTE when the app origin is
+  // known, even though the bootstrap no longer navigates the frame
+  // itself (round 3): the document it runs in is sandboxed into an
+  // opaque origin, so a self-navigation went out as a cross-site
+  // request, the SameSite=Lax session cookies were withheld, and
+  // the auth-gated proxy's answer was a page the frame must refuse
+  // — the "This content is blocked" failure on in-page link clicks
+  // and GET form submits (live-proven 2026-11-22). The panel now
+  // drives those loads from the `navigate` message instead. The
+  // absolute base still matters for anything in this document that
+  // resolves the proxy path: injectProxyBootstrap inserts
   // <base href="<target URL>"> into the same document, so a
-  // root-relative proxy URL would resolve against the TARGET origin
-  // (e.g. https://en.wikipedia.org/api/studio/browser/proxy?...) and
-  // the frame would load a framing-blocked page from the target's own
-  // server — the "This content is blocked" failure on in-page link
-  // clicks and GET form submits (live-proven 2026-11-22). The route
-  // handler passes its own request origin; the relative path remains
-  // the fallback for callers that cannot know it.
+  // root-relative URL would resolve against the TARGET origin
+  // (e.g. https://en.wikipedia.org/api/studio/browser/proxy?...),
+  // not ours. The route handler passes its own request origin; the
+  // relative path remains the fallback for callers that cannot
+  // know it.
   const proxyBase = proxyOrigin
     ? `${proxyOrigin.replace(/\/+$/, "")}${BROWSER_PROXY_PATH}`
     : BROWSER_PROXY_PATH;
@@ -154,7 +164,6 @@ export function buildProxyBootstrapScript(finalUrl: string, proxyOrigin?: string
     "    ev.preventDefault();",
     "    if (a.getAttribute('target') === '_blank') { post('external', abs); return; }",
     "    post('navigate', abs);",
-    "    location.href = proxied(abs);",
     "  }, true);",
     "  document.addEventListener('submit', function (ev) {",
     "    var form = ev.target;",
@@ -168,7 +177,6 @@ export function buildProxyBootstrapScript(finalUrl: string, proxyOrigin?: string
     "      var qs = new URLSearchParams(new FormData(form)).toString();",
     "      var dest = qs ? action + (action.indexOf('?') >= 0 ? '&' : '?') + qs : action;",
     "      post('navigate', dest);",
-    "      location.href = proxied(dest);",
     "    } catch (e) { post('external', action); }",
     "  }, true);",
     "})();",
