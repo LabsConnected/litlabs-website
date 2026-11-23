@@ -2978,11 +2978,11 @@ async function runAgentLoopV2Inner(
 
       // Loop detection — a repeated read-only call earns a bounded
       // corrective nudge (the content is already in context; spend the
-      // step mutating). Exhausted nudges or a repeated MUTATING call
-      // still cancel honestly.
+      // step mutating). Exhausted read nudges still cancel honestly;
+      // failed writes are bounded by the step budget instead.
       const inputsHash = hashInputs(toolCall.inputs);
-      if (detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation)) {
-        if (toolDef.readOnly && readLoopNudges < READ_LOOP_NUDGE_MAX) {
+      if (toolDef.readOnly && detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation)) {
+        if (readLoopNudges < READ_LOOP_NUDGE_MAX) {
           readLoopNudges += 1;
           localProgress.emit({
             type: "status",
@@ -3067,7 +3067,7 @@ async function runAgentLoopV2Inner(
 
       // Track mutations
       if (!toolDef.readOnly) {
-        hasInterveningMutation = true;
+        if (mutationSucceeded(result)) hasInterveningMutation = true;
         batchHasMutation = true;
       }
 
@@ -3898,8 +3898,8 @@ export async function executeDeferredToolCalls(
     // Loop detection — same bounded read-loop nudge as the main loop;
     // nudge budget lives on `state` so it carries across the boundary.
     // inputsHash was computed above, before the permission check.
-    if (detectRepeatedCalls(ctx.toolCallRecords, toolCall.toolId, inputsHash, state.hasInterveningMutation)) {
-      if (toolDef.readOnly && (state.readLoopNudges ?? 0) < READ_LOOP_NUDGE_MAX) {
+    if (toolDef.readOnly && detectRepeatedCalls(ctx.toolCallRecords, toolCall.toolId, inputsHash, state.hasInterveningMutation)) {
+      if ((state.readLoopNudges ?? 0) < READ_LOOP_NUDGE_MAX) {
         state.readLoopNudges = (state.readLoopNudges ?? 0) + 1;
         ctx.localProgress.emit({
           type: "status",
@@ -3956,7 +3956,7 @@ export async function executeDeferredToolCalls(
     ctx.toolCallRecords.push({ toolId: toolCall.toolId, inputsHash, resultHash: hashResult(result.result), step: ctx.stepsUsed, success: mutationSucceeded(result), mutating: !toolDef.readOnly });
 
     if (!toolDef.readOnly) {
-      state.hasInterveningMutation = true;
+      if (mutationSucceeded(result)) state.hasInterveningMutation = true;
       state.batchHasMutation = true;
     }
 
@@ -4855,8 +4855,8 @@ async function resumeAgentLoopV2Inner(
       // Loop detection — same bounded read-loop nudge as the initial
       // loop; nudges spent in the deferred batch carry over here.
       const inputsHash = hashInputs(toolCall.inputs);
-      if (detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation)) {
-        if (toolDef.readOnly && readLoopNudges < READ_LOOP_NUDGE_MAX) {
+      if (toolDef.readOnly && detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation)) {
+        if (readLoopNudges < READ_LOOP_NUDGE_MAX) {
           readLoopNudges += 1;
           localProgress.emit({
             type: "status",
@@ -4912,7 +4912,7 @@ async function resumeAgentLoopV2Inner(
       toolCallRecords.push({ toolId: toolCall.toolId, inputsHash, resultHash: hashResult(result.result), step: stepsUsed, success: mutationSucceeded(result), mutating: !toolDef.readOnly });
 
       if (!toolDef.readOnly) {
-        hasInterveningMutation = true;
+        if (mutationSucceeded(result)) hasInterveningMutation = true;
         batchHasMutation = true;
       }
 

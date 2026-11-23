@@ -1714,6 +1714,43 @@ describe("runAgentLoopV2 — build capability guard", () => {
     expect(result.failedHonestly).toBeDefined();
   });
 
+  it("still requires a tool call after a failed build write", async () => {
+    const writeFile = vi.fn()
+      .mockRejectedValueOnce(new Error("disk unavailable"))
+      .mockResolvedValueOnce(undefined);
+    const transport = { ...transportWithRead, writeFile } as unknown as WorkspaceTransport;
+    const writeCall = (id: string) => ({
+      text: "",
+      toolCalls: [{
+        toolCallId: id,
+        toolId: "files.write",
+        inputs: { projectId: "p-test", path: "index.html", content: "<h1>Recovered</h1>" },
+      }],
+      finishReason: "tool_calls",
+      model: "gemini-2.5-flash",
+      provider: "gemini",
+    });
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(writeCall("tc-failed-write"))
+      .mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "gemini-2.5-flash", provider: "gemini" })
+      .mockResolvedValueOnce(writeCall("tc-recovery-write"))
+      .mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "gemini-2.5-flash", provider: "gemini" });
+
+    const result = await runAgentLoopV2("Build a landing page and save index.html", transport, {
+      systemPrompt: "You are LiTT.",
+      executionMode: "auto",
+      enableBuildFix: false,
+      isStaticWorkspace: true,
+      maxSteps: 8,
+      requireToolCallOnFirstStep: true,
+      buildCapabilityGuard: { maxStepsWithoutFileWrite: 3 },
+    });
+
+    expect(vi.mocked(callLLMWithTools).mock.calls[1][3]).toMatchObject({ toolChoice: "required" });
+    expect(writeFile).toHaveBeenCalledTimes(2);
+    expect(result.failedHonestly).toBeUndefined();
+  });
+
   it("rules out a read-only model after 3 zero-write steps and switches the build model", async () => {
     vi.mocked(callLLMWithTools)
       .mockResolvedValueOnce(readOnlyStep("cohere/north-mini-code:free", "openrouter", 1))
@@ -3037,11 +3074,8 @@ describe("runAgentLoopV2 — bounded read-loop recovery (golden follow-up incide
   });
 
   it("repeated MUTATING calls are outside the read-loop watchdog by design", async () => {
-    // hasInterveningMutation flips on the first non-readOnly call — even
-    // a failed one — so the detector only covers the pre-mutation phase
-    // (the golden scenario: reads before any write). A model repeating a
-    // failing patch is never nudged and never watchdog-cancelled; it is
-    // bounded by the step budget instead.
+    // The watchdog only applies to reads. A model repeating a failing patch
+    // is bounded by the step budget instead of a read-loop cancellation.
     const { transport } = makeEditTransport("<html><body><footer>x</footer></body></html>");
     (transport.applyPatch as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("disk full"));
 
