@@ -765,13 +765,13 @@ export async function reserveResumeCredits(params: {
     // instance id otherwise); input carries agent/model/provider.
     const { data: priorRuns } = await admin
       .from("agent_runs")
-      .select("agent_name, input")
+      .select("agent_name, agent_mode, input")
       .eq("user_id", user.id)
       .filter("input->>conversation_id", "eq", params.conversationId)
       .order("started_at", { ascending: false })
       .limit(1);
     const prior = (priorRuns ?? [])[0] as
-      | { agent_name?: unknown; input?: Record<string, unknown> | null }
+      | { agent_name?: unknown; agent_mode?: unknown; input?: Record<string, unknown> | null }
       | undefined;
     if (!prior || typeof prior.agent_name !== "string" || !prior.agent_name) {
       return { engaged: false };
@@ -791,6 +791,7 @@ export async function reserveResumeCredits(params: {
         idempotencyKey: `approval-resume:${params.pausedRunId}`,
         model: typeof priorInput.model === "string" ? priorInput.model : undefined,
         provider: typeof priorInput.provider === "string" ? priorInput.provider : undefined,
+        agentMode: typeof prior?.agent_mode === "string" ? prior.agent_mode : undefined,
       },
       estimatedCost,
     );
