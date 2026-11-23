@@ -691,6 +691,26 @@ export function seedToolCallRecordsFromHistory(
 const FILE_GENERATION_TOOL_IDS = new Set([...FILE_WRITE_TOOL_IDS, "code.writeFile", "code.refactor", "files.patch", "site.compose", "site.patch"]);
 export function isFileWritingTool(toolId: string): boolean { return FILE_GENERATION_TOOL_IDS.has(toolId); }
 
+function hasLandedBuildWrite(calls: AgentToolCallLogEntry[]): boolean {
+  return calls.some((call) => call.success && isFileWritingTool(call.toolId) && call.persisted !== false);
+}
+
+function unverifiedBuildMessage(change: WorkspaceChangeEvidence | undefined): string | undefined {
+  if (change?.status === "changed") return undefined;
+  return change?.status === "unchanged"
+    ? "The build is not complete: no files were changed."
+    : "The build is not complete: file changes could not be verified.";
+}
+
+async function shellWriteLanded(
+  calls: AgentToolCallLogEntry[],
+  transport: WorkspaceTransport,
+  checkpoint: { checkpointId: string; label: string; gitSha: string } | null,
+): Promise<boolean> {
+  if (!calls.some((call) => call.success && call.toolId === "terminal.execute")) return false;
+  return (await computeWorkspaceChange(transport, checkpoint)).status === "changed";
+}
+
 /** Server-persisted tool results, not assistant completion claims. */
 export function hasSuccessfulFileWriteInHistory(messages: LLMMessage[]): boolean {
   const writeIds = new Set(messages.flatMap((message) =>
@@ -2290,8 +2310,16 @@ async function runAgentLoopV2Inner(
   // Route honesty: the first LLM call's route plan is persisted into
   // this run's record (see makeRoutePlanRecorder).
   const recordRoutePlan = makeRoutePlanRecorder(localProgress);
+  let shellProbeAt = 0;
+  let shellMutationVerified = false;
 
   while (stepsUsed < cfg.maxSteps) {
+    if (cfg.buildCapabilityGuard && !shellMutationVerified) {
+      shellMutationVerified = await shellWriteLanded(
+        toolCallLog.slice(shellProbeAt), transport, baselineCheckpoint ?? checkpoint ?? null,
+      );
+      shellProbeAt = toolCallLog.length;
+    }
     // Check runtime limit
     const elapsed = Date.now() - startTime;
     if (elapsed > cfg.maxRuntimeMs) {
@@ -2320,7 +2348,8 @@ async function runAgentLoopV2Inner(
           model: requestedModel,
           temperature: 0.15,
           maxTokens: 4096,
-          toolChoice: cfg.requireToolCallOnFirstStep && !emittedToolCalls ? "required" : "auto",
+          toolChoice: (cfg.buildCapabilityGuard && !hasLandedBuildWrite(toolCallLog) && !shellMutationVerified) ||
+            (cfg.requireToolCallOnFirstStep && !emittedToolCalls) ? "required" : "auto",
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,
@@ -2468,9 +2497,10 @@ async function runAgentLoopV2Inner(
         // prose-only reply can never be the final answer — bounded nudges
         // then an honest failure, never a silent fake-complete.
         requiredToolCallPending:
-          (cfg.requireToolCallOnFirstStep === true || isLocalSmallLane()) &&
-          !emittedToolCalls &&
-          !hasInterveningMutation,
+          !pendingPatchRejection && (
+            (cfg.buildCapabilityGuard != null && !hasLandedBuildWrite(toolCallLog) && !shellMutationVerified) ||
+            ((cfg.requireToolCallOnFirstStep === true || isLocalSmallLane()) && !emittedToolCalls && !hasInterveningMutation)
+          ),
         // Prose approval-asks can only stall a turn that was dispatched
         // to execute: on chat/plan turns the same wording is a valid
         // final answer, not a missing tool call. Execution intent rides
@@ -3238,7 +3268,7 @@ async function runAgentLoopV2Inner(
   // failed, so verified builds pay nothing for it.
   let guardWorkspaceEvidence: Awaited<ReturnType<typeof computeWorkspaceChange>> | undefined;
   if (cfg.buildCapabilityGuard && !cancelled && !modelFailed && !failedHonestly &&
-      !toolCallLog.some((call) => call.success && isFileWritingTool(call.toolId)) &&
+      !hasLandedBuildWrite(toolCallLog) &&
       !hasSuccessfulFileWriteInHistory(cfg.initialMessages ?? [])) {
     const guardAttemptedMutation = toolCallLog.some((call) => call.mutating);
     if (baselineCheckpoint || checkpoint || guardAttemptedMutation) {
@@ -3251,7 +3281,7 @@ async function runAgentLoopV2Inner(
 
   if (cfg.buildCapabilityGuard && !cancelled && !modelFailed && !failedHonestly &&
       guardWorkspaceEvidence?.status !== "changed" &&
-      !toolCallLog.some((call) => call.success && isFileWritingTool(call.toolId)) &&
+      !hasLandedBuildWrite(toolCallLog) &&
       !hasSuccessfulFileWriteInHistory(cfg.initialMessages ?? [])) {
     failedHonestly = "The build produced no successful file-writing operation, so it is not complete.";
     finalText = failedHonestly;
@@ -3332,6 +3362,10 @@ async function runAgentLoopV2Inner(
   if (workspaceChange) {
     localProgress.emit({ type: "workspace_change", ...workspaceChange });
   }
+  const buildVerificationFailure = cfg.buildCapabilityGuard && !cancelled && !failedHonestly
+    ? unverifiedBuildMessage(workspaceChange)
+    : undefined;
+  if (buildVerificationFailure) failedHonestly = buildVerificationFailure;
   // Round 11: settle from the run's evidence (run-settlement.ts). A
   // wrap-up route failure after the deliverable landed settles
   // completed-with-warning instead of failing work that succeeded;
@@ -3351,9 +3385,9 @@ async function runAgentLoopV2Inner(
   // text (live URL + what failed after it) — keep it over the generic
   // warning.
   const settledFinalText =
-    settlement.completedWithWarning && !completedDeployment
+    buildVerificationFailure ?? (settlement.completedWithWarning && !completedDeployment
       ? settlement.completedWithWarning
-      : gatedFinalText;
+      : gatedFinalText);
   // Round 14: generated images render inline in the settled text —
   // appended here, by the loop, only on a completed settlement.
   const finalTextWithChatImages =
@@ -4177,6 +4211,8 @@ async function resumeAgentLoopV2Inner(
   // persisted/complete verdict must cover the full mutation history, not
   // just what ran after the gate.
   const toolCallLog: AgentToolCallLogEntry[] = [...(resume.priorToolCalls ?? [])];
+  let shellProbeAt = 0;
+  let shellMutationVerified = false;
   let completedDeployment: CompletedDeployment | null = null;
   // Round 14: images generated during this run (the approved call,
   // deferred batch, and main loop all collect), rendered inline in
@@ -4498,6 +4534,12 @@ async function resumeAgentLoopV2Inner(
 
   // Continue the loop
   while (stepsUsed < cfg.maxSteps && !cancelled && !failedHonestly) {
+    if (cfg.buildCapabilityGuard && !shellMutationVerified) {
+      shellMutationVerified = await shellWriteLanded(
+        toolCallLog.slice(shellProbeAt), transport, baselineCheckpoint ?? checkpoint ?? null,
+      );
+      shellProbeAt = toolCallLog.length;
+    }
     const elapsed = Date.now() - startTime;
     if (elapsed > cfg.maxRuntimeMs) {
       cancelled = true;
@@ -4518,7 +4560,8 @@ async function resumeAgentLoopV2Inner(
           model: cfg.model,
           temperature: 0.15,
           maxTokens: 4096,
-          toolChoice: cfg.requireToolCallOnFirstStep && !emittedToolCalls ? "required" : "auto",
+          toolChoice: (cfg.buildCapabilityGuard && !hasLandedBuildWrite(toolCallLog) && !shellMutationVerified) ||
+            (cfg.requireToolCallOnFirstStep && !emittedToolCalls) ? "required" : "auto",
           evalMetadata: cfg.evalMetadata,
           deadlineMs: startTime + cfg.maxRuntimeMs,
           signal: cfg.signal,
@@ -4613,9 +4656,8 @@ async function resumeAgentLoopV2Inner(
         // prose-only reply can never be the final answer — bounded nudges
         // then an honest failure, never a silent fake-complete.
         requiredToolCallPending:
-          (cfg.requireToolCallOnFirstStep === true || isLocalSmallLane()) &&
-          !emittedToolCalls &&
-          !hasInterveningMutation,
+          (cfg.buildCapabilityGuard != null && !hasLandedBuildWrite(toolCallLog) && !shellMutationVerified) ||
+          ((cfg.requireToolCallOnFirstStep === true || isLocalSmallLane()) && !emittedToolCalls && !hasInterveningMutation),
         // Prose approval-asks can only stall a turn that was dispatched
         // to execute: on chat/plan turns the same wording is a valid
         // final answer, not a missing tool call. Execution intent rides
@@ -5075,6 +5117,10 @@ async function resumeAgentLoopV2Inner(
   if (workspaceChange) {
     localProgress.emit({ type: "workspace_change", ...workspaceChange });
   }
+  const buildVerificationFailure = cfg.buildCapabilityGuard && !cancelled && !failedHonestly
+    ? unverifiedBuildMessage(workspaceChange)
+    : undefined;
+  if (buildVerificationFailure) failedHonestly = buildVerificationFailure;
   // Round 11: settle from the run's evidence (run-settlement.ts) —
   // identical rule to the initial loop. The lion proof's failed run was
   // a resume: the deliverable (an approved, saved image generation)
@@ -5095,9 +5141,9 @@ async function resumeAgentLoopV2Inner(
   // text (live URL + what failed after it) — keep it over the generic
   // warning.
   const settledFinalText =
-    settlement.completedWithWarning && !completedDeployment
+    buildVerificationFailure ?? (settlement.completedWithWarning && !completedDeployment
       ? settlement.completedWithWarning
-      : gatedFinalText;
+      : gatedFinalText);
   // Round 14: generated images render inline in the settled text —
   // appended here, by the loop, only on a completed settlement.
   const finalTextWithChatImages =

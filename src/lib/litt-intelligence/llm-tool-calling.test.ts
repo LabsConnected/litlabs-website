@@ -209,6 +209,58 @@ afterEach(() => {
 // ─── Tests ────────────────────────────────────────────────────────
 
 describe("callLLMWithTools — provider selection", () => {
+  it("fails explicitly when Gemini billing, OpenRouter limits, and Cloudflare fail together", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");
+    vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", "test-account");
+    vi.stubEnv("CLOUDFLARE_AI_API_TOKEN", "test-cf-token");
+    mockFetch.mockImplementation(async (url: string) => {
+      const endpoint = String(url);
+      if (endpoint.includes("generativelanguage")) return makeGeminiErrorResponse(402, "billing unavailable");
+      if (endpoint.includes("openrouter")) return makeErrorResponse(429, "rate limited", { "retry-after": "120" });
+      if (endpoint.includes("cloudflare")) return makeErrorResponse(503, "upstream unavailable");
+      throw new Error(`Unexpected provider endpoint: ${endpoint}`);
+    });
+
+    const failure = await callLLMWithTools(
+      "Build a website",
+      [{ role: "user", content: "Write index.html" }],
+      [WRITE_TOOL],
+      { toolChoice: "required", allowTransientPlanRetry: true },
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AllRoutesFailedError);
+    const failures = (failure as AllRoutesFailedError).failures;
+    expect(failures.some((entry) => entry.provider === "gemini" && entry.class === "billing")).toBe(true);
+    expect(failures.some((entry) => entry.provider === "openrouter" && entry.class === "rate_limited")).toBe(true);
+    expect(failures.some((entry) => entry.provider === "cloudflare" && entry.class === "server_error")).toBe(true);
+    expect(callsTo("generativelanguage")).toHaveLength(1);
+    expect(callsTo("cloudflare")).toHaveLength(1);
+  });
+
+  it("sends required tool choice to Cloudflare and parses a structured file write", async () => {
+    vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", "test-account");
+    vi.stubEnv("CLOUDFLARE_AI_API_TOKEN", "test-cf-token");
+    vi.stubEnv("CLOUDFLARE_AI_MODEL", "@cf/mistralai/mistral-small-3.1-24b-instruct");
+    mockFetch.mockResolvedValueOnce(makeSuccessResponse(
+      "@cf/mistralai/mistral-small-3.1-24b-instruct",
+      "",
+      [{
+        id: "write1234", type: "function",
+        function: { name: "write_file", arguments: '{"path":"index.html","content":"updated"}' },
+      }],
+    ));
+
+    const result = await callLLMWithTools(
+      "Build a website",
+      [{ role: "user", content: "Write index.html" }],
+      [WRITE_TOOL], { toolChoice: "required" },
+    );
+
+    expect(result.provider).toBe("cloudflare");
+    expect(result.toolCalls).toMatchObject([{ toolId: "write_file", inputs: { path: "index.html", content: "updated" } }]);
+    expect(lastBodyFor("cloudflare").tool_choice).toBe("required");
+  });
   it("uses Gemini direct first when its credential is present", async () => {
     vi.stubEnv("GEMINI_API_KEY", "test-gemini-key");
     vi.stubEnv("OPENROUTER_API_KEY", "test-or-key");

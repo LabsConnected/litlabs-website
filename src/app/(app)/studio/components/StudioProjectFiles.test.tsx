@@ -254,9 +254,12 @@ describe("StudioProjectFiles", () => {
 
   it("panel linking (B3): an external studio:open-file event still selects the file", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [{ name: "README.md", type: "file", size: 10 }] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ content: "# from action" }), { status: 200 }));
+    fetchMock.mockImplementation(async (_input, init) => {
+      if (typeof init?.body === "string" && init.body.includes('"action":"read"')) {
+        return new Response(JSON.stringify({ content: "# from action" }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ entries: [{ name: "README.md", type: "file", size: 10 }] }), { status: 200 });
+    });
 
     render(<StudioProjectFiles projectId="project-1" repositoryName="owner/repo" branch="main" workspaceStatus="ready" writeAccess />);
 
@@ -264,6 +267,10 @@ describe("StudioProjectFiles", () => {
     fireEvent(window, new CustomEvent(STUDIO_EVENT_OPEN_FILE, { detail: { projectId: "project-1", path: "README.md" } }));
 
     const editor = await screen.findByRole("textbox", { name: "Edit README.md" });
-    expect((editor as HTMLTextAreaElement).value).toBe("# from action");
+    await waitFor(() => expect((editor as HTMLTextAreaElement).value).toBe("# from action"));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/studio-projects/project-1/files",
+      expect.objectContaining({ method: "POST", body: expect.stringContaining('"action":"read"') }),
+    );
   });
 });

@@ -148,6 +148,8 @@ describe("StudioPreviewPanel starter-template honesty", () => {
   it("opens the static preview URL in a new tab, not the dead runtime URL (ACC-01 F3)", async () => {
     mockFetch({ scaffolded: false, touched: true, starterContent: false }, STATIC_READY);
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     renderPanel();
 
     const button = await screen.findByTestId("preview-open-external");
@@ -161,6 +163,16 @@ describe("StudioPreviewPanel starter-template honesty", () => {
       "/api/preview/project-1/index.html",
       "_blank",
       "noopener,noreferrer",
+    );
+
+    // Copy uses the same effective URL the iframe shows — as an
+    // absolute URL, since pasted text cannot resolve origin-relative
+    // paths (PR #1103).
+    fireEvent.click(await screen.findByTestId("preview-copy-url"));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(
+        new URL("/api/preview/project-1/index.html", window.location.origin).href,
+      ),
     );
   });
 

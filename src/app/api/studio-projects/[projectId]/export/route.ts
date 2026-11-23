@@ -13,10 +13,8 @@ import { buildZip, type ZipEntryInput } from "@/lib/studio/zip";
  * terminal-server workspace recursively, reads every file, and packs a
  * deflate-compressed archive server-side.
  *
- * Truthful behavior: files that cannot be read (oversize, vanished mid-
- * export) are listed in an EXPORT-SKIPPED.txt manifest inside the archive
- * — never silently dropped. If the workspace has no files at all the
- * export fails with 409 rather than emitting an empty zip.
+ * An unreadable file or a traversal/size limit fails the entire request.
+ * A successful download therefore contains every listed project file.
  */
 
 const TERMINAL_BASE = () => requireTerminalBaseUrl();
@@ -27,7 +25,13 @@ const MAX_TOTAL_BYTES = 128 * 1024 * 1024; // 128MB uncompressed
 const FILE_READ_TIMEOUT_MS = 30_000;
 
 /** Directories that are environment state, not project content. */
-const SKIP_DIRS = new Set(["node_modules", ".git", ".next", ".turbo", "dist", "build"]);
+const SKIP_DIRS = new Set(["node_modules", ".git", ".next", ".turbo"]);
+
+class ExportError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
 
 interface ListedEntry {
   name: string;
@@ -142,11 +146,12 @@ export async function GET(
     // Recursive walk — folders are descended, skipped-dir names excluded,
     // everything else is a file to pack.
     const filePaths: string[] = [];
-    const skipped: string[] = [];
     let totalBytes = 0;
 
     async function walk(dir: string, depth: number): Promise<void> {
-      if (depth > MAX_WALK_DEPTH || filePaths.length >= MAX_FILES) return;
+      if (depth > MAX_WALK_DEPTH) {
+        throw new ExportError("Project files are nested too deeply to export safely.", 413);
+      }
       const { entries } = await terminalList(dir, workspaceId, token);
       for (const e of entries ?? []) {
         const rel = dir === "." ? e.name : `${dir}/${e.name}`;
@@ -156,6 +161,9 @@ export async function GET(
           if (SKIP_DIRS.has(e.name)) continue;
           await walk(rel, depth + 1);
         } else {
+          if (filePaths.length >= MAX_FILES) {
+            throw new ExportError("Project has too many files to export safely.", 413);
+          }
           filePaths.push(rel);
         }
       }
@@ -171,7 +179,10 @@ export async function GET(
         if (recovered.reprepared) {
           workspaceId = recovered.workspaceId;
           token = createTerminalToken(userId).token;
+          filePaths.length = 0;
           await walk(".", 0);
+        } else {
+          throw err;
         }
       } else {
         throw err;
@@ -187,30 +198,17 @@ export async function GET(
 
     const zipEntries: ZipEntryInput[] = [];
     for (const rel of filePaths) {
-      if (totalBytes > MAX_TOTAL_BYTES) {
-        skipped.push(`${rel} (export size limit reached)`);
-        continue;
-      }
       try {
         const data = await terminalRead(rel, workspaceId, token);
         totalBytes += data.length;
+        if (totalBytes > MAX_TOTAL_BYTES) {
+          throw new ExportError("Project exceeds the export size limit.", 413);
+        }
         zipEntries.push({ name: rel, data });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "unreadable";
-        skipped.push(`${rel} (${msg.slice(0, 160)})`);
+        if (err instanceof ExportError) throw err;
+        throw new ExportError(`Could not read ${rel} for export. Retry after checking the file.`, 409);
       }
-    }
-
-    if (skipped.length > 0) {
-      zipEntries.push({
-        name: "EXPORT-SKIPPED.txt",
-        data: Buffer.from(
-          "These workspace files could not be included in this export:\n\n" +
-            skipped.map((s) => `- ${s}`).join("\n") +
-            "\n",
-          "utf-8",
-        ),
-      });
     }
 
     const zip = buildZip(zipEntries);
@@ -223,14 +221,14 @@ export async function GET(
         "Content-Disposition": `attachment; filename="${filename}"`,
         "Content-Length": String(zip.length),
         "Cache-Control": "no-store",
-        "X-Export-File-Count": String(zipEntries.length - (skipped.length > 0 ? 1 : 0)),
-        "X-Export-Skipped": String(skipped.length),
+        "X-Export-File-Count": String(zipEntries.length),
       },
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Export failed";
     const code = (err as { code?: string }).code;
     const status =
+      err instanceof ExportError ? err.status :
       code === "PROJECT_NOT_FOUND" ? 404 :
       code === "FORBIDDEN" ? 403 :
       code === "WORKSPACE_NOT_PROVISIONED" || code === "WORKSPACE_NOT_READY" ? 409 :

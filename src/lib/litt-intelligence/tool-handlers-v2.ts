@@ -205,8 +205,12 @@ export const handleFilesWrite: ToolHandler = async (inputs, transport) => {
           if (overwrite) return { success: false, error: overwrite };
         }
       }
-    } catch {
-      // Unreadable target = a new file — nothing to preserve.
+    } catch (readError) {
+      const message = readError instanceof Error ? readError.message : String(readError);
+      if (!/\b404\b|\bENOENT\b|not found|missing file|no such file/i.test(message)) {
+        return { success: false, error: `Could not verify the existing content of ${path}; retry after workspace access is restored.` };
+      }
+      // Only a confirmed missing target may be created without a comparison.
     }
   }
 

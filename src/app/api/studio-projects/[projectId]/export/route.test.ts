@@ -27,6 +27,7 @@ vi.mock("@/lib/studio/workspace-recovery", () => ({
 
 import { auth } from "@/lib/auth";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
+import { ensureWorkspaceAlive } from "@/lib/studio/workspace-recovery";
 
 const authMock = vi.mocked(auth);
 const verifyMock = vi.mocked(verifyProjectWorkspace);
@@ -129,7 +130,7 @@ describe("studio-projects export route", () => {
     vi.unstubAllGlobals();
   });
 
-  it("manifests unreadable files instead of dropping them silently", async () => {
+  it("fails the export when a listed file cannot be read", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/ws-files/read")) {
@@ -147,12 +148,58 @@ describe("studio-projects export route", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const res = await GET(new Request("http://x/export") as never, makeParams());
+    expect(res.status).toBe(409);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    expect((await res.json()).error).toContain("big.bin");
+    vi.unstubAllGlobals();
+  });
+
+  it("fails instead of returning a partial archive when the file-count limit is reached", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/ws-files/read")) return readResponse(Buffer.from("ok"));
+      return listResponse(Array.from({ length: 2001 }, (_, i) => ({ name: `file-${i}.txt`, type: "file" })));
+    }));
+
+    const res = await GET(new Request("http://x/export") as never, makeParams());
+    expect(res.status).toBe(413);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    vi.unstubAllGlobals();
+  });
+
+  it("fails instead of returning a partial archive when traversal is too deep", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/ws-files/read")) return readResponse(Buffer.from("ok"));
+      const path = new URL(String(input)).searchParams.get("path") ?? ".";
+      const depth = path === "." ? 0 : path.split("/").length;
+      return listResponse(depth > 10
+        ? [{ name: "deep.txt", type: "file" }]
+        : [{ name: "nested", type: "folder" }, { name: `at-${depth}.txt`, type: "file" }]);
+    }));
+
+    const res = await GET(new Request("http://x/export") as never, makeParams());
+    expect(res.status).toBe(413);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    vi.unstubAllGlobals();
+  });
+
+  it("discards partial file lists when a lost workspace is re-prepared", async () => {
+    vi.mocked(ensureWorkspaceAlive).mockResolvedValue({ reprepared: true, workspaceId: "ws-2" } as never);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const workspaceId = new Headers(init?.headers).get("X-Workspace-Id");
+      if (url.includes("/ws-files/read")) return readResponse(Buffer.from("new version"));
+      if (workspaceId === "ws-1" && url.includes("path=nested")) return new Response("gone", { status: 404 });
+      if (workspaceId === "ws-1") return listResponse([
+        { name: "old.txt", type: "file" }, { name: "nested", type: "folder" },
+      ]);
+      return listResponse([{ name: "new.txt", type: "file" }]);
+    }));
+
+    const res = await GET(new Request("http://x/export") as never, makeParams());
     expect(res.status).toBe(200);
     const entries = unzip(Buffer.from(await res.arrayBuffer()));
-    expect(entries.get("index.html")?.toString()).toBe("ok");
-    const manifest = entries.get("EXPORT-SKIPPED.txt")?.toString();
-    expect(manifest).toContain("big.bin");
-    expect(res.headers.get("x-export-skipped")).toBe("1");
+    expect([...entries.keys()]).toEqual(["new.txt"]);
+    expect(entries.get("new.txt")?.toString()).toBe("new version");
     vi.unstubAllGlobals();
   });
 
