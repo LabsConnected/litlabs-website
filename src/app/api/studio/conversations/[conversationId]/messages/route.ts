@@ -28,6 +28,7 @@ import {
   parseRuntimeContextHint,
   HISTORY_LIMIT,
 } from "@/lib/litt-runtime";
+import { slugToMode } from "@/lib/litt-intelligence/agent-identity";
 import { runAgentLoop } from "@/lib/litt-intelligence/agent-loop";
 import { runAgentLoopV2, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
 import { findToolCallMarkup, stripToolCallMarkupText } from "@/lib/litt-intelligence/tool-call-markup";
@@ -1039,6 +1040,10 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         messageId: assistantMessage.id,
         idempotencyKey: clientRequestId,
         model: runtimeAgent?.model,
+        // agent_runs.agent_mode is check-constrained to the AgentMode
+        // values — derive it from the resolved agent slug, never from
+        // the model name (ACC-01 F7).
+        agentMode: slugToMode(agentSlug),
         // Simulation-aware billing: agent-billing's isBillingExempt
         // check receives the resolved simulation, so under a simulated
         // tier (including Zero-LiTTBits) the reservation actually

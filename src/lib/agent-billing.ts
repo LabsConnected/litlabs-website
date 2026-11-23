@@ -20,6 +20,11 @@
  */
 
 import { supabaseAdmin, getSupabaseAdmin } from "@/lib/supabase";
+import {
+  DEFAULT_AGENT_MODE,
+  isValidAgentMode,
+  type AgentMode,
+} from "@/lib/litt-intelligence/agent-identity";
 import { isBillingExempt, type SimulatedPlan } from "@/lib/owner";
 import { emitUsageEvent } from "@/lib/metering";
 import { calculateLlmCost } from "@/lib/llm-cost-engine";
@@ -34,6 +39,15 @@ export interface AgentRunContext {
   idempotencyKey: string;
   model?: string;
   provider?: string;
+  /**
+   * The run's agent_mode, written to the agent_runs row. Must be one of
+   * the DB check-constraint values ('standard' | 'builder' | 'research' |
+   * 'spark') — never a model name. Defaults to DEFAULT_AGENT_MODE.
+   * (ACC-01 F7: the inserts previously wrote `ctx.model ?? "default"`,
+   * which always violated agent_runs_agent_mode_check once built-in
+   * Studio runs started reserving for real.)
+   */
+  agentMode?: AgentMode;
   /** Optional owner simulation override for billing-exempt checks. */
   simulation?: SimulatedPlan | null;
 }
@@ -195,7 +209,7 @@ export async function reserveCredits(
         task: ctx.idempotencyKey,
         idempotency_key: ctx.idempotencyKey,
         status: "running",
-        agent_mode: ctx.model ?? "default",
+        agent_mode: ctx.agentMode ?? DEFAULT_AGENT_MODE,
         input: {
           agent_id: ctx.agentId,
           agent_version_id: ctx.agentVersionId,
@@ -314,7 +328,7 @@ export async function reserveCredits(
       task: ctx.idempotencyKey,
       idempotency_key: ctx.idempotencyKey,
       status: "running",
-      agent_mode: ctx.model ?? "default",
+      agent_mode: ctx.agentMode ?? DEFAULT_AGENT_MODE,
       input: {
         agent_id: ctx.agentId,
         agent_version_id: ctx.agentVersionId,
@@ -760,13 +774,17 @@ export async function reserveResumeCredits(params: {
     // instance id otherwise); input carries agent/model/provider.
     const { data: priorRuns } = await admin
       .from("agent_runs")
-      .select("agent_name, input")
+      .select("agent_name, agent_mode, input")
       .eq("user_id", user.id)
       .filter("input->>conversation_id", "eq", params.conversationId)
       .order("started_at", { ascending: false })
       .limit(1);
     const prior = (priorRuns ?? [])[0] as
-      | { agent_name?: unknown; input?: Record<string, unknown> | null }
+      | {
+          agent_name?: unknown;
+          agent_mode?: unknown;
+          input?: Record<string, unknown> | null;
+        }
       | undefined;
     if (!prior || typeof prior.agent_name !== "string" || !prior.agent_name) {
       return { engaged: false };
@@ -786,6 +804,11 @@ export async function reserveResumeCredits(params: {
         idempotencyKey: `approval-resume:${params.pausedRunId}`,
         model: typeof priorInput.model === "string" ? priorInput.model : undefined,
         provider: typeof priorInput.provider === "string" ? priorInput.provider : undefined,
+        // Carry the original run's mode into the resume's run row. Rows
+        // written before the F7 fix can hold a model name or "default"
+        // in agent_mode — anything that is not a valid mode falls back
+        // to reserveCredits' standard default.
+        agentMode: isValidAgentMode(prior.agent_mode) ? prior.agent_mode : undefined,
       },
       estimatedCost,
     );
