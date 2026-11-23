@@ -21,7 +21,7 @@ async function handler(req: NextRequest) {
       return NextResponse.json({
         plan: PLANS.starter,
         subscription: null,
-        balances: { monthly: 0, purchased: 0, beta_promotional: 0, total: 0 },
+        balances: { monthly: 0, purchased: 0, beta_promotional: 0, starter: 0, total: 0 },
         billingExempt: false,
       });
     }
@@ -36,7 +36,7 @@ async function handler(req: NextRequest) {
       return NextResponse.json({
         plan: PLANS.starter,
         subscription: null,
-        balances: { monthly: 0, purchased: 0, beta_promotional: 0, total: 0 },
+        balances: { monthly: 0, purchased: 0, beta_promotional: 0, starter: 0, total: 0 },
         billingExempt: false,
       });
     }
@@ -72,13 +72,16 @@ async function handler(req: NextRequest) {
       }
     }
 
-    let balances = { monthly: 0, purchased: 0, beta_promotional: 0, total: 0 };
+    let balances = { monthly: 0, purchased: 0, beta_promotional: 0, starter: 0, total: 0 };
     try {
       const creditBalances = await getCreditBalances(clerkId);
       balances = {
         monthly: creditBalances.monthly,
         purchased: creditBalances.purchased,
         beta_promotional: creditBalances.betaPromotional,
+        // One-time Starter remainder inside the monthly bucket (ACC-01 F6
+        // labeling) — the settings page splits it out of the Monthly tile.
+        starter: creditBalances.starter ?? 0,
         total: creditBalances.total,
       };
     } catch {
@@ -87,7 +90,7 @@ async function handler(req: NextRequest) {
 
     // If simulating zero-bits, override the displayed balance to 0
     if (simulatedZeroBalance) {
-      balances = { monthly: 0, purchased: 0, beta_promotional: 0, total: 0 };
+      balances = { monthly: 0, purchased: 0, beta_promotional: 0, starter: 0, total: 0 };
     }
 
     return NextResponse.json({

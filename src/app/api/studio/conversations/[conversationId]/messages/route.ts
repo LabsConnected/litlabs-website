@@ -20,6 +20,7 @@ import type { AgentSlug, MessageStatus } from "@/lib/studio/types";
 import { parseAgentSelection } from "@/lib/agent-selection";
 import { resolveRuntimeAgent, type RuntimeAgent } from "@/lib/agent-runtime";
 import { reserveCredits, settleRun, estimateCredits } from "@/lib/agent-billing";
+import { getCreditBalances } from "@/lib/wallet-ledger";
 import { runWithMeteringContext } from "@/lib/metering";
 import {
   buildPrompt,
@@ -982,7 +983,18 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     return NextResponse.json({ error: "Failed to create assistant message" }, { status: 500 });
   }
 
-  // 11.5. Reserve credits BEFORE the model call (marketplace agents only)
+  // 11.5. Reserve credits BEFORE the model call.
+  //
+  // ACC-01 F6: this used to engage only for marketplace agent instances
+  // (`runtimeAgent?.agentInstanceId`), but built-in Studio agents resolve
+  // with agentInstanceId=null — so the default Studio experience (the runs
+  // a paying customer actually makes) never reserved and never settled,
+  // and verified completed work was delivered with zero debit (balance
+  // 4,000 → 4,000 across a full acceptance journey). Built-ins now bill
+  // under a stable synthetic instance id, `builtin:<slug>`, through the
+  // exact same reserve → settle machinery; owner exemption and simulated
+  // tiers are still decided inside reserveCredits.
+  const billingInstanceId = runtimeAgent?.agentInstanceId ?? `builtin:${agentSlug}`;
   let agentRunId: string | null = null;
   let reservedCredits = 0;
   let reservationId: string | null = null;
@@ -1005,20 +1017,28 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
       });
     }
   };
-  if (runtimeAgent?.agentInstanceId && clerkId) {
+  if (clerkId) {
+    // Built-in path only: make sure the one-time Starter grant exists
+    // before reserving, so a new account whose Clerk webhook was missed
+    // is not 402'd on its first run. getCreditBalances grants it
+    // idempotently; any failure falls through and reserve_bits answers
+    // honestly from the real balance.
+    if (!runtimeAgent?.agentInstanceId) {
+      await getCreditBalances(clerkId).catch(() => undefined);
+    }
     // Estimate the maximum cost: per-run fee + estimated tokens
     const estimatedTokens = Math.ceil(finalPrompt.length / 4) + 2048; // prompt + max output
     const estimatedCost = estimateCredits(estimatedTokens, 0, 1, 1);
     const reserveResult = await reserveCredits(
       {
         clerkId,
-        agentInstanceId: runtimeAgent.agentInstanceId,
-        agentId: runtimeAgent.agentId,
-        agentVersionId: runtimeAgent.agentVersionId,
+        agentInstanceId: billingInstanceId,
+        agentId: runtimeAgent?.agentId ?? null,
+        agentVersionId: runtimeAgent?.agentVersionId ?? null,
         conversationId: conversation.id,
         messageId: assistantMessage.id,
         idempotencyKey: clientRequestId,
-        model: runtimeAgent.model,
+        model: runtimeAgent?.model,
         // Simulation-aware billing: agent-billing's isBillingExempt
         // check receives the resolved simulation, so under a simulated
         // tier (including Zero-LiTTBits) the reservation actually
@@ -1652,34 +1672,6 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               toolCalls: v2ToolCalls.map((c) => ({ toolId: c.toolId, success: c.success, mutating: c.mutating, paths: c.paths, persisted: c.persisted })),
               deployment: deploymentEvidenceFrom(v2ToolCalls),
               workspaceChange: v2Result?.workspaceChange ?? null,
-              // Preview evidence comes from the launch flow's own verified
-              // status — never a tool's self-report. Only set for build-flow
-              // statuses that actually ran a preview phase; "completed"
-              // (read-only/exec/media turns have no preview phase) and
-              // "cancelled" leave it unset so they are unaffected. A "failed"
-              // status alone is not enough: the flow also returns "failed"
-              // for pre-preview failures (build checks, missing artifacts)
-              // that never launched a preview — previewAttempted distinguishes
-              // those so their real error text is not replaced by a preview
-              // verdict.
-              ...(launchFlowResult &&
-              (launchFlowResult.status === "preview_ready" ||
-                launchFlowResult.status === "deployed" ||
-                (launchFlowResult.status === "failed" &&
-                  launchFlowResult.previewAttempted === true))
-                ? {
-                    preview: {
-                      started:
-                        launchFlowResult.status !== "failed" ||
-                        !!launchFlowResult.previewUrl,
-                      ready:
-                        launchFlowResult.status === "preview_ready" ||
-                        launchFlowResult.status === "deployed" ||
-                        !!launchFlowResult.previewUrl,
-                      failed: launchFlowResult.status === "failed",
-                    },
-                  }
-                : {}),
             })
           : null;
         const executionNotVerified =
@@ -1771,9 +1763,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           });
         }
         if (agentRunId) {
-          const actualCredits = runtimeAgent
-            ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
-            : 0;
+          // ACC-01 F6: the settle amount never depended on the agent kind —
+          // the old `runtimeAgent ? … : 0` forced every built-in run to
+          // settle at 0 even when a reservation existed. Estimate from the
+          // same prompt/response sizes the reserve used.
+          const actualCredits = estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1);
           await finishAgentBilling({
             inputTokens: Math.ceil(finalPrompt.length / 4),
             outputTokens: Math.ceil(assistantText.length / 4),
@@ -2041,9 +2035,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                       : undefined),
           );
           if (agentRunId) {
-            const actualCredits = runtimeAgent
-              ? estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1)
-              : 0;
+            // ACC-01 F6: see the V2 settle site — built-in runs settle a
+            // real estimated amount, not a forced 0.
+            const actualCredits = estimateCredits(Math.ceil(finalPrompt.length / 4), Math.ceil(assistantText.length / 4), 1, 1);
             await finishAgentBilling({
               inputTokens: Math.ceil(finalPrompt.length / 4),
               outputTokens: Math.ceil(assistantText.length / 4),

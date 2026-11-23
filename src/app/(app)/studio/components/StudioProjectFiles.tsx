@@ -24,6 +24,7 @@ import { copyToClipboard } from "@/lib/studio/message-copy";
 import { useBoardPanelStatusStore } from "../stores/useBoardPanelStatusStore";
 import { attemptWorkspacePrepare, isHostExecSettled } from "@/lib/studio/host-exec-session";
 import { HOST_EXECUTION_UNAVAILABLE_MESSAGE } from "@/lib/projects/runtime-state";
+import { downloadProjectExport } from "../lib/export-project";
 
 interface FileEntry {
   name: string;
@@ -341,40 +342,26 @@ export default function StudioProjectFiles({
     );
   }, [authHeaders, projectId]);
 
+  // ACC-01 F5: export goes through the canonical client path
+  // (lib/export-project) — the same one Static View uses. The previous
+  // local copy revoked the object URL synchronously in `finally`,
+  // which can cancel the download before the browser commits it, and
+  // the button was hard-disabled whenever the terminal workspace
+  // status was not "ready", so for sandbox projects the click did
+  // nothing at all — no download, no message. The export endpoint
+  // verifies/recovers the workspace itself and returns an honest
+  // error; surface that verdict instead of pre-judging it here.
   const exportZip = useCallback(async () => {
     if (!projectId || exporting) return;
     setExporting(true);
     setError(null);
-    let objectUrl: string | null = null;
     try {
-      const response = await fetchWithTimeout(
-        `/api/studio-projects/${encodeURIComponent(projectId)}/export`,
-        { credentials: "include", headers: await authHeaders() },
-        120_000,
-      );
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
-        throw new Error(
-          typeof payload?.error === "string" ? payload.error : `Export failed (${response.status})`,
-        );
-      }
-      const blob = await response.blob();
-      const disposition = response.headers.get("content-disposition") ?? "";
-      const match = /filename="([^"]+)"/.exec(disposition);
-      objectUrl = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = objectUrl;
-      anchor.download = match?.[1] ?? "project-export.zip";
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-    } catch (exportError) {
-      setError(exportError instanceof Error ? exportError.message : "Export failed");
+      const result = await downloadProjectExport(projectId, getToken);
+      if (!result.ok) setError(result.error);
     } finally {
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
       setExporting(false);
     }
-  }, [projectId, exporting, authHeaders]);
+  }, [projectId, exporting, getToken]);
 
   const loadDirectory = useCallback(async (directory: string, silent = false) => {
     if (!projectId) return;
@@ -922,7 +909,7 @@ export default function StudioProjectFiles({
       <div className="flex shrink-0 items-center gap-1 overflow-x-auto rounded-lg border p-1" style={{ borderColor: "var(--studio-border)" }}>
         <button type="button" onClick={() => setDialog({ kind: "file", directory: ".", value: "" })} disabled={!writeAccess} className="flex min-h-10 items-center gap-1.5 rounded-md px-2 text-[9px] font-bold hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-35" title="Create file"><Plus size={12} /> File</button>
         <button type="button" onClick={() => setDialog({ kind: "folder", directory: ".", value: "" })} disabled={!writeAccess} className="flex min-h-10 items-center gap-1.5 rounded-md px-2 text-[9px] font-bold hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-35" title="Create folder"><FolderPlus size={12} /> Folder</button>
-        <button type="button" onClick={() => void exportZip()} disabled={exporting || workspaceStatus !== "ready"} className="flex min-h-10 items-center gap-1.5 rounded-md px-2 text-[9px] font-bold hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-35" title="Download project as ZIP" aria-label="Download project as ZIP" data-testid="studio-export-zip">{exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} ZIP</button>
+        <button type="button" onClick={() => void exportZip()} disabled={exporting} className="flex min-h-10 items-center gap-1.5 rounded-md px-2 text-[9px] font-bold hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-35" title="Download project as ZIP" aria-label="Download project as ZIP" data-testid="studio-export-zip">{exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} ZIP</button>
         <span className="ml-auto shrink-0 px-1 text-[9px]" style={{ color: "var(--text-muted)" }}>{loading ? "Loading…" : `${Object.values(entries).flat().length} loaded`}</span>
       </div>
 

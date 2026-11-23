@@ -397,6 +397,12 @@ export default function StudioPreviewPanel({
   // until the lookup resolves — starter labeling waits for the truth
   // rather than guessing.
   const [workspaceContent, setWorkspaceContent] = useState<{ touched: boolean; starterContent: boolean } | null>(null);
+  // ACC-01 F3: bumped on every completed preview-status load. The
+  // workspace-state effect keys on it so the starter/content truth is
+  // refetched whenever the panel learns anything new about the runtime
+  // — a status transition dep alone can be collapsed by React batching
+  // when starting → ready land in the same tick.
+  const [statusTick, setStatusTick] = useState(0);
   // Project secrets editor (Clerk keys for the preview runtime). Toggled
   // from the toolbar; auto-opened from the auth-config error CTA.
   const [secretsOpen, setSecretsOpen] = useState(false);
@@ -696,6 +702,7 @@ export default function StudioPreviewPanel({
         return next.state;
       });
       setPreviewUrl(next.url);
+      setStatusTick((tick) => tick + 1);
       setError(next.error);
       setErrorCode(next.errorCode);
       setFramework(typeof payload.framework === "string" ? payload.framework : null);
@@ -775,7 +782,15 @@ export default function StudioPreviewPanel({
       }
     })();
     return () => { cancelled = true; };
-  }, [projectId, refreshKey, authHeaders]);
+    // ACC-01 F3: `statusTick` is a dependency on purpose. The workspace
+    // truth was previously fetched once at mount (plus parent-driven
+    // refreshKey bumps the standalone Static View never receives), so
+    // a panel opened on a brand-new project kept reporting the starter
+    // scaffold forever — the header claimed "nothing has been built"
+    // while the frame below it rendered the built site. Every
+    // completed status load bumps the tick, so the truth is refetched
+    // whenever the panel learns anything new about the runtime.
+  }, [projectId, refreshKey, authHeaders, statusTick]);
 
   // Refresh when refreshKey prop changes (used by CodeWorkspace split view
   // and the permanent preview column's workspaceRevision prop)
@@ -1124,6 +1139,7 @@ export default function StudioPreviewPanel({
       }
       setState(next.state);
       setPreviewUrl(next.url);
+      setStatusTick((tick) => tick + 1);
       setError(next.error);
       setErrorCode(next.errorCode);
       if (next.state === "ready") setFrameKey((value) => value + 1);
@@ -1228,16 +1244,30 @@ export default function StudioPreviewPanel({
     void preparePreview();
   }, [state, projectId, preparePreview, workspaceTruth, workspaceRefusalCode, errorCode]);
 
+  // Static projects use the static preview endpoint (no dev server).
+  // Framework comes from the preview payload; "static" means HTML/CSS/JS only.
+  // Use explicit /index.html so relative assets (style.css, app.js) resolve correctly.
+  // ACC-01 F3: this effective URL — the one the iframe actually displays —
+  // is also what Copy and Open-in-new-tab must use. Both previously used
+  // the raw runtime `previewUrl`, which for a static project points at a
+  // dev server that does not exist, so "Open Static View in new tab"
+  // opened nothing.
+  const isStaticProject = framework === "static";
+  const staticPreviewUrl = isStaticProject && projectId
+    ? `/api/preview/${encodeURIComponent(projectId)}/index.html`
+    : null;
+  const effectivePreviewUrl = isStaticProject ? staticPreviewUrl : previewUrl;
+
   const handleCopyUrl = useCallback(async () => {
-    if (!previewUrl) return;
+    if (!effectivePreviewUrl) return;
     try {
-      await navigator.clipboard.writeText(previewUrl);
+      await navigator.clipboard.writeText(effectivePreviewUrl);
       setUrlCopied(true);
       setTimeout(() => setUrlCopied(false), 2000);
     } catch {
       // Clipboard API may be blocked — ignore silently
     }
-  }, [previewUrl]);
+  }, [effectivePreviewUrl]);
 
   const stopPreview = async () => {
     if (!projectId) return;
@@ -1270,14 +1300,6 @@ export default function StudioPreviewPanel({
     void loadStatus(true);
   }, [loadStatus]);
 
-  // Static projects use the static preview endpoint (no dev server).
-  // Framework comes from the preview payload; "static" means HTML/CSS/JS only.
-  // Use explicit /index.html so relative assets (style.css, app.js) resolve correctly.
-  const isStaticProject = framework === "static";
-  const staticPreviewUrl = isStaticProject && projectId 
-    ? `/api/preview/${encodeURIComponent(projectId)}/index.html` 
-    : null;
-  const effectivePreviewUrl = isStaticProject ? staticPreviewUrl : previewUrl;
   const displayUrl = effectivePreviewUrl ? `${effectivePreviewUrl}${effectivePreviewUrl.includes("?") ? "&" : "?"}studioRefresh=${frameKey}` : null;
   const isAuthConfigError = errorCode === "preview_clerk_config_error" || errorCode === "preview_auth_config_error";
   // Wave-4 truth: a HOST_EXECUTION_DISABLED failure is the hosted service's
@@ -1671,7 +1693,7 @@ export default function StudioPreviewPanel({
           </button>
         )}
         {/* Copy URL */}
-        {isLive && previewUrl && (
+        {isLive && effectivePreviewUrl && (
           <button
             type="button"
             onClick={() => void handleCopyUrl()}
@@ -2057,10 +2079,10 @@ export default function StudioPreviewPanel({
               Logs
             </button>
           )}
-          {previewUrl && (
+          {effectivePreviewUrl && (
             <button
               type="button"
-              onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")}
+              onClick={() => window.open(effectivePreviewUrl, "_blank", "noopener,noreferrer")}
               className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold transition hover:bg-black/5"
               style={{ color: "var(--text-secondary)" }}
               aria-label="Open Static View in new tab"

@@ -13,6 +13,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   computeWorkspaceChange,
   workspaceChangeFromVolumeListing,
+  workspaceChangeFromDirectReads,
   type WorkspaceChangeProbe,
 } from "../workspace-change-producer";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
@@ -111,5 +112,52 @@ describe("workspaceChangeFromVolumeListing — evidence fallback (Q2b)", () => {
       listDir: vi.fn(async () => [{ name: "a-lion-mwjuqfd3.jpeg", type: "directory" }]),
     });
     expect(result).toBe(UNKNOWN);
+  });
+});
+
+describe("workspaceChangeFromDirectReads — evidence fallback (ACC-01 F1)", () => {
+  it("reports changed when a declared path reads back directly", async () => {
+    const result = await workspaceChangeFromDirectReads(UNKNOWN, {
+      candidatePaths: ["index.html"],
+      readFile: vi.fn(async () => ({ content: "<html>Harbor Lights Coffee</html>" })),
+    });
+    expect(result.status).toBe("changed");
+    expect(result.files).toEqual(["index.html"]);
+    expect(result.evidenceSource).toBe("direct-read");
+    expect(result.rollbackAvailable).toBe(false);
+  });
+
+  it("verifies only the candidates that actually read back", async () => {
+    const result = await workspaceChangeFromDirectReads(UNKNOWN, {
+      candidatePaths: ["index.html", "assets/app.js"],
+      readFile: vi.fn(async (path: string) => {
+        if (path === "index.html") return { content: "<html>ok</html>" };
+        throw new Error("404 not found");
+      }),
+    });
+    expect(result.status).toBe("changed");
+    expect(result.files).toEqual(["index.html"]);
+  });
+
+  it("leaves the primary unknown when nothing reads back", async () => {
+    const result = await workspaceChangeFromDirectReads(UNKNOWN, {
+      candidatePaths: ["index.html"],
+      readFile: vi.fn(async () => {
+        throw new Error("workspace unreachable");
+      }),
+    });
+    expect(result).toBe(UNKNOWN);
+  });
+
+  it("never touches a non-unknown primary and never reads without candidates", async () => {
+    const changed: WorkspaceChangeEvidence = {
+      status: "changed",
+      files: ["index.html"],
+      rollbackAvailable: true,
+    };
+    const readFile = vi.fn(async () => ({ content: "x" }));
+    expect(await workspaceChangeFromDirectReads(changed, { candidatePaths: ["index.html"], readFile })).toBe(changed);
+    expect(await workspaceChangeFromDirectReads(UNKNOWN, { candidatePaths: [], readFile })).toBe(UNKNOWN);
+    expect(readFile).not.toHaveBeenCalled();
   });
 });

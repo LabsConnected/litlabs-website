@@ -28,7 +28,7 @@ export type { LLMMessage };
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { buildPatchRecoveryMessage, existingPageOverwriteError, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
-import { computeWorkspaceChange, workspaceChangeFromVolumeListing } from "./workspace-change-producer";
+import { computeWorkspaceChange, workspaceChangeFromVolumeListing, workspaceChangeFromDirectReads } from "./workspace-change-producer";
 import { settleRunOutcome, type RunFailureContributor } from "./run-settlement";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { recordModelFailure } from "./provider-registry";
@@ -1205,12 +1205,21 @@ async function settleWorkspaceChangeEvidence(
     ),
   ];
   if (candidatePaths.length === 0) return primary;
-  return workspaceChangeFromVolumeListing(primary, {
+  const fromListing = await workspaceChangeFromVolumeListing(primary, {
     candidatePaths,
     listDir: async (dir) => {
       const listing = await transport.listFiles(dir);
       return listing.entries.map((e) => ({ name: e.name, type: e.type }));
     },
+  });
+  if (fromListing.status !== "unknown") return fromListing;
+  // ACC-01 F1: when the listing channel cannot answer either, read the
+  // declared paths directly — the channel the Files panel proves
+  // reaches the volume — before settling for an unexplained "unknown"
+  // that fails a run whose work verifiably landed.
+  return workspaceChangeFromDirectReads(fromListing, {
+    candidatePaths,
+    readFile: (path) => transport.readFile(path),
   });
 }
 
@@ -1349,6 +1358,9 @@ async function listingKind(
  *   image.generate / project.insert_asset — the asset path the tool
  *     returned must exist in the workspace listing (binary-safe: the
  *     parent is listed, never the bytes).
+ *   site.compose — the composed page must read back carrying the plan's
+ *     identity anchors (title + hero heading). site.patch — the patched
+ *     section's claimed text must be present in the read-back.
  *   preview.start / preview.stop — the preview service's own status probe
  *     must confirm the lifecycle state the tool claimed.
  *   everything else (terminal.execute, deploys, browser.*, …) — not
@@ -1485,6 +1497,75 @@ async function readBackMutation(
     // (savedToProject:false): the asset the result implies is not there.
     if (r?.savedToProject === false) return { path: null, verified: false };
     return null;
+  }
+
+  if (toolId === "site.compose") {
+    // ACC-01 F1: site.compose is the DEFAULT page-creation tool, but it
+    // used to fall through to the null return below — never read-back
+    // verified. Its mutations therefore carried persisted=undefined and
+    // depended entirely on the checkpoint diff, which a gitless (static)
+    // workspace can never produce; when the volume-listing fallback also
+    // could not answer, a build that verifiably wrote the page settled
+    // as "partial" and was reported FAILED ("could not verify whether
+    // files changed") over a correct file. Verify the composed page the
+    // same way apply_patch is verified — by the presence of what the
+    // call claimed to put there: the plan's identity anchors (title and
+    // hero heading are embedded verbatim by composeSiteHtml, in raw or
+    // HTML-escaped form).
+    const path = str(r?.path) ?? str(inputs.path) ?? "index.html";
+    let content: string;
+    try {
+      content = (await transport.readFile(path)).content;
+    } catch (err) {
+      return {
+        path,
+        verified: readFailedBecauseMissing(err) ? false : null,
+        readable: false,
+        contentMatches: false,
+      };
+    }
+    const plan = (
+      inputs.plan && typeof inputs.plan === "object" ? inputs.plan : inputs
+    ) as Record<string, unknown>;
+    const hero =
+      plan.hero && typeof plan.hero === "object"
+        ? (plan.hero as Record<string, unknown>)
+        : null;
+    const escHtml = (s: string): string =>
+      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const anchors = [str(plan.title), str(hero?.heading)].filter(
+      (a): a is string => !!a,
+    );
+    if (anchors.length === 0) {
+      return { path, verified: content.trim().length > 0, readable: true, contentMatches: null };
+    }
+    const allPresent = anchors.every(
+      (a) => content.includes(a) || content.includes(escHtml(a)),
+    );
+    return { path, verified: allPresent, readable: true, contentMatches: allPresent };
+  }
+
+  if (toolId === "site.patch") {
+    // ACC-01 F1: same gap as site.compose — a section splice reported
+    // success with no read-back, so its persistence rested entirely on
+    // the checkpoint diff. The claim is the patched field text; its
+    // presence in the read-back is the proof (apply_patch's standard).
+    const path = str(inputs.path) ?? "index.html";
+    let content: string;
+    try {
+      content = (await transport.readFile(path)).content;
+    } catch (err) {
+      return {
+        path,
+        verified: readFailedBecauseMissing(err) ? false : null,
+        readable: false,
+        contentMatches: false,
+      };
+    }
+    const claimed = str(inputs.text) ?? str(inputs.heading) ?? str(inputs.subheading);
+    if (!claimed) return { path, verified: true, readable: true, contentMatches: null };
+    const present = content.includes(claimed);
+    return { path, verified: present, readable: true, contentMatches: present };
   }
 
   if (toolId === "preview.start" || toolId === "preview.stop") {
@@ -2583,6 +2664,25 @@ async function runAgentLoopV2Inner(
         }
       }
 
+      // Patch-recovery fallback: when an apply_patch for this path was
+      // rejected earlier in this run, the loop's own recovery guidance
+      // offers files.write of the complete corrected contents as the
+      // sanctioned fallback — a loop-directed overwrite derived from
+      // the current file content the rejection feedback supplied, not a
+      // blind regeneration. Mark it as a declared overwrite so the
+      // full-overwrite gate (pre-approval check + handler floor) lets
+      // the recovery land; without this the gate refuses the very
+      // fallback the loop instructed (ACC-01 F2 follow-on).
+      if (
+        (toolCall.toolId === "files.write" || toolCall.toolId === "site.compose") &&
+        toolCall.inputs?.allowOverwrite !== true &&
+        (patchRecoveryAttempts.get(
+          `apply_patch:${typeof toolCall.inputs?.path === "string" ? toolCall.inputs.path : "index.html"}`,
+        ) ?? 0) > 0
+      ) {
+        toolCall.inputs = { ...toolCall.inputs, allowOverwrite: true };
+      }
+
       // Check permissions
       const permInfo = toPermissionInfo(toolDef);
       const permResult = permissionEngine.check(permInfo, toolCall.inputs, cfg.executionMode, availableCapabilities);
@@ -2618,13 +2718,18 @@ async function runAgentLoopV2Inner(
             : toolCall.toolId === "files.write"
               ? validateFilesWriteInputs(toolCall.inputs)
               : null;
-        // Small-lane full-overwrite gate: a files.write or site.compose that
-        // replaces an existing page must declare allowOverwrite or take the
-        // apply_patch path — whole-document regeneration is how small
-        // models silently drop the requested edit.
+        // Full-overwrite gate (all lanes since ACC-01 F2): a files.write
+        // or site.compose that replaces an existing page must declare
+        // allowOverwrite or take the apply_patch path — whole-document
+        // regeneration is how models silently drop the requested edit.
+        // This was small-lane-only until the paid-beta acceptance, where
+        // a cloud model answered a one-line edit by regenerating the
+        // whole page as a generic template and the write landed. Running
+        // the gate pre-approval matters: the approval freezes the
+        // inputs, so a dead overwrite refused only at execution time
+        // kills the resumed run instead of steering the model to patch.
         if (
           !writeError &&
-          isLocalSmallLane() &&
           (toolCall.toolId === "files.write" || toolCall.toolId === "site.compose")
         ) {
           writeError = await existingPageOverwriteError(toolCall.inputs, transport);

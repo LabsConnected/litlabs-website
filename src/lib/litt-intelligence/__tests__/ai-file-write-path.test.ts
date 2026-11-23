@@ -308,3 +308,99 @@ describe("handleFilesWrite — preserving merge repairs destructive rewrites", (
     expect(String(result.error)).toContain("full-file rewrite");
   });
 });
+
+describe("handleFilesWrite — overwrite guards protect the cloud lane (ACC-01 F2)", () => {
+  /**
+   * ACC-01 F2 (paid-beta acceptance, 2026-11-22): on the production
+   * cloud lane, a one-paragraph edit request was answered with a
+   * whole-page regeneration — a generic template replaced the built
+   * page, losing the business name, drinks, and hours — and the write
+   * landed unchecked, because BOTH overwrite guards in this handler
+   * were gated on the local small lane. The guards now run on every
+   * lane; these tests deliberately do NOT set LITT_LOCAL_SMALL /
+   * OLLAMA_MODEL (the pre-existing guard suites above do).
+   */
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "litt-ws-cloud-guard-"));
+    delete process.env.LITT_LOCAL_SMALL;
+    delete process.env.OLLAMA_MODEL;
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  // A built page like the acceptance project's: styled, structured,
+  // carrying the business's real content.
+  const BUILT_PAGE = `<!DOCTYPE html><html><head><style>
+:root { --accent: #7a4a21; } body { font-family: Georgia, serif; }
+@media (max-width: 600px) { .menu { display: block; } }
+</style></head><body><header class="site-head"><h1>Harbor Lights Coffee</h1></header>
+<main class="menu"><section class="drinks"><p>Classic Latte $4.50</p><p>Harbor Brew $5.00</p></section>
+<p class="welcome">Welcome to Harbor Lights. Open 7 AM to 6 PM.</p></main></body></html>`;
+
+  // The acceptance failure's shape: a generic regeneration that keeps
+  // SOME styling markers (so it is not "destructive" by signature) but
+  // replaces all of the site's real content.
+  const GENERIC_REGENERATION = `<!DOCTYPE html><html><head><style>
+body { font-family: sans-serif; } .wrap { max-width: 800px; }
+</style></head><body><main class="wrap"><section class="hero"><h1>Grand Haven Coffee</h1>
+<p>Fresh coffee in Grand Haven.</p></section></main></body></html>`;
+
+  it("refuses a whole-page regeneration over an existing page without allowOverwrite", async () => {
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(root, "index.html"), BUILT_PAGE);
+    const transport = makeTestTransport(root);
+    const result = await handleFilesWrite(
+      { path: "index.html", content: GENERIC_REGENERATION },
+      transport,
+    );
+    expect(result.success).toBe(false);
+    expect(String(result.error)).toContain("already exists");
+    expect(String(result.error)).toContain("apply_patch");
+    // The built page is untouched — name, drinks, and hours survive.
+    const landed = readFileSync(join(root, "index.html"), "utf-8");
+    expect(landed).toBe(BUILT_PAGE);
+    expect(landed).toContain("Harbor Lights Coffee");
+  });
+
+  it("allows the same overwrite when the rebuild is explicit (allowOverwrite)", async () => {
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(root, "index.html"), BUILT_PAGE);
+    const transport = makeTestTransport(root);
+    const result = await handleFilesWrite(
+      { path: "index.html", content: GENERIC_REGENERATION, allowOverwrite: true },
+      transport,
+    );
+    expect(result.success).toBe(true);
+    expect(readFileSync(join(root, "index.html"), "utf-8")).toBe(GENERIC_REGENERATION);
+  });
+
+  it("refuses a structure-stripping destructive rewrite on the cloud lane", async () => {
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(root, "index.html"), BUILT_PAGE);
+    const transport = makeTestTransport(root);
+    const result = await handleFilesWrite(
+      { path: "index.html", content: "<!DOCTYPE html><html><body><h1>Generic</h1></body></html>" },
+      transport,
+    );
+    expect(result.success).toBe(false);
+    expect(String(result.error)).toContain("full-file rewrite");
+    expect(readFileSync(join(root, "index.html"), "utf-8")).toBe(BUILT_PAGE);
+  });
+
+  it("still allows replacing the welcome scaffold on the cloud lane", async () => {
+    const { writeFileSync } = await import("node:fs");
+    const scaffold = `<!-- LITT-WELCOME-SCREEN: blank-state of the LiTT builder. -->
+<!DOCTYPE html><html><head><style>body { font-family: sans-serif; }</style></head>
+<body><div class="litt-welcome"><h1>Welcome</h1></div></body></html>`;
+    writeFileSync(join(root, "index.html"), scaffold);
+    const transport = makeTestTransport(root);
+    const result = await handleFilesWrite(
+      { path: "index.html", content: BUILT_PAGE },
+      transport,
+    );
+    expect(result.success).toBe(true);
+    expect(readFileSync(join(root, "index.html"), "utf-8")).toBe(BUILT_PAGE);
+  });
+});

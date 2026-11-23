@@ -281,7 +281,38 @@ const MODE_PATTERNS: ModePattern[] = [
       // routing them to text-only chat silently drops the requested mutation.
       // redesign/revamp/restyle/overhaul and fix/repair are the same family:
       // "redesign my homepage", "fix the header on my site" are mutations.
-      /\b(edit|update|change|modify|rename|replace|delete|redesign|revamp|restyle|overhaul|fix|repair)\b.*\b(site|website|web ?app|homepage|landing page|footer|header|nav|menu|section|theme|palette|colou?r|font|heading|headline|hero|banner|layout|background|tagline|copy)\b/i,
+      /\b(edit|update|change|modify|rename|replace|delete|redesign|revamp|restyle|overhaul|fix|repair)\b.*\b(site|website|web ?app|homepage|landing page|footer|header|nav|menu|section|theme|palette|colou?r|font|heading|headline|hero|banner|layout|background|tagline|copy|paragraph)\b/i,
+      // Content-addition edits name the copy target, not the page:
+      // "add a line to the welcome paragraph", "mention fresh pastries
+      // in the welcome paragraph" (ACC-01 F2, 2026-11-22). "mention" is
+      // not edit vocabulary and "paragraph"/"line" were in no target
+      // list, so these fell to think/research with
+      // requiresExecution=false — the model replied in prose, nothing
+      // changed, and the turn still completed as "Done · No files
+      // changed". The verb must be an addition/edit verb and the target
+      // a page-part noun; "mention the paragraph in your reply" style
+      // chat about text has no page-part target pairing this tight in
+      // practice, and question openings are excluded like the other
+      // mutation patterns.
+      /^(?!\s*(how|what|why|when|where|which|who|explain|describe|tell\s+me|show\s+me)\b)[\s\S]*?\b(add|mention|insert|include|append|update|edit|change)\b[^.!?]{0,80}\b(paragraph|line|section|heading|headline|hero|header|footer|menu)\b/i,
+      // Correction directives: the user is reporting that an edit went
+      // wrong and wants the content restored — "that's the wrong page",
+      // "put back the Harbor Lights name, the drinks and the hours"
+      // (ACC-01 F2's follow-up turn, which also fell to think and
+      // "completed" with no change). "wrong/incorrect + page-ish noun"
+      // and restore-verbs paired with content nouns are the shapes;
+      // bare opinion ("the wrong shade of blue") names no page/content
+      // noun and stays chat.
+      // Demonstrative correction openings name the project's page as
+      // wrong — "that's the wrong page", "the page is wrong". The
+      // page-noun requirement keeps chat false positives out ("that's
+      // the wrong shade of blue", "I read the wrong page of the book"
+      // — the latter also fails the second pattern: no correction
+      // directive follows).
+      /^(that'?s|this is|it'?s)\b[^.!?]{0,24}\bwrong\s+(page|site|website|homepage|web ?page|content|version|file)\b/i,
+      /^the\s+(page|site|website|homepage)\s+is\s+wrong\b/i,
+      /\bwrong\s+(page|site|website|homepage|web ?page|content|version|file)\b[\s\S]{0,120}\b(should be|should have|put back|fix|restore|instead)\b/i,
+      /\b(put back|restore|bring back|revert)\b[\s\S]{0,100}\b(name|hours|menu|drinks?|prices?|page|site|homepage|content|text|title|paragraph|line|heading)\b/i,
       // Placement commands use everyday verbs rather than edit-vocabulary —
       // "put this image on my homepage", "add that picture to the hero",
       // "insert the image into this page". Without this they fell into

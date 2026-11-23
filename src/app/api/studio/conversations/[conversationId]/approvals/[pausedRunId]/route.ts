@@ -58,6 +58,11 @@ import { makePersistProgressEvent } from "@/lib/action-runtime/progress-event-pe
 import { isTerminalActionRunStatus } from "@/lib/action-runtime/state-machine";
 import type { MessageStatus } from "@/lib/studio/types";
 import { attachActionRunToConversationTask, settleConversationTask } from "@/lib/studio/task-service";
+import {
+  reserveResumeCredits,
+  settleResumeCredits,
+  type ResumeBillingHandle,
+} from "@/lib/agent-billing";
 
 /**
  * Gated tools whose approval resume is a POST-BUILD continuation, not a
@@ -540,6 +545,29 @@ export async function POST(
     }, { status: 202 });
   }
 
+  // ── Approval-resume billing (ACC-01 F6) ──────────────────────────
+  // The original turn's reservation was released in full when the run
+  // paused, and this route historically performed no billing at all —
+  // so approved work (in ACC-01: the approved edit and the approved
+  // deploy) completed and charged nothing. The reserve itself happens
+  // further below, after every pre-flight failure return; this handle +
+  // settle closure are declared here so every terminal path of the
+  // detached resume (including the stall watchdog) can settle it.
+  // settleResumeBilling is idempotent: the first terminal path wins.
+  let resumeBilling: ResumeBillingHandle | null = null;
+  const settleResumeBilling = async (
+    status: "completed" | "failed" | "cancelled",
+    outputText: string,
+  ): Promise<void> => {
+    if (!resumeBilling) return;
+    const handle = resumeBilling;
+    resumeBilling = null;
+    await settleResumeCredits(handle, {
+      outputTokens: Math.ceil(outputText.length / 4),
+      status,
+    }).catch(() => undefined);
+  };
+
   // Controlled retry, continued: the previous attempt's action_run is
   // terminal, and a terminal run cannot run again
   // (ACTION_RUN_TERMINAL_IMMUTABLE — this used to be a hard 503). Mint a
@@ -660,6 +688,9 @@ export async function POST(
         () => undefined,
       );
     }
+    // A stalled resume never completed its work — release the resume
+    // reservation in full (ACC-01 F6).
+    await settleResumeBilling("failed", "");
   };
   const heartbeat = setInterval(() => {
     void renewRunLease(pausedRunId, userId, executionToken, lastProgressAt)
@@ -749,6 +780,59 @@ export async function POST(
       }
       return NextResponse.json({ error: message, code: "ACTION_RUNTIME_UNAVAILABLE" }, { status: 503 });
     }
+  }
+
+  // Re-reserve for the resumed segment (ACC-01 F6) — placed here, after
+  // every pre-flight failure return, so a failed reserve never strands a
+  // run that was never going to execute. Engages only when the original
+  // turn billed (the helper looks up its billing run and no-ops for
+  // legacy uncharged conversations). An insufficient balance fails the
+  // resume honestly BEFORE any work runs: the user approved the action,
+  // not free execution.
+  const resumeInputTokens = Math.ceil(
+    (resolved.systemPrompt.length +
+      resolved.pausedMessages.reduce((sum, m) => {
+        const content: unknown = (m as { content?: unknown }).content;
+        return sum + (typeof content === "string" ? content.length : JSON.stringify(content ?? "").length);
+      }, 0)) /
+      4,
+  );
+  const resumeReserve = await reserveResumeCredits({
+    clerkId: userId,
+    conversationId,
+    pausedRunId,
+    estimatedInputTokens: resumeInputTokens,
+  });
+  if (resumeReserve.engaged && !resumeReserve.ok) {
+    clearInterval(heartbeat);
+    await writeResumedResultToTranscript({
+      conversationId,
+      userId,
+      projectId: resolved.projectId,
+      pausedRunId,
+      status: "failed",
+      content: resumeReserve.error,
+    });
+    try {
+      await settleResumedRunOutcome({
+        record: resolved,
+        userId,
+        status: "failed",
+        eventType: "run.failed",
+        patch: { currentActivity: "Task failed", failureCode: "BILLING_RESERVE_FAILED", failureMessage: resumeReserve.error },
+        executionToken,
+        logEvent: "approval:action_run_billing_reserve_settle_failed",
+      });
+    } catch {
+      await releaseRunClaim(pausedRunId, userId, executionToken, "failed").catch(() => undefined);
+    }
+    return NextResponse.json(
+      { error: resumeReserve.error, resolved: true, status: "failed", pausedRunId },
+      { status: resumeReserve.status },
+    );
+  }
+  if (resumeReserve.engaged) {
+    resumeBilling = resumeReserve.handle;
   }
 
   // Static-workspace truth for the resumed run's tool-health filtering.
@@ -1045,6 +1129,8 @@ export async function POST(
       }
 
       if (resumeFailure) {
+        // The resumed segment failed — release its reservation (ACC-01 F6).
+        await settleResumeBilling("failed", "");
         await writeResumedResultToTranscript({
           conversationId,
           userId,
@@ -1256,6 +1342,7 @@ export async function POST(
             hasPausedRunId: false,
             hasToolId: !!gate.toolId,
           });
+          await settleResumeBilling("failed", "");
           await writeResumedResultToTranscript({
             conversationId,
             userId,
@@ -1323,6 +1410,7 @@ export async function POST(
           const nestedPersistError =
             nestedGateFailure ??
             `The follow-up approval for \`${result.pendingApproval.toolId}\` could not be saved — send the request again to retry.`;
+          await settleResumeBilling("failed", "");
           await writeResumedResultToTranscript({
             conversationId,
             userId,
@@ -1375,6 +1463,11 @@ export async function POST(
           hasPausedRunId: true,
           hasToolId: true,
         });
+        // This segment ends paused again, not completed — release its
+        // reservation in full; the NEXT resume re-reserves for its own
+        // segment (ACC-01 F6). A segment is only charged when it reaches
+        // a completed terminal state.
+        await settleResumeBilling("failed", "");
         return true;
       }
 
@@ -1382,6 +1475,12 @@ export async function POST(
       // carrying the RunResult. An honest loop failure is reported as
       // failed, never completed.
       const honestFailure = terminalFailure;
+      // Settle the resume reservation at the same truth (ACC-01 F6):
+      // completed segments charge, failed/cancelled segments release.
+      await settleResumeBilling(
+        result.cancelled ? "cancelled" : honestFailure ? "failed" : "completed",
+        finalText,
+      );
       await settleResumedRunOutcome({
         record: resolved,
         userId,
@@ -1407,6 +1506,8 @@ export async function POST(
     })
     .catch(async (err) => {
       if (fenced) return;
+      // The resumed segment errored — release its reservation (ACC-01 F6).
+      await settleResumeBilling("failed", "");
       const message = err instanceof Error ? err.message : "Resume failed";
       await writeResumedResultToTranscript({
         conversationId,

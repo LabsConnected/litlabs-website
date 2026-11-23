@@ -23,9 +23,34 @@ export type CreditBalances = {
   monthly: number;
   purchased: number;
   betaPromotional: number;
+  /**
+   * Unspent remainder of the one-time Starter grant(s) sitting inside the
+   * monthly bucket. The Starter grant is one-time (never renews), but it is
+   * granted into the monthly bucket so it is spendable immediately — which
+   * made the billing page label a new subscriber's whole monthly bucket as
+   * plan credits (ACC-01 F6: 1,500 starter + 2,500 Creator Lite rendered as
+   * "4,000 MONTHLY"). `monthly` still includes this amount (bucket totals
+   * are unchanged); `starter` is the display split so the UI can label the
+   * one-time portion honestly. Remainder rule: the monthly bucket drains
+   * oldest-credit-first, and the Starter grant precedes any plan grant, so
+   * monthly-bucket debits after the first Starter grant consume it first.
+   * Optional so existing balance mocks/fixtures stay valid; readers use
+   * `?? 0`. getCreditBalances always populates it.
+   */
+  starter?: number;
   total: number;
   lastDailyClaim: string | null;
 };
+
+/** Pure remainder rule for the Starter split — see CreditBalances.starter. */
+export function computeStarterRemainder(params: {
+  starterGrantedTotal: number;
+  monthlyDebitsAfterStarterGrant: number;
+  monthlyBalance: number;
+}): number {
+  const remaining = params.starterGrantedTotal - params.monthlyDebitsAfterStarterGrant;
+  return Math.max(0, Math.min(remaining, params.monthlyBalance));
+}
 
 async function getUserId(clerkId: string): Promise<string> {
   const admin = getSupabaseAdmin();
@@ -170,10 +195,57 @@ export async function getCreditBalances(clerkId: string): Promise<CreditBalances
   ]);
   if (error) throw new Error(`Wallet balance lookup failed: ${error.message}`);
   const row = Array.isArray(data) ? data[0] : data;
+  const monthly = Math.max(0, Number(row?.monthly ?? 0));
+
+  // Starter split (ACC-01 F6): how much of the monthly bucket is the
+  // one-time Starter grant's unspent remainder. Best-effort display data —
+  // any lookup failure degrades to 0 (the pre-fix label), never an error.
+  let starter = 0;
+  try {
+    const starterKeys = [
+      `${STARTER_GRANT_KEY_PREFIX}${userId}`,
+      `${STARTER_TOPUP_KEY_PREFIX}${userId}`,
+      `${LEGACY_STARTER_GRANT_KEY_PREFIX}${userId}`,
+    ];
+    const { data: starterRows } = await admin
+      .from("credit_ledger")
+      .select("amount, created_at")
+      .eq("user_id", userId)
+      .eq("direction", "credit")
+      .in("idempotency_key", starterKeys)
+      .order("created_at", { ascending: true });
+    if (starterRows && starterRows.length > 0) {
+      const starterGrantedTotal = starterRows.reduce(
+        (sum, r) => sum + Math.max(0, Number(r.amount ?? 0)),
+        0,
+      );
+      const firstStarterAt = starterRows[0].created_at as string;
+      const { data: monthlyDebits } = await admin
+        .from("credit_ledger")
+        .select("amount")
+        .eq("user_id", userId)
+        .eq("direction", "debit")
+        .eq("balance_bucket", "monthly")
+        .gte("created_at", firstStarterAt);
+      const monthlyDebitsAfterStarterGrant = (monthlyDebits ?? []).reduce(
+        (sum, r) => sum + Math.max(0, Number(r.amount ?? 0)),
+        0,
+      );
+      starter = computeStarterRemainder({
+        starterGrantedTotal,
+        monthlyDebitsAfterStarterGrant,
+        monthlyBalance: monthly,
+      });
+    }
+  } catch {
+    starter = 0;
+  }
+
   return {
-    monthly: Math.max(0, Number(row?.monthly ?? 0)),
+    monthly,
     purchased: Math.max(0, Number(row?.purchased ?? 0)),
     betaPromotional: Math.max(0, Number(row?.beta_promotional ?? 0)),
+    starter,
     total: Math.max(0, Number(row?.total ?? 0)),
     lastDailyClaim: daily?.created_at ?? null,
   };

@@ -1599,6 +1599,8 @@ type BillingData = {
     monthly: number;
     purchased: number;
     beta_promotional: number;
+    /** One-time Starter remainder inside monthly (ACC-01 F6); older API responses omit it. */
+    starter?: number;
     total: number;
   } | null;
   billingExempt?: boolean;
@@ -1674,6 +1676,7 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
   const billingExempt = data?.billingExempt ?? false;
   const totalBalance = balances?.total ?? 0;
   const monthlyBalance = balances?.monthly ?? 0;
+  const starterBalance = Math.min(monthlyBalance, balances?.starter ?? 0);
   const purchasedBalance = balances?.purchased ?? 0;
   const betaBalance = balances?.beta_promotional ?? 0;
   const subStatus = data?.subscription?.status ?? "none";
@@ -1750,19 +1753,22 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
               </p>
             </div>
             {!billingExempt && (
-            <div className="mt-3 grid grid-cols-3 gap-2">
-              <div className="rounded-lg border border-black/5 bg-black/[0.03] px-3 py-2 text-center">
-                <div className="text-sm font-bold text-zinc-800">{monthlyBalance.toLocaleString()}</div>
-                <div className="text-[9px] uppercase tracking-wider text-zinc-500">Monthly</div>
-              </div>
-              <div className="rounded-lg border border-black/5 bg-black/[0.03] px-3 py-2 text-center">
-                <div className="text-sm font-bold text-zinc-800">{purchasedBalance.toLocaleString()}</div>
-                <div className="text-[9px] uppercase tracking-wider text-zinc-500">Purchased</div>
-              </div>
-              <div className="rounded-lg border border-black/5 bg-black/[0.03] px-3 py-2 text-center">
-                <div className="text-sm font-bold text-zinc-800">{betaBalance.toLocaleString()}</div>
-                <div className="text-[9px] uppercase tracking-wider text-zinc-500">Beta</div>
-              </div>
+            <div className={`mt-3 grid gap-2 ${starterBalance > 0 ? "grid-cols-4" : "grid-cols-3"}`}>
+              {[
+                // The one-time Starter grant lives in the monthly bucket
+                // (spendable immediately) but is NOT monthly plan credit —
+                // split it out so the Monthly tile shows only the plan's
+                // renewable credits (ACC-01 F6 labeling).
+                { label: "Monthly", value: monthlyBalance - starterBalance },
+                ...(starterBalance > 0 ? [{ label: "Starter (one-time)", value: starterBalance }] : []),
+                { label: "Purchased", value: purchasedBalance },
+                { label: "Beta", value: betaBalance },
+              ].map((tile) => (
+                <div key={tile.label} className="rounded-lg border border-black/5 bg-black/[0.03] px-3 py-2 text-center">
+                  <div className="text-sm font-bold text-zinc-800">{tile.value.toLocaleString()}</div>
+                  <div className="text-[9px] uppercase tracking-wider text-zinc-500">{tile.label}</div>
+                </div>
+              ))}
             </div>
             )}
             {!billingExempt && betaBalance > 0 && (

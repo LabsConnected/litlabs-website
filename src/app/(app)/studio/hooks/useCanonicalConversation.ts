@@ -1981,12 +1981,22 @@ export function useCanonicalConversation({
     const target = assistantMessageId
       ? allMessages.find((m) => m.id === assistantMessageId && m.role === "assistant")
       : allMessages.findLast((m) => m.role === "assistant" && m.status === "completed");
-    if (!target?.id) return;
+    if (!target?.id && !assistantMessageId) return;
+
+    // ACC-01 F1: when the pressed id is NOT in the store's list, the old
+    // code returned here silently — a dead Retry button (the acceptance
+    // run's Retry "started no new run", with no error either). The
+    // transcript can render a failed turn whose id the store's list no
+    // longer holds (identity mixing after an approval resume), which is
+    // exactly the divergence the canonical resolution below exists for.
+    // Retry is only rendered on failed turns, so a missing target is
+    // carried into that resolution as a failed ref instead of dying.
+    const targetRef = target ?? { id: assistantMessageId, status: "failed" };
 
     // A failed turn means the work never completed — re-send the parent user
     // message through the normal send pipeline so the turn is genuinely
     // re-run (see findRetryResendText).
-    const resendText = findRetryResendText(target, allMessages);
+    const resendText = target ? findRetryResendText(target, allMessages) : null;
     if (resendText) {
       await send(resendText);
       return;
@@ -2001,11 +2011,11 @@ export function useCanonicalConversation({
     // null; optimistic/canonical identity mixing can strand the parent
     // outside the store's list), while the server persists the real
     // linkage — resolve the turn from canonical messages before deciding.
-    let regenerateTargetId = target.id;
+    let regenerateTargetId = targetRef.id;
     if (assistantMessageId) {
       await loadMessages(conversationId);
       const freshMessages = getStore().getMessages();
-      const canonicalTarget = resolveCanonicalRetryTarget(target, freshMessages);
+      const canonicalTarget = resolveCanonicalRetryTarget(targetRef, freshMessages);
       if (canonicalTarget?.status === "failed") {
         const canonicalResendText = findRetryResendText(canonicalTarget, freshMessages);
         if (canonicalResendText) {
@@ -2020,7 +2030,7 @@ export function useCanonicalConversation({
         );
         return;
       }
-      if (!canonicalTarget && target.status === "failed") {
+      if (!canonicalTarget && targetRef.status === "failed") {
         setSendError(
           "Couldn't re-run that turn — it couldn't be found in this conversation. Send the request again as a new message to retry the task.",
         );
