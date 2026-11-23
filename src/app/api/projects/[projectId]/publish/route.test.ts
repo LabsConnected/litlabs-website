@@ -271,3 +271,89 @@ describe("DELETE /api/projects/[projectId]/publish", () => {
     assertZeroSubprocesses();
   });
 });
+
+describe("stable public URL (ACC-01 F8a)", () => {
+  const PREV_ENV = process.env.DEPLOY_PRODUCTION_URL;
+  beforeEach(() => {
+    process.env.DEPLOY_PRODUCTION_URL = "https://hosting.example.test";
+  });
+  afterEach(() => {
+    if (PREV_ENV === undefined) delete process.env.DEPLOY_PRODUCTION_URL;
+    else process.env.DEPLOY_PRODUCTION_URL = PREV_ENV;
+  });
+
+  it("GET exposes the stable project URL alongside the snapshot URL when live", async () => {
+    listDeploymentsMock.mockResolvedValue([
+      {
+        id: "dep-1",
+        userId: "user-1",
+        projectId: "proj-1",
+        workspaceId: "ws-1",
+        status: "ready",
+        target: "litt-static",
+        publicUrl: "https://example.litt.host/sites/dep-1",
+        urlVerified: true,
+        fileCount: 3,
+        totalBytes: 1024,
+        contentHash: "abc",
+        errorClass: null,
+        errorMessage: null,
+      },
+    ]);
+    const res = await GET(makeRequest("GET"), makeParams("proj-1"));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.stablePublicUrl).toBe("https://hosting.example.test/sites/project/proj-1/");
+    expect(data.deployment.stablePublicUrl).toBe(
+      "https://hosting.example.test/sites/project/proj-1/",
+    );
+    // The snapshot URL stays on the record, unchanged.
+    expect(data.deployment.publicUrl).toBe("https://example.litt.host/sites/dep-1");
+  });
+
+  it("GET omits the stable URL when the deployment is not live", async () => {
+    listDeploymentsMock.mockResolvedValue([
+      {
+        id: "dep-2",
+        userId: "user-1",
+        projectId: "proj-1",
+        workspaceId: "ws-1",
+        status: "failed",
+        target: "litt-static",
+        publicUrl: "https://example.litt.host/sites/dep-2",
+        urlVerified: false,
+        fileCount: 0,
+        totalBytes: 0,
+        contentHash: null,
+        errorClass: "build",
+        errorMessage: "boom",
+      },
+    ]);
+    const res = await GET(makeRequest("GET"), makeParams("proj-1"));
+    const data = await res.json();
+    expect(data.stablePublicUrl).toBeNull();
+    expect(data.deployment.stablePublicUrl).toBeNull();
+  });
+
+  it("POST returns the stable project URL with the publish result", async () => {
+    createTransportMock.mockResolvedValue({ userId: "user-1", projectId: "proj-1", workspaceId: "ws-1" } as never);
+    deployMock.mockResolvedValue({
+      ok: true,
+      deploymentId: "dep-9",
+      status: "ready",
+      publicUrl: "https://example.litt.host/sites/dep-9",
+      urlVerified: true,
+      target: "litt-static",
+      projectId: "proj-1",
+      workspaceId: "ws-1",
+      fileCount: 5,
+      totalBytes: 2048,
+      reused: false,
+    });
+    const res = await POST(makeRequest("POST"), makeParams("proj-1"));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.stablePublicUrl).toBe("https://hosting.example.test/sites/project/proj-1/");
+    expect(data.publicUrl).toBe("https://example.litt.host/sites/dep-9");
+  });
+});

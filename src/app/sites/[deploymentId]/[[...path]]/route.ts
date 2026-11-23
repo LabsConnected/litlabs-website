@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { readPublishedFile } from "@/lib/deployments/deployment-store";
-import {
-  deploymentPublicPath,
-  isBinaryContentType,
-} from "@/lib/deployments/user-deployment";
+import { publishedFileResponse } from "@/lib/deployments/serve-published";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,29 +10,16 @@ export const dynamic = "force-dynamic";
  *
  * This route is deliberately PUBLIC: it never calls auth(). That is what
  * makes a deployment a deployment. The preview proxy
- * (/api/studio-projects/[id]/preview/proxy) is the opposite — authenticated,
- * and pointed at a live dev process. A URL here is independently reachable
- * by anyone, which is why it can be HTTP-verified before a deployment is
- * reported live.
+ * (/api/studio-projects/[id]/preview/proxy) is the opposite —
+ * authenticated, and pointed at a live dev process. A URL here is
+ * independently reachable by anyone, which is why it can be
+ * HTTP-verified before a deployment is reported live.
  *
  * Only `ready` deployments serve (enforced in readPublishedFile).
- *
- * Security — this serves USER-AUTHORED HTML from LiTT's own origin, so the
- * response is sandboxed:
- *
- *   Content-Security-Policy: sandbox allow-scripts
- *     Puts the document in an opaque origin. Without `allow-same-origin` it
- *     cannot read document.cookie, localStorage, or make credentialed
- *     same-origin requests to the app — so a deployed site cannot reach the
- *     session of whoever visits it.
- *   X-Content-Type-Options: nosniff
- *     The stored content type is authoritative; unknown extensions are never
- *     collected in the first place, and never served as HTML.
- *
- * Residual risk: same-origin hosting still shares the app's domain for
- * cookie *scoping* purposes. Moving deployments to a dedicated domain is the
- * stronger control and the recommended next hardening step; the sandbox
- * directive is what makes same-origin hosting safe enough for V1.
+ * The serving semantics live in lib/deployments/serve-published, shared
+ * with the project's stable address (/sites/project/[projectId]) —
+ * this route serves ONE immutable snapshot; the stable route resolves
+ * the latest ready snapshot first. Both keep working.
  */
 export async function GET(
   _request: NextRequest,
@@ -48,122 +31,11 @@ export async function GET(
     return new NextResponse("Not found", { status: 404 });
   }
 
-  // Resolve the request path against the artifact. Returns null for any
-  // traversal attempt, including percent-encoded ones.
   const requestPath = Array.isArray(path) ? path.join("/") : "";
 
-  const artifactPath = deploymentPublicPath(deploymentId, requestPath);
-  if (!artifactPath) {
-    return new NextResponse("Not found", { status: 404 });
-  }
-
-  let file: Awaited<ReturnType<typeof readPublishedFile>>;
-  try {
-    file = await readPublishedFile(deploymentId, artifactPath);
-  } catch {
-    // Never leak storage errors to a public visitor. Retry-After marks
-    // this as propagation/blip latency rather than a permanent failure —
-    // freshly deployed assets legitimately blip for ~1s while the file
-    // rows settle (readPublishedFile retries cover most of that window).
-    return new NextResponse("Service unavailable", {
-      status: 503,
-      headers: { "Retry-After": "1" },
-    });
-  }
-
-  if (!file) {
-    return new NextResponse("Not found", { status: 404 });
-  }
-
-  let content: string | Uint8Array<ArrayBuffer> = file.content;
-  // Binary artifacts (images, fonts) are stored base64 — the files table
-  // is text-shaped — so decode them back to raw bytes before serving.
-  // The stored `encoding` column is authoritative; rows written before it
-  // existed fall back to the content-type predicate.
-  const binary =
-    file.encoding != null
-      ? file.encoding === "base64"
-      : isBinaryContentType(file.contentType);
-  if (binary) {
-    content = new Uint8Array(Buffer.from(file.content, "base64"));
-  }
-  // LiTT form wiring: static exports render forms with an empty
-  // `deploymentId` hidden input (the id doesn't exist until the deploy
-  // is created). At serve time the id is known from the URL, so fill it
-  // in for any page that carries a LiTT form — the form backend resolves
-  // the site owner from this id. Without this, a published form can
-  // never submit. The id was validated against a strict pattern above,
-  // so it is safe to interpolate.
-  if (
-    file.contentType.includes("text/html") &&
-    typeof content === "string" &&
-    content.includes('data-litt-form="1"') &&
-    content.includes('name="deploymentId" value=""')
-  ) {
-    content = content.replaceAll(
-      'name="deploymentId" value=""',
-      `name="deploymentId" value="${deploymentId}"`,
-    );
-  }
-
-  // Deployed markup references assets RELATIVELY (assets/images/x) so one
-  // artifact serves under any mount — but relative resolution needs a
-  // directory base, and the served URL does not always provide one:
-  // "/sites/{id}" (no trailing slash) resolves "assets/images/x" to
-  // "/sites/assets/images/x", escaping the deployment entirely ("assets"
-  // parses as a deploymentId → every asset request failed; staging
-  // acceptance 42693622298). A redirect cannot fix this — Next.js
-  // trailing-slash normalization strips "/" before this handler runs, so
-  // canonicalizing here loops forever (and rebuilding the target from
-  // request.url leaks the internal bind address, e.g. https://0.0.0.0:8080,
-  // which made the deploy verifier's fetch fail outright). Instead inject
-  // <base> into served HTML: relative refs then resolve against the
-  // artifact's real directory under ANY request URL form — slash-less
-  // root, trailing-slash (normalized away upstream), or explicit
-  // /index.html — with no redirects at all. An author-supplied <base>
-  // always wins.
-  if (
-    file.contentType.includes("text/html") &&
-    typeof content === "string" &&
-    !/<base[\s>]/i.test(content)
-  ) {
-    const dir = artifactPath.includes("/")
-      ? artifactPath.slice(0, artifactPath.lastIndexOf("/") + 1)
-      : "";
-    const baseHref = encodeURI(`/sites/${deploymentId}/${dir}`);
-    const baseTag = `<base href="${baseHref}">`;
-    if (/<head[^>]*>/i.test(content)) {
-      content = content.replace(/<head[^>]*>/i, (m) => `${m}${baseTag}`);
-    } else if (/<\/head\s*>/i.test(content)) {
-      content = content.replace(/<\/head\s*>/i, `${baseTag}</head>`);
-    }
-  }
-
-  // LiTT branding: inject a subtle, dismissible "Built with LiTT" badge
-  // before </body> on HTML pages, unless the page opts out with
-  // data-litt-badge="0". The badge is fixed-position, non-intrusive, and
-  // never replaces the site owner's own branding.
-  if (
-    file.contentType.includes("text/html") &&
-    typeof content === "string" &&
-    !content.includes('data-litt-badge="0"') &&
-    /<\/body\s*>/i.test(content)
-  ) {
-    const badge = `<div id="litt-badge" style="position:fixed;bottom:12px;right:12px;z-index:2147483647;display:flex;align-items:center;gap:6px;background:rgba(10,10,18,0.85);border:1px solid rgba(139,92,246,0.4);border-radius:9999px;padding:4px 10px 4px 4px;font-family:system-ui,sans-serif;font-size:11px;color:#e4e4e7;backdrop-filter:blur(8px);box-shadow:0 2px 12px rgba(0,0,0,0.4)"><img src="/brand/litt-robot-32.png" alt="LiTT" width="20" height="20" style="border-radius:50%"/><a href="https://www.litlabs.net" target="_blank" rel="noopener" style="color:#e4e4e7;text-decoration:none">Built with LiTT</a><button onclick="this.parentElement.remove()" aria-label="Dismiss" style="background:none;border:none;color:#a1a1aa;cursor:pointer;font-size:14px;line-height:1;padding:0 2px">×</button></div>`;
-    content = content.replace(/<\/body\s*>/i, `${badge}</body>`);
-  }
-
-  return new NextResponse(content, {
-    status: 200,
-    headers: {
-      "Content-Type": file.contentType,
-      "X-Content-Type-Options": "nosniff",
-      // Opaque origin: no access to the app's cookies or storage.
-      "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups",
-      "Referrer-Policy": "no-referrer",
-      // Unpublish must take effect immediately: no-store prevents any
-      // caching so revoked deployments stop serving on the next request.
-      "Cache-Control": "no-store",
-    },
+  return publishedFileResponse({
+    deploymentId,
+    mountBase: `/sites/${deploymentId}`,
+    requestPath,
   });
 }

@@ -29,6 +29,7 @@ import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { buildPatchRecoveryMessage, existingPageOverwriteError, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange, workspaceChangeFromVolumeListing, workspaceChangeFromDirectReads } from "./workspace-change-producer";
+import { checkRequestedLiteral, requestedLiteralFailureMessage, requestedLiteralRepairPrompt } from "./requested-literal";
 import { settleRunOutcome, type RunFailureContributor } from "./run-settlement";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { recordModelFailure } from "./provider-registry";
@@ -1201,6 +1202,26 @@ async function pauseReasonFor(
  * after-checkpoint (the pre-run baseline still exists for Revert).
  */
 /**
+ * Paths declared by the run's successful mutations (F9 check input).
+ * Entries the persisted-truth evidence explicitly contradicted
+ * (persisted === false — the #1105 build-verification layer's landed
+ * predicate) are excluded: a write that did not land must not be
+ * literal-checked as if it had. That layer still delivers the honest
+ * failure for such runs; this check stays silent on them.
+ */
+function successfulMutationPaths(
+  toolCallLog: ReadonlyArray<{ success: boolean; mutating?: boolean; paths?: string[]; persisted?: boolean }>,
+): string[] {
+  return [
+    ...new Set(
+      toolCallLog
+        .filter((c) => c.success && c.mutating && c.persisted !== false)
+        .flatMap((c) => c.paths ?? []),
+    ),
+  ];
+}
+
+/**
  * Round 11: settlement workspace evidence. The git/checkpoint probe
  * runs first, carrying the recorded checkpoint-failure reason when
  * checkpoint creation failed (Q2a). When the probe still cannot
@@ -2284,6 +2305,9 @@ async function runAgentLoopV2Inner(
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
   let readLoopNudges = 0;
+  // ACC-01 F9: the requested-literal repair feedback fires at most
+  // once per run; the tail check is the final word either way.
+  let literalRepairFeedbackGiven = false;
   // True once the model has emitted at least one tool call this run. An
   // execution-required run (requireToolCallOnFirstStep) holds the
   // "required" tool choice until this flips — a provider that drops the
@@ -3244,6 +3268,37 @@ async function runAgentLoopV2Inner(
       mutationBatchPending = false;
     }
 
+    // ACC-01 F9: after a mutation batch, verify the exact text the
+    // user asked for actually landed in the edited file. On a miss,
+    // feed the mismatch back ONCE (the loop's own continuation is the
+    // repair mechanism) so the model can fix its own near-miss —
+    // a stray character or dropped space — before finishing. The
+    // tail check below has the final word if it still isn't there.
+    if (
+      batchHasMutation &&
+      !literalRepairFeedbackGiven &&
+      !cancelled &&
+      !modelFailed &&
+      !failedHonestly
+    ) {
+      const literalCheck = await checkRequestedLiteral({
+        instruction: userMessage,
+        candidatePaths: successfulMutationPaths(toolCallLog),
+        readFile: (path) => transport.readFile(path),
+      });
+      if (literalCheck.applies && !literalCheck.found && literalCheck.literal) {
+        literalRepairFeedbackGiven = true;
+        llmMessages.push({
+          role: "user",
+          content: requestedLiteralRepairPrompt(literalCheck.literal, literalCheck.checkedFiles),
+        });
+        localProgress.emit({
+          type: "status",
+          summary: "The requested text wasn't in the edited file — asking for a fix before this can be called done.",
+        });
+      }
+    }
+
     // Per-step timing: total step duration + cumulative elapsed, so the work log
     // can show exactly where the minutes went on a slow build.
     localProgress.emit({
@@ -3285,6 +3340,25 @@ async function runAgentLoopV2Inner(
       !hasSuccessfulFileWriteInHistory(cfg.initialMessages ?? [])) {
     failedHonestly = "The build produced no successful file-writing operation, so it is not complete.";
     finalText = failedHonestly;
+  }
+
+  // ACC-01 F9 — the final word on edit runs that named a literal
+  // target text: if the requested text still isn't in any file the
+  // run mutated (read back from the workspace, never the model's
+  // narration), the run has NOT done what was asked — settle it
+  // honestly as failed instead of reporting a corrupted edit as
+  // success. Runs that specified no literal, or whose files can't be
+  // read back, are untouched by this check.
+  if (!cancelled && !modelFailed && !failedHonestly) {
+    const literalCheck = await checkRequestedLiteral({
+      instruction: userMessage,
+      candidatePaths: successfulMutationPaths(toolCallLog),
+      readFile: (path) => transport.readFile(path),
+    });
+    if (literalCheck.applies && !literalCheck.found && literalCheck.literal) {
+      failedHonestly = requestedLiteralFailureMessage(literalCheck.literal);
+      finalText = failedHonestly;
+    }
   }
 
   // Run build-fix loop if mutations were made and enabled
@@ -4227,6 +4301,9 @@ async function resumeAgentLoopV2Inner(
   // calls (the silent mid-build stall) — see resolveZeroToolCalls.
   let continuationNudges = 0;
   let readLoopNudges = 0;
+  // ACC-01 F9: the requested-literal repair feedback fires at most
+  // once per run; the tail check is the final word either way.
+  let literalRepairFeedbackGiven = false;
   // A paused run exists BECAUSE the model emitted an approval-gated tool
   // call — the required-first-call contract was satisfied pre-pause, so
   // the resumed loop runs under "auto" tool choice throughout.
@@ -4983,6 +5060,36 @@ async function resumeAgentLoopV2Inner(
         break;
       }
     }
+    // ACC-01 F9: same requested-literal feedback as the initial loop —
+    // after a mutation batch, if the exact text the user asked for is
+    // not in the edited file, feed the mismatch back ONCE so the model
+    // can repair its own near-miss before finishing. (The live F9 edit
+    // was an approval-resumed run, so this loop needs the check as
+    // much as the initial one.)
+    if (
+      batchHasMutation &&
+      !literalRepairFeedbackGiven &&
+      !cancelled &&
+      !modelFailed &&
+      !failedHonestly
+    ) {
+      const literalCheck = await checkRequestedLiteral({
+        instruction: resumeUserMessage,
+        candidatePaths: successfulMutationPaths(toolCallLog),
+        readFile: (path) => transport.readFile(path),
+      });
+      if (literalCheck.applies && !literalCheck.found && literalCheck.literal) {
+        literalRepairFeedbackGiven = true;
+        llmMessages.push({
+          role: "user",
+          content: requestedLiteralRepairPrompt(literalCheck.literal, literalCheck.checkedFiles),
+        });
+        localProgress.emit({
+          type: "status",
+          summary: "The requested text wasn't in the edited file — asking for a fix before this can be called done.",
+        });
+      }
+    }
     if (!batchHasMutation) mutationBatchPending = false;
   }
 
@@ -5009,6 +5116,23 @@ async function resumeAgentLoopV2Inner(
       !hasSuccessfulFileWriteInHistory(resume.pausedMessages)) {
     failedHonestly = "The build produced no successful file-writing operation, so it is not complete.";
     finalText = failedHonestly;
+  }
+
+  // ACC-01 F9 — the final word, identical to the initial loop: an
+  // edit that named a literal target text only counts as done when
+  // that text is actually in a file the run mutated (read back from
+  // the workspace). Otherwise settle honestly as failed — never
+  // report a corrupted edit as success.
+  if (!cancelled && !modelFailed && !failedHonestly) {
+    const literalCheck = await checkRequestedLiteral({
+      instruction: resumeUserMessage,
+      candidatePaths: successfulMutationPaths(toolCallLog),
+      readFile: (path) => transport.readFile(path),
+    });
+    if (literalCheck.applies && !literalCheck.found && literalCheck.literal) {
+      failedHonestly = requestedLiteralFailureMessage(literalCheck.literal);
+      finalText = failedHonestly;
+    }
   }
 
   // Run build-fix loop with autonomous repair

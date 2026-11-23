@@ -39,7 +39,7 @@
  * accent (mockup), green is reserved for status signals. No pink.
  */
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   CheckCircle2,
   Eye,
@@ -124,6 +124,19 @@ export default function BoardChatPanel({
 }: BoardChatPanelProps) {
   const { tokens } = useTheme();
   const [tab, setTab] = useState<"chat" | "jobs">("chat");
+
+  // ACC-01 F8b: an ask-litt request (the Deploy surface's deploy
+  // request is the proven case) pre-fills this panel's composer — but
+  // the composer only renders on the Chat tab. When a request arrives
+  // while the user is on the Jobs tab, the pre-filled prompt was
+  // invisible and the originating click read as a dead button. Any
+  // ask-litt event lands the user on the Chat tab, where the request
+  // actually is.
+  useEffect(() => {
+    const handler = () => setTab("chat");
+    window.addEventListener("studio:ask-litt", handler);
+    return () => window.removeEventListener("studio:ask-litt", handler);
+  }, []);
   const phase = useExecutionStore((s) => s.phase);
   const isRunning = useExecutionStore((s) => s.isRunning);
   const events = useExecutionStore((s) => s.events);

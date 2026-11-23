@@ -16,6 +16,7 @@ import type {
   DeploymentRecord,
   DeploymentCreateInput,
 } from "./deploy-service";
+import { HOSTING_TARGET } from "./litt-hosting";
 import type { DeploymentStatus } from "./user-deployment";
 
 const TABLE = "user_project_deployments";
@@ -370,6 +371,31 @@ export async function findLatestReadyDeploymentForProject(
     .select("*")
     .eq("project_id", projectId)
     .eq("user_id", userId)
+    .eq("status", "ready")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  return rowToRecord(data as DeploymentRow);
+}
+
+/**
+ * The most recent READY LiTT Hosting deployment for a project, resolved
+ * WITHOUT an owner — the public stable-address route
+ * (/sites/project/[projectId]) has no session; published sites are
+ * public by design. Scoped to the LiTT Hosting target so a newer
+ * Netlify deployment never becomes the project's LiTT address. Returns
+ * null when storage is unavailable or no ready deployment exists.
+ */
+export async function findLatestReadyDeploymentForProjectPublic(
+  projectId: string,
+): Promise<DeploymentRecord | null> {
+  if (!supabaseAdmin) return null;
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("target", HOSTING_TARGET)
     .eq("status", "ready")
     .order("created_at", { ascending: false })
     .limit(1)

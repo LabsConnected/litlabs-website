@@ -5,6 +5,8 @@ import {
   CANONICAL_HOSTING_BACKEND,
   HOSTING_TARGET,
   HOSTING_DISPLAY_NAME,
+  stablePublicUrlFor,
+  stableSitePathForProject,
 } from "./litt-hosting";
 
 /**
@@ -50,5 +52,31 @@ describe("LiTT Hosting abstraction", () => {
       expect(check.reason).toContain("LiTT Hosting");
       expect(check.reason).not.toMatch(/RAILWAY_|VERCEL_|railway|vercel/i);
     }
+  });
+});
+
+describe("stable public URL (ACC-01 F8a)", () => {
+  it("builds the stable project path", () => {
+    expect(stableSitePathForProject("proj-1")).toBe("/sites/project/proj-1/");
+  });
+
+  it("mints the stable URL on the hosting base, trimming trailing slashes", async () => {
+    const hosting = {
+      isConfigured: () => ({ ok: true as const }),
+      resolveBaseUrl: async () => "https://hosting.example.test/",
+    };
+    await expect(stablePublicUrlFor("proj-1", hosting)).resolves.toBe(
+      "https://hosting.example.test/sites/project/proj-1/",
+    );
+  });
+
+  it("propagates base-resolution failure instead of guessing an origin", async () => {
+    const hosting = {
+      isConfigured: () => ({ ok: true as const }),
+      resolveBaseUrl: async () => {
+        throw new Error("no base");
+      },
+    };
+    await expect(stablePublicUrlFor("proj-1", hosting)).rejects.toThrow("no base");
   });
 });

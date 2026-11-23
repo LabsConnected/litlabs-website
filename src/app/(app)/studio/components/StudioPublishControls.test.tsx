@@ -301,3 +301,42 @@ describe("StudioPublishControls — canvas compile before publish (P0-1)", () =>
     expect(state.siteWrites).toHaveLength(0);
   });
 });
+
+describe("StudioPublishControls — stable public URL (ACC-01 F8a)", () => {
+  it("displays and copies the STABLE project URL, not the rotating snapshot URL", async () => {
+    fetchHandler = async () =>
+      jsonResponse({
+        published: true,
+        stablePublicUrl: "https://hosting.example.test/sites/project/proj-1/",
+        deployment: {
+          id: "dep-2",
+          status: "ready",
+          publicUrl: "https://example.litt.host/sites/dep-2",
+          stablePublicUrl: "https://hosting.example.test/sites/project/proj-1/",
+          urlVerified: true,
+          fileCount: 7,
+        },
+      });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+
+    render(<StudioPublishControls projectId="proj-1" />);
+    await waitFor(() => {
+      expect(screen.getByTestId("publish-live-url")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("publish-live-url")).toHaveAttribute(
+      "href",
+      "https://hosting.example.test/sites/project/proj-1/",
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("publish-copy-url"));
+    });
+    expect(writeText).toHaveBeenCalledWith(
+      "https://hosting.example.test/sites/project/proj-1/",
+    );
+  });
+});

@@ -80,8 +80,12 @@ describe("deployed user output (/sites) CSP sandbox", () => {
   });
 
   it("still sandboxes in the route handler itself, as defence in depth", () => {
+    // The serving body for BOTH /sites mounts (per-deployment snapshot
+    // and the stable /sites/project address, ACC-01 F8a) lives in the
+    // shared serve-published helper — the sandbox CSP is set there,
+    // once, for every published page either route serves.
     const routeSource = readFileSync(
-      join(__dirname, "../app/sites/[deploymentId]/[[...path]]/route.ts"),
+      join(__dirname, "../lib/deployments/serve-published.ts"),
       "utf-8",
     );
     const match = routeSource.match(/"(sandbox[^"]*)"/);

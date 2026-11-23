@@ -55,7 +55,9 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   const { listLatestDeploymentsForUser } = await import(
     "@/lib/deployments/deployment-store"
   );
-  const { HOSTING_TARGET } = await import("@/lib/deployments/litt-hosting");
+  const { HOSTING_TARGET, stablePublicUrlFor } = await import(
+    "@/lib/deployments/litt-hosting"
+  );
   try {
     const all = await listLatestDeploymentsForUser(owner.userId);
     // This route is the LiTT Hosting publish status — with per-target
@@ -64,6 +66,16 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     const latest =
       all.find((d) => d.projectId === projectId && d.target === HOSTING_TARGET) ??
       null;
+    // ACC-01 F8a: the project's ONE stable public address — it always
+    // serves the latest ready publish, so it is the URL surfaces
+    // present to the user. The per-deployment publicUrl stays on the
+    // record as the immutable snapshot link. Best-effort: when the
+    // hosting base cannot be resolved the field is null rather than a
+    // guessed origin.
+    const stablePublicUrl =
+      latest && latest.status === "ready" && latest.urlVerified
+        ? await stablePublicUrlFor(projectId).catch(() => null)
+        : null;
     const deployment = latest
       ? {
           id: latest.id,
@@ -72,12 +84,14 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
             latest.status === "ready" && latest.urlVerified
               ? latest.publicUrl
               : null,
+          stablePublicUrl,
           urlVerified: latest.urlVerified,
           fileCount: latest.fileCount,
         }
       : null;
     return NextResponse.json({
       published: deployment?.status === "ready" && !!deployment.publicUrl,
+      stablePublicUrl,
       deployment,
     });
   } catch {
@@ -137,10 +151,16 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     );
   }
 
+  // The publish just landed ready + verified, so the project's stable
+  // address now serves it — hand the caller both URLs (F8a).
+  const { stablePublicUrlFor } = await import("@/lib/deployments/litt-hosting");
+  const stablePublicUrl = await stablePublicUrlFor(projectId).catch(() => null);
+
   return NextResponse.json({
     published: true,
     deploymentId: result.deploymentId,
     publicUrl: result.publicUrl,
+    stablePublicUrl,
     reused: result.reused,
     fileCount: result.fileCount,
   });
