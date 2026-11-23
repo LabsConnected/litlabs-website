@@ -2698,10 +2698,9 @@ describe("POST /api/studio/conversations/[conversationId]/messages — built-in 
     expect(reserveCtx.agentInstanceId).toBe("builtin:litt");
     expect(reserveCtx.agentId).toBeNull();
     expect(reserveCtx.agentVersionId).toBeNull();
-    // F7: agent_runs.agent_mode is CHECK-constrained to LiTT agent modes —
-    // the reserve context must carry a valid mode, never the model name.
+    // ACC-01 F7: agent_mode must be a check-constraint value derived
+    // from the slug — the default litt slug maps to "standard".
     expect(reserveCtx.agentMode).toBe("standard");
-    expect(reserveCtx.model ?? "").not.toBe(reserveCtx.agentMode);
 
     expect(settleRun).toHaveBeenCalledTimes(1);
     const [runId, result, reserved, reservationId] = vi.mocked(settleRun).mock.calls[0] as any[];
@@ -2747,5 +2746,31 @@ describe("POST /api/studio/conversations/[conversationId]/messages — built-in 
     const reserveCtx = vi.mocked(reserveCredits).mock.calls[0][0] as any;
     expect(reserveCtx.agentInstanceId).toBe("inst-1");
     expect(reserveCtx.agentId).toBe("tpl-uuid-1");
+  });
+
+  it("passes agentMode 'builder' for a coder-template agent (ACC-01 F7)", async () => {
+    successfulLaunch();
+    vi.mocked(parseAgentSelection).mockReturnValue({ kind: "instance", id: "inst-1" } as any);
+    vi.mocked(resolveRuntimeAgent).mockResolvedValue({
+      ok: true,
+      agent: {
+        agentInstanceId: "inst-1",
+        agentId: "tpl-uuid-2",
+        templateSlug: "coder",
+        agentVersionId: "ver-2",
+        model: "test-model",
+        memoryNamespace: "ns-2",
+      },
+    } as any);
+
+    const res = await POST(makeRequest({ agentInstanceId: "inst-1" }), routeParams);
+    expect(res.status).toBe(200);
+    await readSSE(res);
+
+    const reserveCtx = vi.mocked(reserveCredits).mock.calls[0][0] as any;
+    expect(reserveCtx.agentInstanceId).toBe("inst-1");
+    // slugToMode("coder") — a valid agent_runs.agent_mode value, never
+    // the model name ("test-model" here).
+    expect(reserveCtx.agentMode).toBe("builder");
   });
 });
