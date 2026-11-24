@@ -1,0 +1,179 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { WorkspaceTransport } from "./workspace-transport";
+
+vi.mock("./llm-tool-calling", async (importOriginal) => ({
+  ...(await importOriginal() as Record<string, unknown>),
+  callLLMWithTools: vi.fn(),
+}));
+
+import { runAgentLoopV2 } from "./agent-loop-v2";
+import { callLLMWithTools } from "./llm-tool-calling";
+
+/**
+ * ACC-02 Defect A (staging Acceptance Run 2, 2026-11-24): the build
+ * of a one-page bakery site reported success — its closing message
+ * even described a "glassmorphic dark theme" with a "near-black
+ * background" — while the page it wrote rendered its tagline and
+ * opening-hours times invisibly: light text colors declared for the
+ * intended dark theme, on a document whose effective background
+ * stayed light.
+ *
+ * These tests reproduce that shape end-to-end through the loop: when
+ * a written page's text would be invisible under its own declared
+ * colors, the mismatch is fed back ONCE for a repair attempt, and if
+ * the text still cannot be read the run settles failedHonestly —
+ * never a false "Done".
+ */
+describe("runAgentLoopV2 — invisible-text verification (ACC-02 Defect A)", () => {
+  function toolCallReply(toolCallId: string, toolId: string, inputs: Record<string, unknown>) {
+    return {
+      text: "",
+      toolCalls: [{ toolCallId, toolId, inputs }],
+      finishReason: "tool_calls",
+      model: "test-model",
+    };
+  }
+  const doneReply = {
+    text: "Your bakery site is live — a glassmorphic dark theme with a lime accent and near-black background.",
+    toolCalls: [],
+    finishReason: "stop",
+    model: "test-model",
+  };
+
+  // The Run 2 shape: the tagline and the hours times carry light
+  // colors written for the dark theme the reply describes, while the
+  // body background the document actually declares is white.
+  const INVISIBLE = [
+    "<!DOCTYPE html>",
+    "<html>",
+    "<head><title>Sunny Crust Bakery</title>",
+    "<style>",
+    "  body { background: #ffffff; font-family: sans-serif; }",
+    "  h1 { color: #1c1917; }",
+    "  .tagline { color: #f5f5f4; }",
+    "  .label { color: #44403c; }",
+    "  .hours-time { color: #e7e5e4; }",
+    "</style>",
+    "</head>",
+    "<body>",
+    "  <h1>Sunny Crust Bakery</h1>",
+    '  <p class="tagline">Fresh from the oven every morning.</p>',
+    '  <p><span class="label">Monday - Friday:</span> <span class="hours-time">7:00 AM - 5:00 PM</span></p>',
+    "</body>",
+    "</html>",
+  ].join("\n");
+
+  // The repair the feedback asks for: the dark background the design
+  // intended, actually declared on body.
+  const FIXED = INVISIBLE.replace("background: #ffffff", "background: #03050a")
+    .replace("h1 { color: #1c1917; }", "h1 { color: #f5f5f4; }")
+    .replace(".label { color: #44403c; }", ".label { color: #d6d3d1; }");
+
+  function memoryTransport() {
+    const files = new Map<string, string>();
+    const transport = {
+      workspaceId: "ws-test",
+      userId: "u-test",
+      workspaceRoot: "/tmp/test",
+      projectId: "p-test",
+      createCheckpointBeforeMutation: vi.fn().mockResolvedValue(null),
+      readFile: vi.fn(async (p: string) => {
+        const content = files.get(p);
+        if (content === undefined) throw new Error(`404 not found: ${p}`);
+        return { content, size: content.length };
+      }),
+      writeFile: vi.fn(async (p: string, content: string) => {
+        files.set(p, content);
+        return { saved: true };
+      }),
+      listFiles: vi.fn(async (dir: string) => ({
+        entries: [...files.keys()]
+          .filter((k) => (dir === "." ? !k.includes("/") : k.startsWith(`${dir}/`)))
+          .map((k) => ({ name: k.split("/").pop() as string, type: "file" })),
+      })),
+    } as unknown as WorkspaceTransport;
+    return { transport, files };
+  }
+
+  const INSTRUCTION = "Build a one-page website for a bakery called Sunny Crust Bakery";
+  const config = {
+    model: "test-model",
+    systemPrompt: "You are LiTT.",
+    executionMode: "auto" as const,
+    enableBuildFix: false,
+  };
+
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("settles failedHonestly when the page ships invisible text and the repair chance is not taken", async () => {
+    const { transport, files } = memoryTransport();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(
+        toolCallReply("tc-1", "files.write", { projectId: "p-test", path: "index.html", content: INVISIBLE }),
+      )
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2(INSTRUCTION, transport, config);
+
+    // The invisible page really is what landed on disk.
+    expect(files.get("index.html")).toContain("background: #ffffff");
+    // The mismatch was fed back for one repair attempt: the second
+    // model call's messages carry the contrast feedback.
+    const secondCallMessages = vi.mocked(callLLMWithTools).mock.calls[1][1] as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(
+      secondCallMessages.some(
+        (m) => m.role === "user" && m.content.includes("Verification failed") && m.content.includes("INVISIBLE"),
+      ),
+    ).toBe(true);
+    // And the run must NOT report success: it settles honestly failed,
+    // naming the invisible text instead of the model's theme claim.
+    expect(result.failedHonestly).toBeTruthy();
+    expect(result.failedHonestly).toContain("invisible");
+    expect(result.failedHonestly).toContain("Fresh from the oven every morning.");
+    expect(result.finalText).toBe(result.failedHonestly);
+    expect(result.finalText).not.toContain("glassmorphic");
+  });
+
+  it("succeeds when the model repairs the CSS after the feedback", async () => {
+    const { transport, files } = memoryTransport();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(
+        toolCallReply("tc-1", "files.write", { projectId: "p-test", path: "index.html", content: INVISIBLE }),
+      )
+      .mockResolvedValueOnce(
+        toolCallReply("tc-2", "files.write", { projectId: "p-test", path: "index.html", content: FIXED }),
+      )
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2(INSTRUCTION, transport, config);
+
+    expect(files.get("index.html")).toContain("background: #03050a");
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.finalText).toContain("glassmorphic dark theme");
+  });
+
+  it("succeeds without any feedback when the page is readable the first time", async () => {
+    const { transport } = memoryTransport();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(
+        toolCallReply("tc-1", "files.write", { projectId: "p-test", path: "index.html", content: FIXED }),
+      )
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2(INSTRUCTION, transport, config);
+
+    expect(result.failedHonestly).toBeUndefined();
+    const secondCallMessages = vi.mocked(callLLMWithTools).mock.calls[1][1] as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(
+      secondCallMessages.some((m) => typeof m.content === "string" && m.content.includes("Verification failed")),
+    ).toBe(false);
+  });
+});

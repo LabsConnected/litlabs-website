@@ -60,6 +60,13 @@ describe("buildRuntimeContextBlock — project identity", () => {
     expect(block).toContain("do not put the entry file under public/");
   });
 
+  it("pairs the dark-aesthetic steer with the readability rule (ACC-02 Defect A)", () => {
+    const block = buildRuntimeContextBlock(makeCtx({ framework: "static" }));
+    expect(block).toContain("READABILITY RULE");
+    expect(block).toContain("light text is allowed ONLY where");
+    expect(block).toContain("a page whose words cannot be read on its own declared colors is a failed build");
+  });
+
   it("does not include project_id instruction when projectId is null", () => {
     const block = buildRuntimeContextBlock(makeCtx({ projectId: null }));
     expect(block).not.toContain("project_id=\"");
