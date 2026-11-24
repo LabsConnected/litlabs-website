@@ -289,7 +289,14 @@ export function buildRuntimeContextBlock(ctx: CanonicalRuntimeContext): string {
         "READABILITY RULE: pair every text color with the background this same document actually declares behind it — " +
         "light text is allowed ONLY where the element itself, a section ancestor, or body declares a dark background in the same CSS; " +
         "if that dark background is not declared, the text must be dark. Describing a dark theme in your reply does not make it so: " +
-        "a page whose words cannot be read on its own declared colors is a failed build.",
+        "a page whose words cannot be read on its own declared colors is a failed build. " +
+        "PLAIN-CSS FLOOR (ACC-03): the page's core presentation must not depend on the runtime compiler — " +
+        "ALWAYS also declare the body's background and text colors as plain CSS in a regular <style> block " +
+        "(e.g. <style>body { background-color: #03050a; color: #f5f5f4; }</style>), so the page renders its theme " +
+        "even where the compiled output is unavailable or differs, and so its readability can be verified from the document itself. " +
+        "V4 VARIABLE RULE: Tailwind v4 dropped the v3 variable shorthand — bg-[--color-x] compiles to a declaration browsers " +
+        "drop as invalid, silently removing the background while text colors still apply (white text on no background = invisible). " +
+        "Reference theme variables as bg-(--color-x) or bg-[var(--color-x)], never bg-[--color-x].",
       );
     }
   }
