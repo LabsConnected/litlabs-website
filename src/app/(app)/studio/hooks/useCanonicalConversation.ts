@@ -1972,7 +1972,15 @@ export function useCanonicalConversation({
     const conversationId = s.selectedConversationId;
     // Optimistic "pending_*" ids have no server row — nothing to
     // regenerate against until the canonical conversation exists.
-    if (!conversationId || isOptimisticConversationId(conversationId) || busy) return;
+    if (!conversationId || isOptimisticConversationId(conversationId)) return;
+    if (busy) {
+      // ACC-03 item 5: a Retry press while a run is still settling used
+      // to die here silently — the button looked dead (the first press
+      // did nothing; a later one, after busy cleared, worked). The press
+      // still cannot queue a second run, but it must say why.
+      setSendError("LiTT is still finishing the current run — Retry will work as soon as it settles.");
+      return;
+    }
 
     const allMessages = s.getMessages();
     // Retry targets the exact failed turn the user pressed Retry on. The
@@ -1998,7 +2006,10 @@ export function useCanonicalConversation({
     // re-run (see findRetryResendText).
     const resendText = target ? findRetryResendText(target, allMessages) : null;
     if (resendText) {
-      await send(resendText);
+      const sent = await send(resendText);
+      if (!sent.accepted) {
+        setSendError("Couldn't re-run that turn — LiTT is busy with the current run. Try Retry again once it settles.");
+      }
       return;
     }
 
@@ -2019,7 +2030,10 @@ export function useCanonicalConversation({
       if (canonicalTarget?.status === "failed") {
         const canonicalResendText = findRetryResendText(canonicalTarget, freshMessages);
         if (canonicalResendText) {
-          await send(canonicalResendText);
+          const sent = await send(canonicalResendText);
+          if (!sent.accepted) {
+            setSendError("Couldn't re-run that turn — LiTT is busy with the current run. Try Retry again once it settles.");
+          }
           return;
         }
         // Canonically failed and no parent exists anywhere to re-send:

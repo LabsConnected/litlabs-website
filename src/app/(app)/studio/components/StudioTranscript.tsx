@@ -85,11 +85,17 @@ function deriveWorkLog(
       };
     }
 
-    // Only claim nothing happened when the diff actually says so. Without a
-    // diff we report the failure without asserting anything about the files.
-    // Only claim nothing happened when the diff actually says so. When the
-    // comparison could not be made we say that plainly rather than guessing.
-    if (change?.status === "unknown" || change === null) {
+    // The verification label is only truthful when file verification is
+    // actually what failed: either a workspace comparison was attempted
+    // and came back "unknown", or the run attempted a mutation and no
+    // evidence came back at all. A run that died before attempting any
+    // file work (a failed model call on a first build, say) settled with
+    // change === null too — blaming file verification for it sent the
+    // user (and the operator) hunting a verification bug that never
+    // happened (ACC-03 item 5). Those runs fall through to the plain
+    // failure labels below.
+    const attemptedMutation = execution?.toolCalls.some((call) => call.mutating) ?? false;
+    if (change?.status === "unknown" || (change === null && attemptedMutation)) {
       return {
         label: "Failed — could not verify whether files changed",
         color: "#ef4444",

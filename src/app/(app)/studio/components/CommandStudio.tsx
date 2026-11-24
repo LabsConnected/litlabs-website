@@ -791,6 +791,15 @@ function CommandStudioContent() {
   // activates) — re-applying the same, already-applied URL on such a
   // re-run is never a navigation and must not touch state.
   const lastAppliedNavKeyRef = useRef<string | null>(null);
+  // The project a create/switch navigation is heading to, recorded
+  // synchronously BEFORE router.replace is issued. Until that navigation
+  // commits, capabilities still resolves the PREVIOUS project — and the
+  // state→URL effect below re-runs on the navigation handlers' own
+  // setState calls. Without this record the effect derives the project to
+  // pin from the stale capabilities value and its replace lands after the
+  // navigation's, silently leaving Studio on the old project (ACC-03
+  // item 6). Cleared once the URL carries the target id.
+  const pendingProjectNavigationRef = useRef<string | null>(null);
 
   // ── URL → State synchronization (browser back/forward) ───────────
   // When the URL changes (back/forward navigation), update React state
@@ -1790,10 +1799,16 @@ function CommandStudioContent() {
     // first-run handoff) wins; otherwise the server-resolved project
     // (capabilities) is written back so context is durable across
     // refresh and surface navigation instead of silently re-resolving
-    // to a different project (audit ART-20261111-082).
+    // to a different project (audit ART-20261111-082). While a create /
+    // switch navigation is still committing, its target outranks the
+    // not-yet-refreshed capabilities value (ACC-03 item 6).
+    const pendingProjectId = pendingProjectNavigationRef.current;
+    if (pendingProjectId && searchParams.get("project") === pendingProjectId) {
+      pendingProjectNavigationRef.current = null;
+    }
     const projectId = resolveActiveProjectIdForUrl(
       searchParams.get("project"),
-      capabilities.projectId,
+      pendingProjectId ?? capabilities.projectId,
     );
     if (projectId) params.set("project", projectId);
     params.delete("prompt");
@@ -1833,7 +1848,7 @@ function CommandStudioContent() {
     // into the URL as soon as resolution completes, not only on the next
     // destination change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [destination, studioMode, createMode, moreMode, workSurface, pathname, router, studioShellActive, stageSurface, capabilities.projectId]);
+  }, [destination, studioMode, createMode, moreMode, workSurface, pathname, router, studioShellActive, stageSurface, capabilities.projectId, searchParams]);
 
   // Handle legacy "studio:switch-tool" events emitted from inside tools.
   useEffect(() => {
@@ -2331,6 +2346,11 @@ function CommandStudioContent() {
       params.set("project", project.id);
       params.delete("conversation");
       params.delete("agentInstance");
+      // Record the navigation target before issuing it: the state→URL
+      // effect re-runs on the setState calls below while capabilities
+      // still resolves the previous project, and must pin THIS project,
+      // not the stale one (ACC-03 item 6).
+      pendingProjectNavigationRef.current = project.id;
       window.dispatchEvent(new CustomEvent("studio:project-switching"));
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
       // Refresh capabilities so projectId propagates
@@ -2398,6 +2418,7 @@ function CommandStudioContent() {
   const handleSelectProject = useCallback((projectId: string) => {
     // Synchronous signal first — an in-flight send must see the switch
     // before router state settles.
+    pendingProjectNavigationRef.current = projectId;
     window.dispatchEvent(new CustomEvent("studio:project-switching"));
     const params = new URLSearchParams(searchParams.toString());
     params.set("project", projectId);
@@ -2414,6 +2435,9 @@ function CommandStudioContent() {
    * exists — the capabilities refresh then settles to the no-project state.
    */
   const handleDeleteProject = useCallback((deletedProjectId: string) => {
+    if (pendingProjectNavigationRef.current === deletedProjectId) {
+      pendingProjectNavigationRef.current = null;
+    }
     if (capabilities.projectId !== deletedProjectId) return;
     window.dispatchEvent(new CustomEvent("studio:project-switching"));
     const params = new URLSearchParams(searchParams.toString());

@@ -821,6 +821,54 @@ describe("regenerate() Retry honesty", () => {
     expect(regenerateBodies).toHaveLength(0);
   });
 
+  it("surfaces feedback instead of dying silently when Retry is pressed while a run is still in flight (ACC-03 item 5)", async () => {
+    const result = await renderAndSeed([
+      makeChatMsg({ id: "u1", role: "user", content: PROMPT, status: "completed" }),
+      makeChatMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: "u1" }),
+    ]);
+
+    // Put the hook into its busy state: a send whose POST never resolves
+    // until the test releases it. This is the acceptance shape — the
+    // failed run's settlement is still draining when the user hits
+    // Retry, and the old guard swallowed the press with no feedback at
+    // all (the button looked dead; a later press worked).
+    let releaseSend: (() => void) | undefined;
+    let retryPosts = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "POST" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        retryPosts += 1;
+        if (retryPosts === 1) {
+          await new Promise<void>((resolve) => { releaseSend = resolve; });
+        }
+        const body = JSON.parse(String(init?.body));
+        return jsonResponse({
+          userMessage: makeMsg({ id: "u-new", role: "user", content: body.message }),
+          assistantMessage: makeMsg({ id: "a-new", content: "Re-running the task." }),
+          revision: 3,
+        });
+      }
+      if (url.startsWith("/api/studio/conversations")) {
+        return jsonResponse({ conversations: [] });
+      }
+      return jsonResponse({});
+    }));
+
+    let sendPromise: Promise<unknown> | undefined;
+    act(() => { sendPromise = result.current.send("another task"); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(result.current.busy).toBe(true);
+
+    await act(async () => { await result.current.regenerate("asst-1"); });
+
+    // No second run was queued, and the press was NOT silent.
+    expect(retryPosts).toBe(1);
+    expect(result.current.sendError).toContain("still finishing");
+
+    await act(async () => { releaseSend?.(); await sendPromise; });
+  });
+
   it("keeps plain Regenerate (no id, completed turn) on the chat-only endpoint", async () => {
     const result = await renderAndSeed([
       makeChatMsg({ id: "u1", role: "user", content: "Say hi", status: "completed" }),
