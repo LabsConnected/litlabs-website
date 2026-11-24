@@ -49,6 +49,18 @@ vi.mock("./tool-registry", () => ({
         permissionLevel: "workspace-write",
         approvalPolicy: { required: true, autoApproveReadOnly: false, requireExplicitForMutations: true, neverAllow: false },
       },
+      {
+        id: "files.delete",
+        name: "Delete File",
+        description: "Delete a file",
+        inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+        readOnly: false,
+        enabled: true,
+        risk: "high",
+        requiredPermissions: ["files:write"],
+        permissionLevel: "workspace-write",
+        approvalPolicy: { required: true, autoApproveReadOnly: false, requireExplicitForMutations: true, neverAllow: false },
+      },
     ],
     execute,
     validateInputs: () => null,
@@ -283,5 +295,104 @@ describe("I. a provider failure after deployment neither repeats nor loses it", 
 
     expect(result.finalText).not.toMatch(/https?:\/\/\S*\/sites\//);
     expect(result.finalText).not.toMatch(/is live|deployed successfully/i);
+  });
+
+  // ── ACC-03 item 1: deploy is transport, not a build ──────────────
+  // Run 1 on 055ae851: the Deploy surface's hand-off prefilled
+  // "Deploy this project to production" and the run answered by
+  // regenerating index.html through five approved writes before
+  // publishing. A deploy-only run must not be ABLE to write content.
+  it("refuses a content write in a deploy-only run and still reaches the deploy approval", async () => {
+    callLLMWithTools
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [
+          {
+            toolCallId: "tc-write",
+            toolId: "files.write",
+            inputs: { projectId: "proj_ember", path: "index.html", content: "<html>rewritten</html>" },
+          },
+        ],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [
+          { toolCallId: "tc-deploy", toolId: "project.deploy", inputs: { projectId: "proj_ember" } },
+        ],
+        finishReason: "tool_calls",
+        model: "test-model",
+      });
+
+    const result = await runAgentLoopV2(
+      "Deploy this project to production",
+      transport(),
+      { ...config },
+    );
+
+    // The write was refused before execution: the registry never ran
+    // ANY tool, and the refusal was logged as a non-mutating failure.
+    expect(execute).not.toHaveBeenCalled();
+    const refusal = result.toolCalls.find((t) => t.toolId === "files.write");
+    expect(refusal?.success).toBe(false);
+    expect(refusal?.summary).toMatch(/deploy-only/i);
+    // The run proceeded to the deploy itself, which pauses for its
+    // approval exactly as before.
+    expect(result.pendingApproval?.toolId).toBe("project.deploy");
+  });
+
+  // Greptile (PR #1108): the guard's original hand-picked set left
+  // files.delete / files.rename executable in a deploy-only run —
+  // publishing could still REMOVE content. The blocked set is now
+  // derived from the registry's readOnly metadata.
+  it("refuses a file deletion in a deploy-only run and still reaches the deploy approval", async () => {
+    callLLMWithTools
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [
+          {
+            toolCallId: "tc-delete",
+            toolId: "files.delete",
+            inputs: { projectId: "proj_ember", path: "index.html" },
+          },
+        ],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [
+          { toolCallId: "tc-deploy", toolId: "project.deploy", inputs: { projectId: "proj_ember" } },
+        ],
+        finishReason: "tool_calls",
+        model: "test-model",
+      });
+
+    const result = await runAgentLoopV2(
+      "Deploy this project to production",
+      transport(),
+      { ...config },
+    );
+
+    expect(execute).not.toHaveBeenCalled();
+    const refusal = result.toolCalls.find((t) => t.toolId === "files.delete");
+    expect(refusal?.success).toBe(false);
+    expect(refusal?.summary).toMatch(/deploy-only/i);
+    expect(result.pendingApproval?.toolId).toBe("project.deploy");
+  });
+
+  it("reports the STABLE project URL after an approved deploy, not the per-deployment URL", async () => {
+    const STABLE_URL = "https://litlabs.example/sites/project/proj_ember/";
+    execute.mockResolvedValue({
+      ok: true,
+      result: { ...deploySuccess, stablePublicUrl: STABLE_URL },
+    });
+    callLLMWithTools.mockRejectedValue(new Error("All tool-calling models failed"));
+
+    const result = await resumeAgentLoopV2(approvedDeploy(), transport());
+
+    expect(result.finalText).toContain(STABLE_URL);
+    expect(result.finalText).not.toContain(LIVE_URL);
   });
 });

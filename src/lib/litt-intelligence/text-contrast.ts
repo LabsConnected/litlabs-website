@@ -26,9 +26,22 @@
  *   - It reasons ONLY about the generated document itself: its own
  *     <style> blocks and inline style attributes. A document whose
  *     colors may live elsewhere — a linked local stylesheet, an
- *     @import, a prefers-color-scheme media block, or the Tailwind
- *     browser runtime compiling utility classes into CSS at load —
- *     is not reasoned about at all.
+ *     @import, a prefers-color-scheme media block — is not reasoned
+ *     about at all.
+ *   - ACC-03 (Run 1 on 055ae851): the Tailwind browser runtime is no
+ *     longer a silent pass. A page whose theme lives ONLY in a
+ *     <style type="text/tailwindcss"> @apply block ships or breaks
+ *     with the runtime compiler — the run's page declared white text
+ *     over bg-[--color-background], which Tailwind v4 compiles to an
+ *     invalid declaration the browser drops, leaving invisible text
+ *     on every serve path. So when the runtime decides colors, the
+ *     checker either judges the narrow shape it can soundly model
+ *     (the html/body @apply rule and a closed set of color utilities,
+ *     with the v3 bg-[--x] shorthand treated as the dropped no-op it
+ *     compiles to) or reports the document UNVERIFIABLE
+ *     (unreasonedReason "tailwind-runtime") — and the wiring treats
+ *     unverifiable exactly like the truncated case: repair feedback,
+ *     then an honest non-clean settlement. Never a silent clean.
  *   - An element is only judged when BOTH its effective text color
  *     and the effective background behind it resolve to concrete
  *     colors through the document's own cascade (tag/class/id
@@ -68,12 +81,20 @@ export interface TextContrastCheck {
   /** True when at least one mutated HTML file could be read back and
    *  the evidence is complete: when the candidate cap truncated the
    *  set and no violation was found, the outcome is unknown and this
-   *  is false — absence of evidence never fails a run (F9's rule). */
+   *  is false — absence of evidence never fails a run (F9's rule).
+   *  ACC-03: a found UNVERIFIABLE file is also evidence the check
+   *  applies — the run must hear about it, not pass in silence. */
   applies: boolean;
   /** Clear invisible-text violations found in the checked files. */
   violations: ContrastViolation[];
   /** Files actually read and checked. */
   checkedFiles: string[];
+  /** Checked files whose colors are decided by the Tailwind browser
+   *  runtime in shapes the checker cannot soundly judge (ACC-03).
+   *  An unverifiable file is NOT a clean file: the loop wiring gives
+   *  it the same repair-feedback-then-honest-failure treatment as a
+   *  violation, with its own message. */
+  unverifiableFiles: string[];
 }
 
 // ─── Color parsing ───────────────────────────────────────────────────
@@ -968,6 +989,12 @@ export interface DocumentContrastResult {
    *  document itself (linked local stylesheet, @import, an opaque
    *  at-rule) and nothing in it can be judged responsibly. */
   reasoned: boolean;
+  /** Set when reasoned is false BECAUSE the document's colors are
+   *  decided by the Tailwind browser runtime in shapes the narrow
+   *  judgment cannot soundly model (ACC-03). Such a document is
+   *  UNVERIFIABLE — never clean. Other unreasoned causes leave this
+   *  unset, keeping their long-standing unenforced behavior. */
+  unreasonedReason?: "tailwind-runtime";
 }
 
 /**
@@ -987,6 +1014,7 @@ export function findContrastViolations(html: string): DocumentContrastResult {
   // Collect the document's own styles and detect colors that may be
   // decided elsewhere.
   const styleTexts: string[] = [];
+  const tailwindTexts: string[] = [];
   let externalColorsPossible = false;
   let tailwindRuntime = false;
   const scan = (node: P5Node) => {
@@ -996,9 +1024,11 @@ export function findContrastViolations(html: string): DocumentContrastResult {
         // A text/tailwindcss block is source for the Tailwind browser
         // runtime, not plain CSS: the runtime compiles it (and the
         // utility classes in the markup) into CSS this checker never
-        // sees, so the document is beyond it.
+        // sees. ACC-03: the block's text is kept for the narrow
+        // runtime judgment below instead of bailing on sight.
         if ((attrOf(child, "type") ?? "").trim().toLowerCase() === "text/tailwindcss") {
           tailwindRuntime = true;
+          tailwindTexts.push(directText(child));
         } else {
           styleTexts.push(directText(child));
         }
@@ -1027,15 +1057,31 @@ export function findContrastViolations(html: string): DocumentContrastResult {
   scan(doc);
 
   const allCss = styleTexts.join("\n");
-  if (externalColorsPossible || tailwindRuntime || /@import/i.test(allCss)) {
+  if (externalColorsPossible || /@import/i.test(allCss)) {
     return { violations: [], reasoned: false };
   }
 
   const { rules, opaque } = parseStylesheet(allCss);
   if (opaque) return { violations: [], reasoned: false };
 
+  // ACC-03: when the Tailwind runtime is present it can recolor any
+  // element whose ancestor chain carries color utilities or a
+  // modeled @apply class, and root-level runtime colors or
+  // unmodelable @apply shapes can recolor anything at all.
+  // Plain-cascade verdicts stay trustworthy only for elements the
+  // runtime cannot recolor; the rest are decided after the visit
+  // (narrow judgment or unverifiable), never by the plain cascade
+  // alone.
+  const tailwindModel = tailwindRuntime ? parseTailwindTheme(tailwindTexts) : null;
+  const runtimeRootColors =
+    tailwindModel !== null &&
+    (tailwindModel.root.bg.kind !== "none" || tailwindModel.root.color.kind !== "none");
+  const applyColorTokensPresent =
+    tailwindModel !== null && (tailwindModel.unmodelable || runtimeRootColors);
+  let anyRuntimeAffectedText = false;
+
   const inlineStyles = new Map<P5Node, Map<string, CssDeclaration>>();
-  const violations: Array<Omit<ContrastViolation, "path">> = [];
+  const violations: Array<Omit<ContrastViolation, "path"> & { runtimeAffected?: boolean }> = [];
   const seen = new Set<string>();
 
   const visit = (el: P5Node) => {
@@ -1049,6 +1095,19 @@ export function findContrastViolations(html: string): DocumentContrastResult {
     const text = directText(el);
     if (text.length >= 2 && /[A-Za-z0-9]/.test(text) && !SKIP_ELEMENT_TAGS.has(tag)) {
       const chain = ancestorChain(el);
+      // ACC-03: can the Tailwind runtime recolor this element (a
+      // color utility on it or an ancestor)? Tracked for every text
+      // element, judged or not — it decides whose verdict counts.
+      const chainRuntimeAffected =
+        tailwindModel !== null &&
+        chain.some((n) =>
+          classListOf(n).some(
+            (tok) =>
+              isColorUtilityToken(tok, tailwindModel.themeVars) ||
+              tailwindModel.classWriters.has(tok),
+          ),
+        );
+      if (chainRuntimeAffected) anyRuntimeAffectedText = true;
       // One custom-property scope per chain prefix: scopes[i] is the
       // scope in force AT chain[i], so an ancestor's declarations
       // resolve with its own variables, not the target's.
@@ -1081,6 +1140,7 @@ export function findContrastViolations(html: string): DocumentContrastResult {
                     color: toHex(painted),
                     background: toHex(bg.value),
                     ratio: Math.round(ratio * 100) / 100,
+                    runtimeAffected: chainRuntimeAffected,
                   });
                 }
               }
@@ -1098,7 +1158,741 @@ export function findContrastViolations(html: string): DocumentContrastResult {
   for (const child of doc.childNodes ?? []) {
     if (child.tagName) visit(child);
   }
-  return { violations, reasoned: true };
+
+  if (!tailwindRuntime) {
+    return {
+      violations: violations.map(({ runtimeAffected: _flag, ...v }) => v),
+      reasoned: true,
+    };
+  }
+
+  // ACC-03 resolution for Tailwind-runtime documents. Plain verdicts
+  // count only where the runtime cannot recolor (no @apply color
+  // tokens anywhere, and this element's chain carries no color
+  // utility). Everything else goes to the narrow runtime judgment;
+  // what it cannot soundly judge is UNVERIFIABLE, never clean.
+  const trustworthy = applyColorTokensPresent
+    ? []
+    : violations
+        .filter((v) => !v.runtimeAffected)
+        .map(({ runtimeAffected: _flag, ...v }) => v);
+  if (trustworthy.length > 0) return { violations: trustworthy, reasoned: true };
+  if (!applyColorTokensPresent && !anyRuntimeAffectedText) {
+    // The runtime is loaded but decides no color at stake — every
+    // text element was judged on the document's own plain CSS.
+    return { violations: [], reasoned: true };
+  }
+  const narrow = tailwindModel
+    ? judgeTailwindRuntimeColors(doc, tailwindModel, rules, inlineStyles)
+    : null;
+  if (narrow === null) {
+    return { violations: [], reasoned: false, unreasonedReason: "tailwind-runtime" };
+  }
+  return { violations: narrow, reasoned: true };
+}
+
+// ─── ACC-03: the narrow Tailwind-runtime judgment ────────────────────
+//
+// Deliberately NOT a Tailwind interpreter. It models exactly the
+// shapes whose compiled colors are certain, composing them with the
+// document's plain cascade (a plain <style> color still applies
+// alongside compiled utilities — the runtime adds CSS, it does not
+// replace the document's own):
+//
+//   - @theme custom properties (the tokens utilities resolve
+//     through);
+//   - the html/body rules of the text/tailwindcss block — plain
+//     declarations and @apply tokens — which set the page's base
+//     colors;
+//   - rules whose selectors are ALL single classes (.glass-card),
+//     modeled as per-class color writers;
+//   - color utilities on elements and their ancestors, restricted
+//     to a CLOSED token set: white, black, transparent, #hex, and
+//     var() references that resolve through @theme.
+//
+// Two evidence-backed rules do the heavy lifting:
+//
+//   - bg-[--x] / text-[--x] (the Tailwind v3 variable shorthand)
+//     compiles under the v4 browser build to a declaration browsers
+//     drop as invalid (`background-color: --color-background`), so
+//     the token has NO effect — proven against @tailwindcss/
+//     browser@4 with the Run 1 evidence file: the same page with
+//     bg-(--color-background) computes body background rgb(3,5,10);
+//     with bg-[--color-background] it computes transparent while
+//     the white text color applies. That asymmetry IS the blank
+//     published page.
+//   - Anything outside the model (palette shades like bg-zinc-900,
+//     gradients, images, currentColor, unresolved variables,
+//     conditional at-rule blocks, @apply colors on selectors that
+//     are neither root nor single-class) makes the document
+//     UNVERIFIABLE rather than guessed at.
+
+type UtilityColor =
+  | { kind: "color"; color: Rgba }
+  | { kind: "dropped" }
+  | { kind: "unknown" };
+
+/** Strip Tailwind variant prefixes (md:, lg:, hover:, dark:, …)
+ *  from a class token, leaving the base utility. Stripping serves
+ *  DETECTION: a prefixed color utility is still a color utility,
+ *  so its chain is runtime-affected and the runtime judge decides
+ *  it (Greptile, PR #1108). Whether a prefixed token may also
+ *  WRITE the colors the default state is judged on is a separate
+ *  question — see conditionalDisposition. Bracketed variant
+ *  forms (data-[state=open]:, supports-[…]:) are stripped through
+ *  their closing bracket. */
+function stripVariantPrefixes(token: string): string {
+  let t = token;
+  while (!/^(?:bg|text)-/.test(t)) {
+    const bracketed = t.indexOf("]:");
+    if (bracketed >= 0 && t.startsWith("[") === false && /^[a-zA-Z][a-zA-Z0-9_-]*-\[/.test(t)) {
+      t = t.slice(bracketed + 2);
+      continue;
+    }
+    const m = /^([a-zA-Z0-9_-]+):/.exec(t);
+    if (!m) break;
+    t = t.slice(m[0].length);
+  }
+  return t;
+}
+
+/** The variant prefixes on a class token, in order, using the
+ *  same scan as stripVariantPrefixes: named segments (hover,
+ *  md, group-hover, …) and bracketed forms kept whole
+ *  (data-[state=open], min-[400px], …). */
+function variantPrefixesOf(token: string): string[] {
+  const prefixes: string[] = [];
+  let t = token;
+  while (!/^(?:bg|text)-/.test(t)) {
+    const bracketed = t.indexOf("]:");
+    if (bracketed >= 0 && t.startsWith("[") === false && /^[a-zA-Z][a-zA-Z0-9_-]*-\[/.test(t)) {
+      prefixes.push(t.slice(0, bracketed + 1));
+      t = t.slice(bracketed + 2);
+      continue;
+    }
+    const m = /^([a-zA-Z0-9_-]+):/.exec(t);
+    if (!m) break;
+    prefixes.push(m[1]);
+    t = t.slice(m[0].length);
+  }
+  return prefixes;
+}
+
+/** Environment variants: conditions of the page's environment
+ *  (viewport, color scheme, orientation, direction, motion and
+ *  contrast preferences, print) rather than of a transient
+ *  interaction state. For a whole class of real visitors the
+ *  condition holds full-time, so the previous round's rule —
+ *  assume it holds and judge the color as applying — stands for
+ *  these (Greptile, PR #1108). */
+function isEnvironmentVariant(prefix: string): boolean {
+  const p = prefix.toLowerCase();
+  return (
+    p === "sm" || p === "md" || p === "lg" || p === "xl" || p === "2xl" ||
+    p.startsWith("min-") || p.startsWith("max-") ||
+    p === "dark" ||
+    p === "portrait" || p === "landscape" ||
+    p === "ltr" || p === "rtl" ||
+    p === "motion-safe" || p === "motion-reduce" ||
+    p === "contrast-more" || p === "contrast-less" ||
+    p === "forced-colors" ||
+    p === "print"
+  );
+}
+
+/** Interaction variants: conditions on a transient interaction
+ *  or form state (hover, focus, active, visited, checked,
+ *  disabled, group-*, peer-*, …). None of them hold in the state
+ *  a visitor first sees the page in, so a color behind one
+ *  paints nothing in the default state and can never be the
+ *  color the default state is judged on (Greptile, PR #1108):
+ *  hover:text-white on a black page leaves the unhovered text at
+ *  its inherited default color — black on black — however white
+ *  the hover state would be. group- and peer- conditions live on
+ *  another element's interaction state, so they are interaction
+ *  conditions too, not this element's. */
+function isInteractionVariant(prefix: string): boolean {
+  const p = prefix.toLowerCase();
+  return (
+    p === "hover" || p === "focus" || p === "focus-visible" || p === "focus-within" ||
+    p === "active" || p === "visited" || p === "target" ||
+    p === "checked" || p === "disabled" || p === "enabled" || p === "indeterminate" ||
+    p === "read-only" || p === "required" ||
+    p === "invalid" || p === "valid" || p === "user-valid" || p === "user-invalid" ||
+    p === "placeholder-shown" || p === "autofilled" ||
+    p === "in-range" || p === "out-of-range" ||
+    p === "default" || p === "empty" || p === "open" || p === "inert" ||
+    p.startsWith("group-") || p.startsWith("peer-")
+  );
+}
+
+/** The structural variants this narrow model can DECIDE from
+ *  the parsed document: conditions on the element's own position
+ *  among its siblings. Unlike an interaction state, a structural
+ *  condition can already hold when the page loads — a paragraph
+ *  that IS the first child is painted by first:text-white in the
+ *  default state, and dropping that color reported a genuinely
+ *  readable page as black-on-black (Greptile, PR #1108). */
+const STRUCTURAL_VARIANTS = new Set([
+  "first",
+  "last",
+  "only",
+  "first-of-type",
+  "last-of-type",
+  "only-of-type",
+]);
+
+/** The element children of el's parent, el included; an element
+ *  with no reachable parent stands alone, trivially first, last
+ *  and only. Text and comment nodes are not siblings for
+ *  :first-child and kin — only elements count. */
+function elementSiblings(el: P5Node): P5Node[] {
+  const parent = el.parentNode;
+  if (!parent || !parent.childNodes) return [el];
+  const els = parent.childNodes.filter((c) => c.tagName);
+  return els.length > 0 ? els : [el];
+}
+
+/** Whether a decidable structural variant holds for THIS
+ *  element, from its actual position among its siblings
+ *  (of-type = among siblings with the same tag name). */
+function structuralVariantHolds(prefix: string, el: P5Node): boolean {
+  const siblings = elementSiblings(el);
+  switch (prefix.toLowerCase()) {
+    case "first":
+      return siblings[0] === el;
+    case "last":
+      return siblings[siblings.length - 1] === el;
+    case "only":
+      return siblings.length === 1;
+    case "first-of-type": {
+      const tag = (el.tagName ?? "").toLowerCase();
+      return siblings.find((s) => (s.tagName ?? "").toLowerCase() === tag) === el;
+    }
+    case "last-of-type": {
+      const tag = (el.tagName ?? "").toLowerCase();
+      const ofType = siblings.filter((s) => (s.tagName ?? "").toLowerCase() === tag);
+      return ofType[ofType.length - 1] === el;
+    }
+    case "only-of-type": {
+      const tag = (el.tagName ?? "").toLowerCase();
+      return siblings.filter((s) => (s.tagName ?? "").toLowerCase() === tag).length === 1;
+    }
+    default:
+      return false;
+  }
+}
+
+/** How a token's color stands in the DEFAULT state — the only
+ *  state this check certifies:
+ *
+ *  - "applies": unconditional, environment-only (the previous
+ *    rounds' rule: for a whole class of visitors the condition
+ *    holds full-time), or behind decidable structural variants
+ *    that all HOLD for the element being folded.
+ *  - "absent": behind an interaction variant anywhere in the
+ *    stack (md:hover:… paints nothing unhovered at any
+ *    viewport), or behind decidable structural variants that do
+ *    not hold for this element — the color genuinely does not
+ *    paint it, so it contributes nothing.
+ *  - "unknown": behind any other condition this narrow model
+ *    does not decide — odd/even/nth-*, data-[…]:, aria-*:, and
+ *    structural variants folded without an element to judge
+ *    them against (@apply tokens in a rule body apply to
+ *    elements whose positions the fold cannot see). Unknown is
+ *    honest: the writer feeds the module's unverifiable path
+ *    rather than being silently absent or silently present. */
+type ConditionalDisposition = "applies" | "absent" | "unknown";
+
+function conditionalDisposition(token: string, el?: P5Node): ConditionalDisposition {
+  const prefixes = variantPrefixesOf(token);
+  if (prefixes.length === 0) return "applies";
+  if (prefixes.every(isEnvironmentVariant)) return "applies";
+  if (prefixes.some(isInteractionVariant)) return "absent";
+  const conditional = prefixes.filter((p) => !isEnvironmentVariant(p));
+  if (conditional.every((p) => STRUCTURAL_VARIANTS.has(p.toLowerCase()))) {
+    if (!el) return "unknown";
+    return conditional.every((p) => structuralVariantHolds(p, el)) ? "applies" : "absent";
+  }
+  return "unknown";
+}
+
+/** True when a class token has the shape of a COLOR utility (as
+ *  opposed to typography/layout tokens like text-lg or bg-cover,
+ *  which decide no color and are ignored). Variant prefixes are
+ *  stripped first. Theme-named colors (bg-background,
+ *  text-foreground) count when the document's @theme defines the
+ *  matching --color-* variable — in Tailwind v4 that definition is
+ *  precisely what makes the utility exist. */
+function isColorUtilityToken(token: string, themeVars?: Map<string, string>): boolean {
+  const m = /^(?:bg|text)-(.+)$/.exec(stripVariantPrefixes(token));
+  if (!m) return false;
+  const body = m[1].replace(/\/\d{1,3}$/, "");
+  return (
+    body === "white" ||
+    body === "black" ||
+    body === "transparent" ||
+    body === "current" ||
+    body === "currentcolor" ||
+    body.startsWith("[") ||
+    body.startsWith("(") ||
+    body.startsWith("gradient-") ||
+    /^#(?:[0-9a-f]{3,8})$/i.test(body) ||
+    /^[a-z]+-[0-9]{2,3}$/.test(body) ||
+    (themeVars !== undefined &&
+      /^[a-zA-Z][a-zA-Z0-9_-]*$/.test(body) &&
+      themeVars.has(`--color-${body}`))
+  );
+}
+
+/** Classify one color-utility token against the @theme variables. */
+function classifyUtilityColor(token: string, themeVars: Map<string, string>): UtilityColor {
+  const m = /^(?:bg|text)-(.+)$/.exec(stripVariantPrefixes(token));
+  if (!m) return { kind: "unknown" };
+  let body = m[1];
+  let alpha = 1;
+  const slash = /\/(\d{1,3})$/.exec(body);
+  if (slash) {
+    alpha = Math.min(1, Number(slash[1]) / 100);
+    body = body.slice(0, slash.index);
+  }
+  const withAlpha = (color: Rgba): UtilityColor => ({
+    kind: "color",
+    color: { ...color, a: color.a * alpha },
+  });
+  if (body === "white") return withAlpha({ r: 255, g: 255, b: 255, a: 1 });
+  if (body === "black") return withAlpha({ r: 0, g: 0, b: 0, a: 1 });
+  if (body === "transparent") return { kind: "color", color: { r: 0, g: 0, b: 0, a: 0 } };
+  // The v3 variable shorthand: compiles to an invalid declaration
+  // the browser drops — the token does nothing at all.
+  if (body.startsWith("[--") && body.endsWith("]")) return { kind: "dropped" };
+  if (body.startsWith("[") && body.endsWith("]")) {
+    const resolved = resolveVars(body.slice(1, -1), themeVars);
+    if (resolved === null) return { kind: "unknown" };
+    const color = parseCssColor(resolved);
+    return color ? withAlpha(color) : { kind: "unknown" };
+  }
+  if (body.startsWith("(") && body.endsWith(")")) {
+    const raw = themeVars.get(body.slice(1, -1).trim());
+    if (raw === undefined) return { kind: "unknown" };
+    const resolved = resolveVars(raw, themeVars);
+    if (resolved === null) return { kind: "unknown" };
+    const color = parseCssColor(resolved);
+    return color ? withAlpha(color) : { kind: "unknown" };
+  }
+  if (/^#(?:[0-9a-f]{3,8})$/i.test(body)) {
+    const color = parseCssColor(body);
+    return color ? withAlpha(color) : { kind: "unknown" };
+  }
+  // Theme-named colors (Greptile, PR #1108): bg-background /
+  // text-foreground resolve through the @theme variable of the
+  // same name — --color-background, --color-foreground — exactly
+  // like the bg-(--color-x) form above. A variable that exists but
+  // does not resolve to a concrete color is unknown (the document
+  // goes UNVERIFIABLE, never silently clean); a name with no
+  // @theme definition generates no utility at all in v4 and falls
+  // through to unknown as well when it reached classification via
+  // a palette-shaped sibling — either way it is never guessed.
+  if (/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(body)) {
+    const raw = themeVars.get(`--color-${body}`);
+    if (raw !== undefined) {
+      const resolved = resolveVars(raw, themeVars);
+      if (resolved === null) return { kind: "unknown" };
+      const color = parseCssColor(resolved);
+      return color ? withAlpha(color) : { kind: "unknown" };
+    }
+  }
+  // Palette shades, gradients, currentColor, anything unrecognized:
+  // a real color the narrow judgment will not guess.
+  return { kind: "unknown" };
+}
+
+/** One property's runtime writer state after folding a rule's
+ *  declarations in source order: the last writer wins, a dropped
+ *  v3-shorthand token writes nothing, an unrecognized writer leaves
+ *  the property honestly unknown. */
+type ColorWriter =
+  | { kind: "color"; color: Rgba }
+  | { kind: "unknown" }
+  | { kind: "none" };
+
+interface TailwindColorWriters {
+  bg: ColorWriter;
+  color: ColorWriter;
+}
+
+interface TailwindThemeModel {
+  themeVars: Map<string, string>;
+  /** Writers from the html/body rules — the page's base colors. */
+  root: TailwindColorWriters;
+  /** Writers from rules whose selectors are all single classes. */
+  classWriters: Map<string, TailwindColorWriters>;
+  /** True when the block shapes exceed the narrow model entirely
+   *  (conditional at-rules, @apply colors on unmodelable
+   *  selectors): nothing in the document can be judged. */
+  unmodelable: boolean;
+}
+
+function emptyWriters(): TailwindColorWriters {
+  return { bg: { kind: "none" }, color: { kind: "none" } };
+}
+
+function foldUtilityToken(
+  w: TailwindColorWriters,
+  token: string,
+  themeVars: Map<string, string>,
+  el?: P5Node,
+): void {
+  if (!isColorUtilityToken(token, themeVars)) return;
+  // Conditional colors are disposed of before they can write —
+  // see conditionalDisposition. "absent" colors (interaction
+  // states, structural conditions that do not hold for this
+  // element) never write a default-state writer: the element is
+  // judged on whatever its default state actually declares (its
+  // own unprefixed utilities, class writers, plain CSS,
+  // inheritance, the initial colors). "unknown" colors
+  // (conditions the narrow model does not decide) write an
+  // unknown writer instead: reached by the walk, the document is
+  // unverifiable — never silently clean, never silently failed.
+  const disposition = conditionalDisposition(token, el);
+  if (disposition === "absent") return;
+  if (disposition === "unknown") {
+    const unknown: ColorWriter = { kind: "unknown" };
+    if (stripVariantPrefixes(token).startsWith("bg-")) w.bg = unknown;
+    else w.color = unknown;
+    return;
+  }
+  const c = classifyUtilityColor(token, themeVars);
+  if (c.kind === "dropped") return;
+  const next: ColorWriter =
+    c.kind === "color" ? { kind: "color", color: c.color } : { kind: "unknown" };
+  if (stripVariantPrefixes(token).startsWith("bg-")) w.bg = next;
+  else w.color = next;
+}
+
+function foldPlainDeclaration(
+  w: TailwindColorWriters,
+  prop: "background" | "color",
+  rawValue: string,
+  themeVars: Map<string, string>,
+): void {
+  const set = (next: ColorWriter) => {
+    if (prop === "background") w.bg = next;
+    else w.color = next;
+  };
+  const resolved = resolveVars(rawValue, themeVars);
+  if (resolved === null) {
+    set({ kind: "unknown" });
+    return;
+  }
+  const value = resolved.trim();
+  const color = parseCssColor(value);
+  if (color) {
+    set({ kind: "color", color });
+    return;
+  }
+  if (/gradient|url\(/i.test(value)) {
+    set({ kind: "unknown" });
+    return;
+  }
+  if (prop === "background") {
+    // A background shorthand can carry a color among other parts.
+    for (const part of value.split(/\s+/)) {
+      const partColor = parseCssColor(part);
+      if (partColor) {
+        set({ kind: "color", color: partColor });
+        return;
+      }
+    }
+  }
+  set({ kind: "unknown" });
+}
+
+/** Fold one rule body (plain declarations and @apply statements,
+ *  interleaved in source order) into a writers record. */
+function foldRuleBody(
+  w: TailwindColorWriters,
+  ruleBody: string,
+  themeVars: Map<string, string>,
+): void {
+  const segmentRe = /@apply\s+([^;]+);?|([^@;]+);?/g;
+  let sm: RegExpExecArray | null;
+  while ((sm = segmentRe.exec(ruleBody)) !== null) {
+    if (sm[1] !== undefined) {
+      for (const tok of sm[1].split(/\s+/)) {
+        if (tok) foldUtilityToken(w, tok, themeVars);
+      }
+    } else if (sm[2] !== undefined) {
+      const colon = sm[2].indexOf(":");
+      if (colon < 0) continue;
+      const prop = sm[2].slice(0, colon).trim().toLowerCase();
+      const value = sm[2].slice(colon + 1).trim();
+      if (prop === "background" || prop === "background-color") {
+        foldPlainDeclaration(w, "background", value, themeVars);
+      } else if (prop === "color") {
+        foldPlainDeclaration(w, "color", value, themeVars);
+      }
+    }
+  }
+}
+
+function ruleHasColorContent(ruleBody: string): boolean {
+  if (/@apply\s+[^;]*\b(?:bg|text)-/.test(ruleBody)) return true;
+  return /(?:^|;)\s*(?:background|background-color|color)\s*:/.test(ruleBody);
+}
+
+/** Parse the text/tailwindcss blocks into the narrow theme model. */
+function parseTailwindTheme(tailwindTexts: string[]): TailwindThemeModel {
+  const css = tailwindTexts.join("\n");
+  const themeVars = new Map<string, string>();
+  const themeRe = /@theme\b[^{]*\{([^}]*)\}/g;
+  let tm: RegExpExecArray | null;
+  while ((tm = themeRe.exec(css)) !== null) {
+    for (const decl of tm[1].split(";")) {
+      const idx = decl.indexOf(":");
+      if (idx < 0) continue;
+      const name = decl.slice(0, idx).trim();
+      const value = decl.slice(idx + 1).trim();
+      if (name.startsWith("--") && value) themeVars.set(name, value);
+    }
+  }
+
+  const model: TailwindThemeModel = {
+    themeVars,
+    root: emptyWriters(),
+    classWriters: new Map(),
+    unmodelable: false,
+  };
+
+  const withoutTheme = css.replace(/@theme\b[^{]*\{[^}]*\}/g, "");
+  // Conditional at-rule blocks can restyle anything per environment
+  // — beyond the narrow model.
+  if (/@(?:media|supports|layer|keyframes|font-face|import|container)\b/.test(withoutTheme)) {
+    model.unmodelable = true;
+    return model;
+  }
+
+  const ruleRe = /([^{}]+)\{([^{}]*)\}/g;
+  let rm: RegExpExecArray | null;
+  while ((rm = ruleRe.exec(withoutTheme)) !== null) {
+    if (!ruleHasColorContent(rm[2])) continue;
+    const selectors = rm[1].split(",").map((s) => s.trim().toLowerCase());
+    const isRootSelector = (s: string) =>
+      s === "body" || s === "html" || s === ":root" || s === "html body";
+    if (selectors.every(isRootSelector)) {
+      foldRuleBody(model.root, rm[2], themeVars);
+      continue;
+    }
+    const classNames = selectors.map((s) => /^\.([a-z0-9_-]+)$/.exec(s)?.[1] ?? null);
+    if (classNames.every((c): c is string => c !== null)) {
+      for (const name of classNames) {
+        let w = model.classWriters.get(name);
+        if (!w) {
+          w = emptyWriters();
+          model.classWriters.set(name, w);
+        }
+        foldRuleBody(w, rm[2], themeVars);
+      }
+      continue;
+    }
+    // Color content on a selector shape the model does not cover
+    // (descendant, element, pseudo, mixed): it can recolor anything
+    // beneath it — the document is beyond judgment.
+    model.unmodelable = true;
+  }
+  return model;
+}
+
+/**
+ * Judge a Tailwind-runtime document's text visibility on the colors
+ * the runtime will actually produce, composed with the document's
+ * plain cascade — or return null when the shape is beyond the
+ * narrow model (the caller then reports the document unverifiable).
+ */
+function judgeTailwindRuntimeColors(
+  doc: P5Node,
+  model: TailwindThemeModel,
+  rules: CssRule[],
+  inlineStyles: Map<P5Node, Map<string, CssDeclaration>>,
+): Array<Omit<ContrastViolation, "path">> | null {
+  if (model.unmodelable) return null;
+
+  const violations: Array<Omit<ContrastViolation, "path">> = [];
+  const seen = new Set<string>();
+  let unjudgeable = false;
+
+  const visitEl = (el: P5Node) => {
+    if (unjudgeable || violations.length >= MAX_VIOLATIONS_PER_FILE) return;
+    const tag = (el.tagName ?? "").toLowerCase();
+    if (SKIP_SUBTREE_TAGS.has(tag)) return;
+
+    // The plain visit may have stopped early at its violation cap;
+    // make sure this element's inline style is on record either way.
+    const styleAttr = attrOf(el, "style");
+    if (styleAttr && !inlineStyles.has(el)) {
+      inlineStyles.set(el, parseDeclarations(styleAttr, { next: 0 }));
+    }
+
+    const text = directText(el);
+    if (text.length >= 2 && /[A-Za-z0-9]/.test(text) && !SKIP_ELEMENT_TAGS.has(tag)) {
+      const chain = ancestorChain(el);
+      const scopes = chain.map((_, idx) =>
+        customPropertyScope(chain.slice(0, idx + 1), rules, inlineStyles),
+      );
+      const scope = scopes[scopes.length - 1];
+      if (!isDeliberatelyHidden(chain, rules, inlineStyles, scope)) {
+        // Compose runtime and plain colors BY PROXIMITY
+        // (Greptile, PR #1108). The first version folded every
+        // runtime writer in the chain into a single value that
+        // overrode the plain cascade wholesale — so a body's
+        // bg-black / text-white utilities hid a child section's own
+        // plain background:white, and the white-on-white inside it
+        // was missed. Now each chain node contributes its own
+        // writers — the block's html/body rules (model.root) attach
+        // at the body node, then the node's modeled class writers,
+        // then its own utilities (the utilities layer wins over
+        // @apply'd component classes in v4's cascade) — and the
+        // NEAREST deciding node wins, exactly as paint and
+        // inheritance behave:
+        //
+        //   - Text color is a single inherited value: walking from
+        //     the element up, the first node carrying a runtime
+        //     color writer or a plain color declaration decides it.
+        //     At one node, an inline plain declaration outranks the
+        //     node's runtime writer (inline styles beat utilities
+        //     in the real cascade); any other same-node tie goes to
+        //     the runtime, the theme the document leads with. The
+        //     per-node plain step mirrors effectiveTextColor's
+        //     semantics (inherit/unset climb, initial is black, an
+        //     unresolvable value skips the element).
+        //   - Backgrounds paint in layers: walking up, each node's
+        //     layer is its runtime bg writer when it has one, else
+        //     its plain paint (ownBackground); layers composite
+        //     nearest-over-farther until the stack is opaque, then
+        //     over the white canvas.
+        //
+        // An unknown RUNTIME writer (palette shade, unresolved
+        // theme variable) makes the document unjudgeable only when
+        // the walk actually reaches it — a nearer decider overrides
+        // it exactly as the browser paints over it. An unknown
+        // PLAIN paint (an image, a gradient) skips just the
+        // element, as the plain path has always done — skipped,
+        // never failed. Where the walk is decided by plain
+        // declarations alone the verdict is the plain cascade's,
+        // so plain authority is extended node by node, not
+        // replaced.
+        const rootAttachIdx = (() => {
+          let idx = -1;
+          for (let i = 0; i < chain.length; i += 1) {
+            const t = (chain[i].tagName ?? "").toLowerCase();
+            if (t === "body") return i;
+            if (t === "html") idx = i;
+          }
+          return idx;
+        })();
+        const nodeWriters: TailwindColorWriters[] = chain.map((node, i) => {
+          const w = emptyWriters();
+          if (i === rootAttachIdx) {
+            w.bg = model.root.bg;
+            w.color = model.root.color;
+          }
+          for (const cls of classListOf(node)) {
+            const cw = model.classWriters.get(cls);
+            if (cw) {
+              if (cw.color.kind !== "none") w.color = cw.color;
+              if (cw.bg.kind !== "none") w.bg = cw.bg;
+            }
+          }
+          for (const tok of classListOf(node)) foldUtilityToken(w, tok, model.themeVars, node);
+          return w;
+        });
+
+        // Text color: nearest deciding node wins.
+        let fg: Rgba | null = null;
+        let fgUnknown = false;
+        let fgSkipped = false;
+        for (let i = chain.length - 1; i >= 0; i -= 1) {
+          const winner = winningDeclaration(chain[i], rules, inlineStyles, "color");
+          if (!winner || !winner.inline) {
+            const rt = nodeWriters[i].color;
+            if (rt.kind === "color") { fg = rt.color; break; }
+            if (rt.kind === "unknown") { fgUnknown = true; break; }
+          }
+          if (!winner) continue;
+          const resolved = resolveVars(winner.value, scopes[i]);
+          if (resolved === null) { fgSkipped = true; break; }
+          const keyword = resolved.trim().toLowerCase();
+          if (keyword === "inherit" || keyword === "unset") continue;
+          if (keyword === "initial") { fg = { r: 0, g: 0, b: 0, a: 1 }; break; }
+          const color = parseCssColor(resolved);
+          if (!color) { fgSkipped = true; break; }
+          fg = color;
+          break;
+        }
+        if (fgUnknown) {
+          unjudgeable = true;
+          return;
+        }
+        if (!fgSkipped && fg === null) fg = { r: 0, g: 0, b: 0, a: 1 };
+
+        // Background: per-node layers composited to opacity.
+        let bgStack: Rgba | null = null;
+        let bgUnknown = false;
+        let bgSkipped = false;
+        for (let i = chain.length - 1; i >= 0; i -= 1) {
+          if (bgStack !== null && bgStack.a >= 1) break;
+          const rt = nodeWriters[i].bg;
+          let layer: Rgba | null = null;
+          if (rt.kind === "unknown") { bgUnknown = true; break; }
+          if (rt.kind === "color" && rt.color.a > 0) {
+            layer = rt.color;
+          } else {
+            const own = ownBackground(chain[i], rules, inlineStyles, scopes[i]);
+            if (own.kind === "unknown") { bgSkipped = true; break; }
+            if (own.kind === "value") layer = own.value;
+          }
+          if (layer !== null) {
+            bgStack = bgStack === null ? layer : compositeOver(bgStack, layer);
+          }
+        }
+        if (bgUnknown) {
+          unjudgeable = true;
+          return;
+        }
+        const bg: Rgba = bgStack === null
+          ? { r: 255, g: 255, b: 255, a: 1 }
+          : compositeOver(bgStack, { r: 255, g: 255, b: 255, a: 1 });
+
+        if (!fgSkipped && !bgSkipped && fg !== null && fg.a > 0) {
+          const painted = fg.a >= 1 ? fg : compositeOver(fg, bg);
+          const ratio = contrastRatio(painted, bg);
+          if (ratio < INVISIBLE_RATIO) {
+            const element = describeElement(el);
+            const key = `${element}|${toHex(painted)}|${toHex(bg)}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              violations.push({
+                element,
+                text: text.length > 60 ? `${text.slice(0, 57)}...` : text,
+                color: toHex(painted),
+                background: toHex(bg),
+                ratio: Math.round(ratio * 100) / 100,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    for (const child of el.childNodes ?? []) {
+      if (child.tagName) visitEl(child);
+    }
+  };
+
+  for (const child of doc.childNodes ?? []) {
+    if (child.tagName) visitEl(child);
+  }
+  return unjudgeable ? null : violations;
 }
 
 function isHtmlFilePath(path: string): boolean {
@@ -1123,13 +1917,14 @@ export async function checkTextContrast(opts: {
     ),
   ];
   if (allCandidates.length === 0) {
-    return { applies: false, violations: [], checkedFiles: [] };
+    return { applies: false, violations: [], checkedFiles: [], unverifiableFiles: [] };
   }
   const truncated = allCandidates.length > MAX_CHECKED_FILES;
   const candidates = allCandidates.slice(0, MAX_CHECKED_FILES);
 
   const checkedFiles: string[] = [];
   const violations: ContrastViolation[] = [];
+  const unverifiableFiles: string[] = [];
   for (const path of candidates) {
     try {
       const { content } = await opts.readFile(path);
@@ -1137,15 +1932,21 @@ export async function checkTextContrast(opts: {
       checkedFiles.push(path);
       const result = findContrastViolations(content);
       for (const v of result.violations) violations.push({ path, ...v });
+      if (!result.reasoned && result.unreasonedReason === "tailwind-runtime") {
+        unverifiableFiles.push(path);
+      }
     } catch {
       // Not readable — not checked. Other candidates may still answer.
     }
   }
 
   return {
-    applies: checkedFiles.length > 0 && (violations.length > 0 || !truncated),
+    applies:
+      checkedFiles.length > 0 &&
+      (violations.length > 0 || unverifiableFiles.length > 0 || !truncated),
     violations,
     checkedFiles,
+    unverifiableFiles,
   };
 }
 
@@ -1179,6 +1980,39 @@ export function textContrastRepairPrompt(violations: ContrastViolation[]): strin
     `written for a background the document does not have). Fix the file now: either declare the dark ` +
     `background the design intends — on body or on the section behind the text — or change the text ` +
     `colors so every text element contrasts strongly with the background actually declared behind it. ` +
+    `Then finish.`
+  );
+}
+
+/** The honest user-facing sentence for a page whose visibility could
+ *  not be verified at all (ACC-03) — distinct from a proven
+ *  violation: nothing was proven invisible, but nothing was proven
+ *  readable either, and an unverifiable page is not a finished page. */
+export function textContrastUnverifiableMessage(files: string[]): string {
+  const list = files.slice(0, 3).join(", ");
+  return (
+    `I wrote the page, but I can't verify that its text is visible — in ${list} the colors are decided ` +
+    `at runtime by the Tailwind browser compiler instead of being declared in the document itself, ` +
+    `so there is nothing in the file I can check the words against. A page I cannot verify is not a ` +
+    `finished page, so I can't confirm this build landed as intended. Please try again.`
+  );
+}
+
+/** The mid-loop feedback for the ONE repair attempt when a page's
+ *  colors are runtime-decided beyond judgment (ACC-03). The repair
+ *  it asks for — plain-CSS body colors — is exactly the PLAIN-CSS
+ *  FLOOR the styling contract now requires, and it makes the page
+ *  verifiable by construction. */
+export function textContrastUnverifiableRepairPrompt(files: string[]): string {
+  const list = files.slice(0, 3).join(", ");
+  return (
+    `Verification could not judge whether the text in ${list} is visible: the page's colors are produced ` +
+    `at runtime by the Tailwind browser compiler (utility classes / @apply rules) rather than declared as ` +
+    `plain CSS in the document, and runtime-decided colors cannot be verified from the file — this is exactly ` +
+    `how invisible text shipped before, when a background the compiler dropped left light text on a light page. ` +
+    `Fix the file now: declare the body's background and text colors as plain CSS in a regular <style> block ` +
+    `(e.g. <style>body { background-color: #03050a; color: #f5f5f4; }</style>), and do the same for any section ` +
+    `whose background sits behind light text. Plain declared colors are what make the page verifiable. ` +
     `Then finish.`
   );
 }
