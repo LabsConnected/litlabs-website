@@ -74,3 +74,33 @@ export function getHostingBackend(name: string = CANONICAL_HOSTING_BACKEND): Hos
   }
   return factory();
 }
+
+/**
+ * ACC-01 F8a — the ONE stable public path for a project.
+ *
+ * Per-deployment snapshot URLs (/sites/<deploymentId>/) are immutable:
+ * every publish mints a new one and the old address serves the old
+ * snapshot forever. Users share ONE address, so the project's public
+ * address must not rotate: /sites/project/<projectId>/ always resolves
+ * the project's latest READY LiTT Hosting deployment at request time
+ * (see src/app/sites/project/[projectId]).
+ */
+export function stableSitePathForProject(projectId: string): string {
+  return `/sites/project/${projectId}/`;
+}
+
+/**
+ * The project's stable public URL, built on the same infrastructure
+ * base the deploy service mints per-deployment publicUrls from — so
+ * staging/production origins are correct by construction. Throws when
+ * the hosting backend cannot resolve a base URL; callers that present
+ * the URL opportunistically (status endpoints) catch and omit it
+ * rather than guessing an origin.
+ */
+export async function stablePublicUrlFor(
+  projectId: string,
+  hosting: HostingBackend = getHostingBackend(),
+): Promise<string> {
+  const baseUrl = await hosting.resolveBaseUrl();
+  return `${baseUrl.replace(/\/+$/, "")}${stableSitePathForProject(projectId)}`;
+}

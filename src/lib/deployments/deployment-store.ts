@@ -16,6 +16,7 @@ import type {
   DeploymentRecord,
   DeploymentCreateInput,
 } from "./deploy-service";
+import { HOSTING_TARGET } from "./litt-hosting";
 import type { DeploymentStatus } from "./user-deployment";
 
 const TABLE = "user_project_deployments";
@@ -74,6 +75,12 @@ function patchToRow(patch: Partial<DeploymentRecord>): Record<string, unknown> {
   if (patch.errorClass !== undefined) row.error_class = patch.errorClass;
   if (patch.errorMessage !== undefined) row.error_message = patch.errorMessage;
   if (patch.externalSiteId !== undefined) row.external_site_id = patch.externalSiteId;
+  // created_at is the publish-event stamp every "newest publish"
+  // lookup orders by. Its one legitimate rewrite is the republish
+  // restamp: when a deploy REUSES an existing deployment (identical
+  // content), that deployment becomes the project's newest publish
+  // event without a new row being created (Greptile, PR #1106).
+  if (patch.createdAt !== undefined) row.created_at = patch.createdAt;
   return row;
 }
 
@@ -375,6 +382,59 @@ export async function findLatestReadyDeploymentForProject(
     .limit(1)
     .maybeSingle();
   if (error || !data) return null;
+  return rowToRecord(data as DeploymentRow);
+}
+
+/**
+ * The LiTT Hosting deployment a project's stable public address
+ * (/sites/project/[projectId]) should serve, resolved WITHOUT an
+ * owner — the route has no session; published sites are public by
+ * design. Scoped to the LiTT Hosting target so a newer Netlify
+ * deployment never becomes the project's LiTT address.
+ *
+ * The project's NEWEST deployment decides, not the newest READY one:
+ * unpublishing is the owner's latest word on the project, so when the
+ * newest deployment is `unpublished` the address serves NOTHING —
+ * falling back to the previous publish would resurrect a site the
+ * owner just took down (Greptile, PR #1106). Only a newest deployment
+ * still in flight (building / deploying / failed) falls back to the
+ * newest READY one, so a republish never blanks the live site while
+ * it builds. Returns null when storage is unavailable or nothing
+ * servable exists; THROWS on a store error so the route can answer
+ * 503 — an outage must never read as "never published" (404).
+ */
+export async function findLatestReadyDeploymentForProjectPublic(
+  projectId: string,
+): Promise<DeploymentRecord | null> {
+  if (!supabaseAdmin) return null;
+  const { data: latest, error: latestError } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("target", HOSTING_TARGET)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (latestError) {
+    throw new Error(`Latest deployment lookup failed: ${latestError.message}`);
+  }
+  if (!latest) return null;
+  const latestRecord = rowToRecord(latest as DeploymentRow);
+  if (latestRecord.status === "ready") return latestRecord;
+  if (latestRecord.status === "unpublished") return null;
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("target", HOSTING_TARGET)
+    .eq("status", "ready")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Latest deployment lookup failed: ${error.message}`);
+  }
+  if (!data) return null;
   return rowToRecord(data as DeploymentRow);
 }
 

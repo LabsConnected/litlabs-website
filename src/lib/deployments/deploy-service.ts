@@ -322,6 +322,22 @@ export async function waitForDeploymentResolved(
  * only after that fetch returns 2xx; a failed fetch reverts the row to
  * `failed` so it stops serving and is never reported as live.
  */
+/**
+ * Record a dedupe-reused publish as the project's newest publish
+ * event by restamping the reused deployment's created_at.
+ *
+ * Every "current publish" surface — above all the stable project
+ * address — follows the newest publish. A reused deployment gets no
+ * new row, so without this restamp the republish leaves no trace:
+ * publish A, publish B, unpublish B, then republish A's exact
+ * contents returned success while the newest-publish rule kept
+ * taking its orders from the unpublished B and the stable address
+ * stayed dark (Greptile, PR #1106).
+ */
+async function recordRepublish(store: DeploymentStore, deploymentId: string): Promise<void> {
+  await store.update(deploymentId, { createdAt: new Date().toISOString() });
+}
+
 export async function deployUserProject(
   request: DeployRequest,
   deps: DeployDeps,
@@ -404,6 +420,13 @@ export async function deployUserProject(
   // republished, so a model that calls the tool twice cannot double-deploy.
   const existing = await store.findReadyByContentHash(projectId, contentHash);
   if (existing && existing.publicUrl && existing.urlVerified) {
+    // If the republish cannot be recorded, fail honestly rather
+    // than report a publish the stable address will not honor.
+    try {
+      await recordRepublish(store, existing.id);
+    } catch (err) {
+      return failure(null, err);
+    }
     return {
       ok: true,
       deploymentId: existing.id,
@@ -429,6 +452,11 @@ export async function deployUserProject(
   if (inFlight) {
     const resolved = await waitForDeploymentResolved(store, inFlight.id, 120_000);
     if (resolved && resolved.status === "ready" && resolved.publicUrl && resolved.urlVerified) {
+      try {
+        await recordRepublish(store, resolved.id);
+      } catch (err) {
+        return failure(null, err);
+      }
       return {
         ok: true,
         deploymentId: resolved.id,

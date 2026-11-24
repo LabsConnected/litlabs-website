@@ -11,6 +11,7 @@ import { describe, it, expect, vi } from "vitest";
 
 import {
   deployUserProject,
+  unpublishDeployment,
   collectStaticArtifact,
   type DeploymentStore,
   type DeploySourceTransport,
@@ -876,6 +877,151 @@ describe("J. a duplicate deploy of identical content does not republish", () => 
 });
 
 /* ── Publish gates: fabrication blocks the deploy ───────────────── */
+
+/* ── Case N: republish of earlier content after a newer unpublish ──
+ * Greptile PR #1106, round 2: publish A, publish B, unpublish B, then
+ * publish A's exact contents again. The dedupe REUSES A without
+ * touching any row, so under the newest-publish-decides rule the
+ * stable project address kept seeing B (unpublished) as the newest
+ * word and stayed dark despite the successful republish. A reused
+ * publish must be recorded as the newest publish event. */
+
+describe("N. republish after unpublish restores the stable address", () => {
+  const transportB = () =>
+    fakeTransport({
+      async readFile(path: string) {
+        if (path === "index.html") {
+          return { content: "<!doctype html><title>Ember Roast v2</title>", size: 44 };
+        }
+        return { content: "body{}", size: 6 };
+      },
+    });
+
+  /** The stable-address rule's first step: the newest publish event. */
+  function newestPublish(rows: DeploymentRecord[]): DeploymentRecord | null {
+    return (
+      [...rows].sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))[0] ?? null
+    );
+  }
+
+  async function publishAB(store: ReturnType<typeof fakeStore>) {
+    const base = { userId: "user_owner", projectId: "proj_ember", hosting: fakeHosting() };
+    const a = await deployUserProject(
+      { ...base, transport: fakeTransport() },
+      { store, fetchImpl: reachableFetch },
+    );
+    expect(a.ok).toBe(true);
+    if (!a.ok) throw new Error("publish A failed");
+    const rowA = store.rows.find((r) => r.id === a.deploymentId)!;
+    rowA.createdAt = "2026-11-23T10:00:00.000Z";
+    const b = await deployUserProject(
+      { ...base, transport: transportB() },
+      { store, fetchImpl: reachableFetch },
+    );
+    expect(b.ok).toBe(true);
+    if (!b.ok) throw new Error("publish B failed");
+    const rowB = store.rows.find((r) => r.id === b.deploymentId)!;
+    rowB.createdAt = "2026-11-23T11:00:00.000Z";
+    return { base, a, b, rowA, rowB };
+  }
+
+  it("republishing A's exact content after unpublishing B makes A the newest publish again", async () => {
+    const store = fakeStore();
+    const { base, a, b } = await publishAB(store);
+
+    const unpub = await unpublishDeployment(
+      { userId: "user_owner", projectId: "proj_ember", deploymentId: b.deploymentId },
+      { store },
+    );
+    expect(unpub.ok).toBe(true);
+    // Mid-sequence: the newest publish is B and it is unpublished —
+    // the stable address is dark at this point, correctly.
+    expect(newestPublish(store.rows)?.id).toBe(b.deploymentId);
+    expect(newestPublish(store.rows)?.status).toBe("unpublished");
+
+    const again = await deployUserProject(
+      { ...base, transport: fakeTransport() },
+      { store, fetchImpl: reachableFetch },
+    );
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    expect(again.reused).toBe(true);
+    expect(again.deploymentId).toBe(a.deploymentId);
+    expect(store.rows).toHaveLength(2);
+
+    // The republish was recorded: A is once again the newest publish,
+    // and it is ready — the stable address serves A's content.
+    const newest = newestPublish(store.rows);
+    expect(newest?.id).toBe(a.deploymentId);
+    expect(newest?.status).toBe("ready");
+  });
+
+  it("without a republish, unpublishing the newest leaves the older publish older", async () => {
+    const store = fakeStore();
+    const { a, b, rowA } = await publishAB(store);
+
+    const unpub = await unpublishDeployment(
+      { userId: "user_owner", projectId: "proj_ember", deploymentId: b.deploymentId },
+      { store },
+    );
+    expect(unpub.ok).toBe(true);
+
+    // Nothing was republished, so nothing may resurface: the newest
+    // publish remains the unpublished B and A keeps its older stamp.
+    const newest = newestPublish(store.rows);
+    expect(newest?.id).toBe(b.deploymentId);
+    expect(newest?.status).toBe("unpublished");
+    expect(rowA.createdAt).toBe("2026-11-23T10:00:00.000Z");
+    expect(a.deploymentId).not.toBe(newest?.id);
+  });
+
+  it("attaching to an in-flight deploy also records the republish", async () => {
+    const store = fakeStore();
+    const first = await deployUserProject(
+      {
+        userId: "user_owner",
+        projectId: "proj_ember",
+        transport: fakeTransport(),
+        hosting: fakeHosting(),
+      },
+      { store, fetchImpl: reachableFetch },
+    );
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const row = store.rows.find((r) => r.id === first.deploymentId)!;
+    row.createdAt = "2026-11-23T10:00:00.000Z";
+    row.status = "building";
+    row.urlVerified = false;
+
+    let polls = 0;
+    const origFindById = store.findById.bind(store);
+    store.findById = async (id: string) => {
+      const rec = await origFindById(id);
+      polls += 1;
+      if (polls >= 2 && rec) {
+        rec.status = "ready";
+        rec.urlVerified = true;
+      }
+      return rec;
+    };
+
+    const second = await deployUserProject(
+      {
+        userId: "user_owner",
+        projectId: "proj_ember",
+        transport: fakeTransport(),
+        hosting: fakeHosting(),
+      },
+      { store, fetchImpl: reachableFetch },
+    );
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.reused).toBe(true);
+    // The reused row was stamped as the newest publish event.
+    expect(row.createdAt).not.toBe("2026-11-23T10:00:00.000Z");
+    expect((row.createdAt ?? "") > "2026-11-23T10:00:00.000Z").toBe(true);
+  });
+});
 
 describe("publish gates", () => {
   it("fails the deploy when the artifact still has fabricated template content", async () => {

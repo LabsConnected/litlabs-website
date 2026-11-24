@@ -31,7 +31,14 @@ type PublishState = "idle" | "loading" | "publishing" | "unpublishing" | "publis
 interface DeploymentInfo {
   id: string;
   status: string;
+  /** The immutable per-deployment snapshot URL. */
   publicUrl: string | null;
+  /**
+   * ACC-01 F8a: the project's ONE stable public address — always
+   * serves the latest ready publish. This is the URL presented to the
+   * user for display/copy/open; publicUrl remains the snapshot link.
+   */
+  stablePublicUrl?: string | null;
   urlVerified: boolean;
   fileCount: number;
 }
@@ -119,6 +126,7 @@ export default function StudioPublishControls({
         id: data.deploymentId,
         status: "ready",
         publicUrl: data.publicUrl,
+        stablePublicUrl: data.stablePublicUrl ?? null,
         urlVerified: true,
         fileCount: data.fileCount ?? 0,
       });
@@ -163,9 +171,13 @@ export default function StudioPublishControls({
   }, [projectId, deployment, state]);
 
   const handleCopyUrl = useCallback(async () => {
-    if (!deployment?.publicUrl) return;
+    // Copy the STABLE address (F8a) — the link the user shares must not
+    // rotate on the next publish. Falls back to the snapshot URL only
+    // when the server could not resolve a stable one.
+    const url = deployment?.stablePublicUrl ?? deployment?.publicUrl;
+    if (!url) return;
     try {
-      await navigator.clipboard.writeText(deployment.publicUrl);
+      await navigator.clipboard.writeText(url);
       setUrlCopied(true);
       setTimeout(() => setUrlCopied(false), 2000);
     } catch {
@@ -287,7 +299,9 @@ export default function StudioPublishControls({
     (state === "published" || state === "confirm-unpublish" || state === "unpublishing") &&
     !!deployment?.publicUrl;
   // Narrowed by showPublishedView — safe to use directly in the published branch.
-  const liveUrl = deployment?.publicUrl ?? undefined;
+  // The presented address is the STABLE one (F8a); the snapshot URL is
+  // only a fallback when no stable URL was resolved.
+  const liveUrl = deployment?.stablePublicUrl ?? deployment?.publicUrl ?? undefined;
   return (
     <div className="flex flex-col gap-2" data-testid="publish-controls">
       {showPublishedView ? (
@@ -301,7 +315,7 @@ export default function StudioPublishControls({
             data-testid="publish-live-url"
           >
             <ExternalLink size={11} className="shrink-0" />
-            <span className="truncate">{deployment.publicUrl}</span>
+            <span className="truncate">{liveUrl}</span>
           </a>
           <div className="flex items-center gap-1.5">
             {isReviewing ? (

@@ -10,6 +10,7 @@ import {
   getHostingBackend,
   HOSTING_DISPLAY_NAME,
   HOSTING_TARGET,
+  stablePublicUrlFor,
 } from "@/lib/deployments/litt-hosting";
 import { NETLIFY_TARGET } from "@/lib/deployments/deploy-targets";
 import { getNetlifyConnection } from "@/lib/netlify-connection";
@@ -64,8 +65,19 @@ export async function GET(
     ]);
 
   const hostingCheck = getHostingBackend().isConfigured();
+  // ACC-01 F8a: the project's ONE stable public address, present only
+  // when the LiTT Hosting deployment is actually live (ready +
+  // URL-verified) — the Deploy surface presents this as the project's
+  // public address; per-deployment publicUrls stay on their records as
+  // immutable snapshot links (history). Best-effort: an unresolvable
+  // hosting base yields null, never a guessed origin.
+  const stablePublicUrl =
+    littDeployment && littDeployment.status === "ready" && littDeployment.urlVerified
+      ? await stablePublicUrlFor(projectId).catch(() => null)
+      : null;
   return NextResponse.json({
     deployment,
+    stablePublicUrl,
     latestByTarget: {
       [HOSTING_TARGET]: littDeployment,
       [NETLIFY_TARGET]: netlifyDeployment,

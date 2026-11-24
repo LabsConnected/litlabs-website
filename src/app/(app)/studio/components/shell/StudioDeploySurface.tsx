@@ -38,6 +38,13 @@ type DeploymentRecord = {
 
 type DeployInfo = {
   deployment: DeploymentRecord | null;
+  /**
+   * ACC-01 F8a: the project's ONE stable public address (LiTT Hosting
+   * only) — always serves the latest ready publish. Presented as the
+   * project's public address; per-deployment publicUrls remain the
+   * immutable snapshot links shown in History.
+   */
+  stablePublicUrl?: string | null;
   latestByTarget?: {
     "litt-static"?: DeploymentRecord | null;
     netlify?: DeploymentRecord | null;
@@ -95,6 +102,10 @@ export default function StudioDeploySurface({
   onDeployRequest: (target: DeployTargetChoice) => void;
 }) {
   const [target, setTarget] = useState<DeployTargetChoice>("litt");
+  // ACC-01 F8b: a click used to vanish silently — the request pre-fills
+  // the Chat panel's composer, and nothing on THIS surface said so.
+  // The surface now acknowledges the hand-off where the click happened.
+  const [requestSent, setRequestSent] = useState(false);
   const [state, setState] = useState<{ loading: boolean; info: DeployInfo | null; error: string | null }>({
     loading: true,
     info: null,
@@ -162,6 +173,11 @@ export default function StudioDeploySurface({
       ? info?.latestByTarget?.netlify ?? null
       : info?.latestByTarget?.["litt-static"] ?? info?.deployment ?? null;
   const live = dep?.status === "ready";
+  // The address presented for the selected target: LiTT Hosting shows
+  // the project's STABLE address (F8a) so the link a user shares never
+  // rotates; Netlify's own URL is already stable per site.
+  const displayUrl =
+    target === "netlify" ? dep?.publicUrl ?? null : info?.stablePublicUrl ?? dep?.publicUrl ?? null;
   const netlifyConnected = info?.netlifyConnection?.connected === true;
   const netlifyBlocked = target === "netlify" && !netlifyConnected;
 
@@ -236,7 +252,10 @@ export default function StudioDeploySurface({
                   role="radio"
                   aria-checked={selected}
                   data-testid={`deploy-target-${option.choice}`}
-                  onClick={() => setTarget(option.choice)}
+                  onClick={() => {
+                    setTarget(option.choice);
+                    setRequestSent(false);
+                  }}
                   className="rounded-xl border px-3 py-2.5 text-left transition-colors"
                   style={{
                     borderColor: selected ? "rgba(190,145,255,0.55)" : "rgba(155,77,255,0.14)",
@@ -281,15 +300,16 @@ export default function StudioDeploySurface({
                     · {target === "netlify" ? "Netlify" : "LiTT Hosting"}
                   </span>
                 </div>
-                {live && dep.publicUrl && (
+                {live && displayUrl && (
                   <a
-                    href={dep.publicUrl}
+                    href={displayUrl}
                     target="_blank"
                     rel="noreferrer"
+                    data-testid="deploy-live-url"
                     className="mt-2 inline-flex items-center gap-1.5 text-[12px] font-semibold underline-offset-2 hover:underline"
                     style={{ color: "var(--litt-primary)" }}
                   >
-                    {dep.publicUrl.replace(/^https?:\/\//, "")}
+                    {displayUrl.replace(/^https?:\/\//, "")}
                     <ExternalLink size={11} />
                   </a>
                 )}
@@ -394,7 +414,10 @@ export default function StudioDeploySurface({
               <>
                 <button
                   type="button"
-                  onClick={() => onDeployRequest(target)}
+                  onClick={() => {
+                    setRequestSent(true);
+                    onDeployRequest(target);
+                  }}
                   disabled={!readyToDeploy}
                   data-testid="deploy-surface-deploy"
                   className="flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-[13px] font-extrabold transition-colors disabled:cursor-not-allowed disabled:opacity-40"
@@ -411,6 +434,14 @@ export default function StudioDeploySurface({
                   <p className="mt-2 flex items-start gap-1.5 text-[11px]" style={{ color: "#f5b544" }} data-testid="deploy-first-blocker">
                     <AlertCircle size={12} className="mt-0.5 shrink-0" />
                     {blockers[0]}
+                  </p>
+                )}
+                {/* F8b hand-off note: the deploy request lives in the
+                    Chat panel now (composer pre-filled, approval still
+                    gated) — say so here, where the click happened. */}
+                {requestSent && blockers.length === 0 && (
+                  <p className="mt-2 text-[11px]" style={{ color: "var(--text-secondary)" }} data-testid="deploy-request-sent">
+                    Sent to LiTT — your deploy request is waiting in the Chat panel. Press Send there, and LiTT will ask for your approval before anything goes live.
                   </p>
                 )}
               </>

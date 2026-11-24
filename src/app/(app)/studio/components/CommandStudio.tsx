@@ -1401,6 +1401,15 @@ function CommandStudioContent() {
           },
         }),
       );
+      // ACC-01 F8b: in the board shell the ask-litt handler only sets
+      // composer state — the Chat PANEL itself was never summoned, so
+      // the pre-filled deploy request sat in a panel the user wasn't
+      // looking at (or one that wasn't open at all) and the click read
+      // as a silent no-op. Summon the chat panel so the request is
+      // visibly in front of the user, ready to send.
+      if (studioShellActive) {
+        summonBoardPanel("chat");
+      }
     };
     // Open a file from the ActionPanel's file tree: switch to the LiTT
     // panel's Files tab (the dock's Files tab is retired). The
@@ -1423,7 +1432,7 @@ function CommandStudioContent() {
       window.removeEventListener(STUDIO_EVENT_REQUEST_DEPLOY, requestDeploy);
       window.removeEventListener(STUDIO_EVENT_OPEN_FILE, openFile);
     };
-  }, [handlePreselectDockTab, handleOpenFilesPanel, boardActive]);
+  }, [handlePreselectDockTab, handleOpenFilesPanel, boardActive, studioShellActive, summonBoardPanel]);
 
   // Dock open helpers — both are OPEN actions (switch tab + ensure
   // open), never a toggle-closed. The dock's own close button and the
