@@ -187,6 +187,10 @@ export default function ProjectsPage() {
         // submission fully resolves.
         setCreateDialogOpen(false);
         setCreateTemplate(null);
+        // Record the open intent exactly like opening an existing
+        // project does, so every "last opened" surface agrees the new
+        // project is the one being opened (ACC-03 item 6).
+        handleOpenProject(project.id);
         router.push(`/studio?project=${encodeURIComponent(project.id)}`);
         setCreatingProject(false);
         createSubmissionRef.current = null;
@@ -195,7 +199,7 @@ export default function ProjectsPage() {
         setCreatingProject(false);
       }
     },
-    [creatingProject, createTemplate, getToken, router],
+    [creatingProject, createTemplate, getToken, router, handleOpenProject],
   );
 
   const retrySetup = useCallback(

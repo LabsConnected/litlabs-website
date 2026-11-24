@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, Download, ExternalLink, Eye, KeyRound, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
+import { Check, Copy, Download, ExternalLink, Eye, Globe, KeyRound, Loader2, Monitor, MousePointer2, RefreshCw, RotateCcw, Smartphone, Square, Tablet, X } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { formatSourceSummary, isRepoWorkspaceGated } from "@/lib/projects/project-source";
 import { HOST_EXECUTION_DISABLED_CODE, extractEmbeddedErrorCode } from "@/lib/host-execution-guard";
@@ -15,7 +15,7 @@ import {
   type BoardPanelStatus,
 } from "../stores/useBoardPanelStatusStore";
 import { StudioSecretsPanel } from "./StudioSecretsPanel";
-import StudioPublishControls from "./StudioPublishControls";
+import { STUDIO_EVENT_REQUEST_DEPLOY } from "@/lib/canvas/panel-actions";
 import { downloadProjectExport } from "../lib/export-project";
 
 /**
@@ -1709,8 +1709,30 @@ export default function StudioPreviewPanel({
             {urlCopied ? <Check size={12} className="pointer-events-none" style={{ color: "#48EE38" }} /> : <Copy size={12} className="pointer-events-none" />}
           </button>
         )}
-        {/* Publish controls — static site publishing (compact toolbar mode) */}
-        {projectId && <StudioPublishControls projectId={projectId} compact />}
+        {/* Publish — routes through the SAME canonical deploy request
+            the Deploy panel uses (studio:request-deploy → LiTT chat →
+            approval → project.deploy). ACC-03 item 4: this toolbar used
+            to mount a second, direct publish implementation whose
+            two-step confirm rendered outside the toolbar's visible
+            strip, so the button appeared to do nothing at all. One
+            publish path only. */}
+        {projectId && (
+          <button
+            type="button"
+            onClick={() =>
+              window.dispatchEvent(
+                new CustomEvent(STUDIO_EVENT_REQUEST_DEPLOY, { detail: { target: "litt" } }),
+              )
+            }
+            className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5"
+            style={{ color: "var(--text-muted)" }}
+            aria-label="Publish site"
+            title="Publish site to a public URL"
+            data-testid="publish-button"
+          >
+            <Globe size={12} className="pointer-events-none" />
+          </button>
+        )}
         {/* Export — download the project source as a ZIP (server-built) */}
         {projectId && (
           <button
