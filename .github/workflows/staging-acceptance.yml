@@ -28,6 +28,10 @@ concurrency:
 env:
   STAGING_URL: https://litlabslitt-shell-staging.up.railway.app
   STAGING_TERMINAL_URL: https://terminal-server-staging.up.railway.app
+  STAGING_PROJECT_ID: 3d5b8abe-088c-4a6c-9b34-7054829247c9
+  STAGING_ENVIRONMENT_ID: 8631ff55-0835-449b-942e-a9c3748dea98
+  STAGING_WEB_SERVICE_ID: 0fbedda0-0053-481c-9e4f-a3ea8100eb16
+  STAGING_TERMINAL_SERVICE_ID: 3c06dd64-e82f-4bb5-8c47-d65dede36af9
   ACCEPTANCE_RUNS: 10
 
 jobs:
@@ -68,8 +72,20 @@ jobs:
       - name: Install Playwright chromium
         run: pnpm exec playwright install --with-deps chromium
 
+      - name: Install Railway CLI for exact deployment evidence
+        run: npm install -g @railway/cli
+
       - name: Verify staging is healthy before acceptance
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
+          set -euo pipefail
+          [ -n "$RAILWAY_TOKEN" ] || { echo "::error::staging Railway project token is required"; exit 1; }
+          scope="$(railway api 'query { projectToken { projectId environmentId } }' --compact)"
+          printf '%s' "$scope" | jq -e \
+            --arg project "$STAGING_PROJECT_ID" --arg environment "$STAGING_ENVIRONMENT_ID" \
+            '.data.projectToken.projectId == $project and .data.projectToken.environmentId == $environment' \
+            > /dev/null || { echo "::error::Railway token is not scoped to staging"; exit 1; }
           body="$(curl -fsS --max-time 30 "$STAGING_URL/api/health")"
           echo "$body" | jq -e '.status == "ok"' > /dev/null \
             || { echo "::error::staging not healthy — refusing acceptance run"; echo "$body" | head -c 500; exit 1; }
@@ -82,6 +98,9 @@ jobs:
             '.status == "ok" and .readiness == "ready" and .commit == $commit and
              .terminal.sandbox.execution == "enabled" and .terminal.sandbox.state == "verified"' \
             > /dev/null || { echo "::error::staging terminal SHA, readiness, or isolation check failed"; exit 1; }
+          terminal_sha="$(railway variable list --service "$STAGING_TERMINAL_SERVICE_ID" --json | jq -r '.RAILWAY_GIT_COMMIT_SHA // empty')"
+          [ "$terminal_sha" = "$EXPECTED_SHA" ] \
+            || { echo "::error::terminal full SHA metadata differs from approved SHA"; exit 1; }
 
       - name: Clean up tagged disposable acceptance users
         # The Clerk TEST instance caps at 100 users and every iteration
@@ -95,26 +114,51 @@ jobs:
       - name: Run 10 consecutive golden journeys
         env:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           LITT_PROD_BASE_URL: ${{ env.STAGING_URL }}
           LITT_ACCEPTANCE_FRESH_ACCOUNT: "1"
           LITT_ACCEPTANCE_DEPLOY: "1"
           LITT_GOLDEN_PROJECT_ID: ""
         run: |
           set -euo pipefail
+          verify_exact_deployments() {
+            local phase="$1" iteration="$2"
+            local web_sha terminal terminal_sha state web_id terminal_id
+            web_sha="$(curl -fsS --max-time 20 "$STAGING_URL/api/health" | jq -r '.checks.build.detail // empty')"
+            [ "$web_sha" = "$EXPECTED_SHA" ] \
+              || { echo "::error::web SHA drift $phase iteration $iteration: $web_sha"; return 1; }
+            terminal="$(curl -fsS --max-time 20 "$STAGING_TERMINAL_URL/health")"
+            printf '%s' "$terminal" | jq -e --arg commit "${EXPECTED_SHA:0:8}" \
+              '.status == "ok" and .readiness == "ready" and .commit == $commit and
+               .terminal.sandbox.execution == "enabled" and .terminal.sandbox.state == "verified"' \
+              > /dev/null || { echo "::error::terminal runtime or isolation drift $phase iteration $iteration"; return 1; }
+            terminal_sha="$(railway variable list --service "$STAGING_TERMINAL_SERVICE_ID" --json | jq -r '.RAILWAY_GIT_COMMIT_SHA // empty')"
+            [ "$terminal_sha" = "$EXPECTED_SHA" ] \
+              || { echo "::error::terminal full SHA metadata drift $phase iteration $iteration: $terminal_sha"; return 1; }
+            state="$(railway status --json)"
+            web_id="$(printf '%s' "$state" | jq -r --arg environment "$STAGING_ENVIRONMENT_ID" --arg service "$STAGING_WEB_SERVICE_ID" \
+              '[.environments.edges[].node | select(.id == $environment) | .serviceInstances.edges[].node |
+                select(.serviceId == $service) | .activeDeployments[] | select(.status == "SUCCESS") | .id] |
+                if length == 1 then .[0] else empty end')"
+            terminal_id="$(printf '%s' "$state" | jq -r --arg environment "$STAGING_ENVIRONMENT_ID" --arg service "$STAGING_TERMINAL_SERVICE_ID" \
+              '[.environments.edges[].node | select(.id == $environment) | .serviceInstances.edges[].node |
+                select(.serviceId == $service) | .activeDeployments[] | select(.status == "SUCCESS") | .id] |
+                if length == 1 then .[0] else empty end')"
+            [ -n "$web_id" ] && [ -n "$terminal_id" ] \
+              || { echo "::error::active staging deployment identity unavailable"; return 1; }
+            if [ -z "${baseline_web_id:-}" ]; then
+              baseline_web_id="$web_id"
+              baseline_terminal_id="$terminal_id"
+            fi
+            [ "$web_id" = "$baseline_web_id" ] && [ "$terminal_id" = "$baseline_terminal_id" ] \
+              || { echo "::error::staging deployment changed $phase iteration $iteration"; return 1; }
+            echo "iteration $iteration $phase: web_sha=$web_sha terminal_sha=$terminal_sha web_deployment=$web_id terminal_deployment=$terminal_id"
+          }
           passes=0
           for i in $(seq 1 "$ACCEPTANCE_RUNS"); do
             echo "=== acceptance iteration $i/$ACCEPTANCE_RUNS ==="
             echo "CONSECUTIVE_PASSES=$passes" >> "$GITHUB_ENV"
-            # Recheck both services before every paid journey: a merge may
-            # move staging web while this four-hour workflow is running.
-            detail="$(curl -fsS --max-time 20 "$STAGING_URL/api/health" | jq -r '.checks.build.detail')"
-            [ "$detail" = "$EXPECTED_SHA" ] \
-              || { echo "::error::web SHA drift at iteration $i: serving $detail, expected $EXPECTED_SHA"; echo "CONSECUTIVE_PASSES=$passes" >> "$GITHUB_ENV"; exit 1; }
-            terminal="$(curl -fsS --max-time 20 "$STAGING_TERMINAL_URL/health")"
-            echo "$terminal" | jq -e --arg commit "${EXPECTED_SHA:0:8}" \
-              '.status == "ok" and .readiness == "ready" and .commit == $commit and
-               .terminal.sandbox.execution == "enabled" and .terminal.sandbox.state == "verified"' \
-              > /dev/null || { echo "::error::terminal drift or isolation failure at iteration $i"; echo "CONSECUTIVE_PASSES=$passes" >> "$GITHUB_ENV"; exit 1; }
+            verify_exact_deployments before "$i"
             user_id="$(node scripts/final-acceptance/create-fresh-user.mjs)"
             echo "fresh user: $user_id"
             journey_passed=0
@@ -122,14 +166,7 @@ jobs:
                node scripts/final-acceptance/prod-mobile-golden.mjs; then
               journey_passed=1
             fi
-            detail="$(curl -fsS --max-time 20 "$STAGING_URL/api/health" | jq -r '.checks.build.detail')"
-            [ "$detail" = "$EXPECTED_SHA" ] \
-              || { echo "::error::web SHA drift after iteration $i: serving $detail, expected $EXPECTED_SHA"; echo "CONSECUTIVE_PASSES=$passes" >> "$GITHUB_ENV"; exit 1; }
-            terminal="$(curl -fsS --max-time 20 "$STAGING_TERMINAL_URL/health")"
-            echo "$terminal" | jq -e --arg commit "${EXPECTED_SHA:0:8}" \
-              '.status == "ok" and .readiness == "ready" and .commit == $commit and
-               .terminal.sandbox.execution == "enabled" and .terminal.sandbox.state == "verified"' \
-              > /dev/null || { echo "::error::terminal drift or isolation failure after iteration $i"; echo "CONSECUTIVE_PASSES=$passes" >> "$GITHUB_ENV"; exit 1; }
+            verify_exact_deployments after "$i"
             if [ "$journey_passed" -eq 1 ]; then
               passes=$((passes + 1))
               echo "iteration $i: PASS (consecutive=$passes)"
