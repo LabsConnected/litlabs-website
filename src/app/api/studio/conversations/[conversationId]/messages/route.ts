@@ -1055,7 +1055,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
     );
 
     if (!reserveResult.ok) {
-      // Insufficient balance — abort BEFORE the model call. Persist the
+      // Reserve failed — abort BEFORE the model call. Persist the
       // reason so a reload shows what actually happened, not an empty
       // failed bubble.
       await updateMessageStatus(
@@ -1064,15 +1064,23 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
         "failed",
         reserveResult.error || "Insufficient LiTTBits balance — purchase credits to run this agent.",
       );
+      const reserveStatus = reserveResult.status || 402;
       return NextResponse.json(
         {
           error: reserveResult.error || "Insufficient LiTTBits balance",
-          detail: "This agent requires LiTTBits to run. Purchase credits in your wallet.",
+          // The purchase-credits wording is only honest for a genuine
+          // 402 (insufficient balance). Any other reserve failure (500
+          // run-row insert, 503 reservation RPC) must not present as a
+          // billing refusal (ACC-04).
+          detail:
+            reserveStatus === 402
+              ? "This agent requires LiTTBits to run. Purchase credits in your wallet."
+              : "LiTT couldn't start this run — no credits were charged.",
           userMessage,
           assistantMessage: { ...assistantMessage, status: "failed" as const },
           revision: conversation.revision,
         },
-        { status: reserveResult.status || 402 },
+        { status: reserveStatus },
       );
     }
 

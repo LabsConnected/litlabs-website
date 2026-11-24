@@ -2722,6 +2722,27 @@ describe("POST /api/studio/conversations/[conversationId]/messages — built-in 
     expect(res.status).toBe(402);
     expect(runLaunchFlow).not.toHaveBeenCalled();
     expect(settleRun).not.toHaveBeenCalled();
+    // A genuine 402 keeps the purchase-credits wording (ACC-04).
+    const body = await res.json();
+    expect(body.detail).toContain("Purchase credits in your wallet");
+  });
+
+  it("does not dress a non-402 reserve failure up as a purchase-credits refusal (ACC-04)", async () => {
+    vi.mocked(reserveCredits).mockResolvedValue({
+      ok: false,
+      status: 500,
+      error: 'null value in column "some_column" violates not-null constraint',
+    } as any);
+
+    const res = await POST(makeRequest({}), routeParams);
+    expect(res.status).toBe(500);
+    expect(runLaunchFlow).not.toHaveBeenCalled();
+    expect(settleRun).not.toHaveBeenCalled();
+    const body = await res.json();
+    expect(body.error).toContain("violates not-null constraint");
+    expect(body.detail).toContain("couldn't start this run");
+    expect(body.detail).not.toContain("LiTTBits");
+    expect(body.detail).not.toContain("Purchase credits");
   });
 
   it("still reserves under the marketplace instance id when one is selected", async () => {
