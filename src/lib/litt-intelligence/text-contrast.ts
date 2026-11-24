@@ -26,8 +26,9 @@
  *   - It reasons ONLY about the generated document itself: its own
  *     <style> blocks and inline style attributes. A document whose
  *     colors may live elsewhere — a linked local stylesheet, an
- *     @import, a prefers-color-scheme media block — is not reasoned
- *     about at all.
+ *     @import, a prefers-color-scheme media block, or the Tailwind
+ *     browser runtime compiling utility classes into CSS at load —
+ *     is not reasoned about at all.
  *   - An element is only judged when BOTH its effective text color
  *     and the effective background behind it resolve to concrete
  *     colors through the document's own cascade (tag/class/id
@@ -292,6 +293,11 @@ function compositeOver(fg: Rgba, bg: Rgba): Rgba {
 interface CssDeclaration {
   value: string;
   important: boolean;
+  /** Position of this declaration in its source (stylesheet or
+   *  style attribute), monotonically increasing. Cascade order is
+   *  per-DECLARATION, not per-rule: inside one block, a later
+   *  `background` must beat an earlier `background-color`. */
+  seq: number;
 }
 
 interface CompoundSelector {
@@ -313,13 +319,20 @@ interface CssRule {
   order: number;
 }
 
-function parseDeclarations(body: string): Map<string, CssDeclaration> {
+function parseDeclarations(
+  body: string,
+  counter: { next: number },
+): Map<string, CssDeclaration> {
   const out = new Map<string, CssDeclaration>();
   for (const part of body.split(";")) {
     const colon = part.indexOf(":");
     if (colon < 0) continue;
-    const prop = part.slice(0, colon).trim().toLowerCase();
-    if (!prop) continue;
+    const rawProp = part.slice(0, colon).trim();
+    if (!rawProp) continue;
+    // Standard property names are case-insensitive; custom property
+    // names are NOT — --bg and --BG are different properties, and
+    // lowercasing would merge them into one.
+    const prop = rawProp.startsWith("--") ? rawProp : rawProp.toLowerCase();
     let value = part.slice(colon + 1).trim();
     let important = false;
     const imp = /!important\s*$/i.exec(value);
@@ -327,7 +340,7 @@ function parseDeclarations(body: string): Map<string, CssDeclaration> {
       important = true;
       value = value.slice(0, imp.index).trim();
     }
-    if (value) out.set(prop, { value, important });
+    if (value) out.set(prop, { value, important, seq: counter.next++ });
   }
   return out;
 }
@@ -385,18 +398,47 @@ function parseComplexSelector(raw: string): ComplexSelector | null {
   return { compounds, combinators, specificity: [ids, cls, tags] };
 }
 
+/** Every property this checker reads while judging an element. A
+ *  rule the parser must skip is only safe to skip when it declares
+ *  none of these (and no custom property): otherwise the skipped
+ *  rule could be the one carrying the colors being judged. */
+const COLOR_RELEVANT_PROPS = new Set([
+  "color", "background", "background-color", "background-image",
+  "background-clip", "-webkit-background-clip",
+  "display", "visibility", "opacity",
+]);
+
+function declarationsAffectColors(declarations: Map<string, CssDeclaration>): boolean {
+  for (const prop of declarations.keys()) {
+    if (prop.startsWith("--") || COLOR_RELEVANT_PROPS.has(prop)) return true;
+  }
+  return false;
+}
+
+/** The same test against raw CSS text, for constructs the flat
+ *  parser cannot decompose (at-rule blocks, nested rules). */
+function textMentionsColorDeclarations(text: string): boolean {
+  return (
+    /(?:^|[;{])\s*(?:color|background|background-color|background-image|background-clip|-webkit-background-clip|display|visibility|opacity)\s*:/i.test(text)
+    || /(?:^|[;{])\s*--[a-zA-Z0-9_-]+\s*:/.test(text)
+  );
+}
+
 /**
- * Parse a stylesheet into flat rules. At-rules are skipped wholesale;
- * the caller is told when a skipped at-rule may carry color
- * declarations this flat view cannot see (a @media block mentioning
- * color-scheme or background), because then the document is beyond
- * this checker.
+ * Parse a stylesheet into flat rules. Constructs this flat view
+ * cannot see — at-rule blocks, nested rules, selectors beyond its
+ * grammar (attribute selectors, pseudo-classes) — are skipped, and
+ * the caller is told when a skipped construct may carry color
+ * declarations, because then the document is beyond this checker:
+ * judging it anyway would mean judging against defaults the skipped
+ * CSS may override.
  */
-function parseStylesheet(css: string): { rules: CssRule[]; opaqueAtRule: boolean } {
+function parseStylesheet(css: string): { rules: CssRule[]; opaque: boolean } {
   const text = css.replace(/\/\*[\s\S]*?\*\//g, "");
   const rules: CssRule[] = [];
-  let opaqueAtRule = false;
+  let opaque = false;
   let order = 0;
+  const seqCounter = { next: 0 };
   let i = 0;
   const n = text.length;
   while (i < n) {
@@ -420,8 +462,12 @@ function parseStylesheet(css: string): { rules: CssRule[]; opaqueAtRule: boolean
           k += 1;
         }
         const block = text.slice(j, k + 1);
-        if (/prefers-color-scheme/i.test(prelude) || /background/i.test(block)) {
-          opaqueAtRule = true;
+        if (
+          /prefers-color-scheme/i.test(prelude)
+          || /background/i.test(block)
+          || textMentionsColorDeclarations(block)
+        ) {
+          opaque = true;
         }
         i = k + 1;
       } else {
@@ -446,17 +492,29 @@ function parseStylesheet(css: string): { rules: CssRule[]; opaqueAtRule: boolean
     }
     const body = text.slice(j + 1, k);
     i = k + 1;
-    if (body.includes("{")) continue; // nested rules — beyond this checker
-    const selectors = selectorText
-      .split(",")
-      .map((s) => parseComplexSelector(s))
-      .filter((s): s is ComplexSelector => s !== null);
-    if (selectors.length === 0) continue;
-    const declarations = parseDeclarations(body);
+    if (body.includes("{")) {
+      // Nested rules — beyond this checker. If the nested content
+      // may carry colors, the document is too, rather than judged
+      // without them.
+      if (textMentionsColorDeclarations(body)) opaque = true;
+      continue;
+    }
+    const declarations = parseDeclarations(body, seqCounter);
     if (declarations.size === 0) continue;
+    const parsedSelectors = selectorText.split(",").map((s) => parseComplexSelector(s));
+    const selectors = parsedSelectors.filter((s): s is ComplexSelector => s !== null);
+    // A selector this grammar cannot read (an attribute selector, a
+    // pseudo-class, a sibling combinator) drops out of the rule. If
+    // the rule declares colors, the dropped selector might be the
+    // one matching the judged elements — the document is beyond
+    // this checker rather than judged on a partial cascade.
+    if (selectors.length < parsedSelectors.length && declarationsAffectColors(declarations)) {
+      opaque = true;
+    }
+    if (selectors.length === 0) continue;
     rules.push({ selectors, declarations, order: order++ });
   }
-  return { rules, opaqueAtRule };
+  return { rules, opaque };
 }
 
 // ─── DOM walking (parse5 tree, structurally typed) ──────────────────
@@ -565,7 +623,7 @@ function winningDeclaration(
         important: decl.important,
         inline: false,
         specificity: selector.specificity,
-        order: rule.order,
+        order: decl.seq,
       };
       if (!best || compareDeclarations(candidate, best) > 0) best = candidate;
     }
@@ -577,7 +635,7 @@ function winningDeclaration(
       important: inline.important,
       inline: true,
       specificity: [0, 0, 0],
-      order: Number.MAX_SAFE_INTEGER,
+      order: inline.seq,
     };
     if (!best || compareDeclarations(candidate, best) > 0) best = candidate;
   }
@@ -614,7 +672,7 @@ function customPropertyScope(
           important: decl.important,
           inline: false,
           specificity: matched.specificity,
-          order: rule.order,
+          order: decl.seq,
         });
       }
     }
@@ -627,7 +685,7 @@ function customPropertyScope(
           important: decl.important,
           inline: true,
           specificity: [0, 0, 0],
-          order: Number.MAX_SAFE_INTEGER,
+          order: decl.seq,
         });
       }
     }
@@ -675,7 +733,9 @@ function resolveVars(value: string, scope: Map<string, string>): string | null {
           break;
         }
       }
-      const name = (comma < 0 ? inner : inner.slice(0, comma)).trim().toLowerCase();
+      // Custom property names are case-sensitive: look the name up
+      // exactly as written.
+      const name = (comma < 0 ? inner : inner.slice(0, comma)).trim();
       const fallback = comma < 0 ? null : inner.slice(comma + 1).trim();
       if (!name.startsWith("--")) return null;
       const scoped = scope.get(name);
@@ -718,17 +778,21 @@ function ancestorChain(el: P5Node): P5Node[] {
 /** Effective text color of an element: its own cascaded `color`, else
  *  inherited from the nearest ancestor that declares one, else the
  *  UA default (black). "unknown" when a declaration exists but its
- *  value cannot be resolved to a concrete color. */
+ *  value cannot be resolved to a concrete color. Each ancestor's
+ *  declaration is resolved in THAT ancestor's own custom-property
+ *  scope (scopes[i] covers chain[0..i]): a var() resolves where the
+ *  declaration lives, with values inherited down to it — a
+ *  descendant's redefinition never reaches back up. */
 function effectiveTextColor(
   chain: P5Node[],
   rules: CssRule[],
   inlineStyles: Map<P5Node, Map<string, CssDeclaration>>,
-  scope: Map<string, string>,
+  scopes: Array<Map<string, string>>,
 ): Resolved<Rgba> {
   for (let i = chain.length - 1; i >= 0; i -= 1) {
     const winner = winningDeclaration(chain[i], rules, inlineStyles, "color");
     if (!winner) continue;
-    const resolved = resolveVars(winner.value, scope);
+    const resolved = resolveVars(winner.value, scopes[i]);
     if (resolved === null) return { kind: "unknown" };
     const keyword = resolved.trim().toLowerCase();
     if (keyword === "inherit" || keyword === "unset") continue;
@@ -738,6 +802,34 @@ function effectiveTextColor(
     return { kind: "value", value: color };
   }
   return { kind: "value", value: { r: 0, g: 0, b: 0, a: 1 } };
+}
+
+/** Split a background shorthand into tokens without breaking
+ *  functional notation apart: rgb(3, 5, 10) is ONE token even though
+ *  it contains spaces. Null when the parens are unbalanced — the
+ *  value cannot be read at all. */
+function shorthandTokens(value: string): string[] | null {
+  const tokens: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of value) {
+    if (ch === "(") depth += 1;
+    else if (ch === ")") {
+      depth -= 1;
+      if (depth < 0) return null;
+    }
+    if (/\s/.test(ch) && depth === 0) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+    } else {
+      current += ch;
+    }
+  }
+  if (depth !== 0) return null;
+  if (current) tokens.push(current);
+  return tokens;
 }
 
 /** One element's own background paint, before walking up. */
@@ -780,10 +872,17 @@ function ownBackground(
   if (isShorthand) {
     if (/url\(|gradient\(/i.test(resolved)) return { kind: "unknown" };
     // Extract the color token, if the shorthand carries one.
-    const tokens = resolved.split(/\s+/).filter((t) => t.length > 0);
+    const tokens = shorthandTokens(resolved);
+    if (tokens === null) return { kind: "unknown" };
     for (const token of tokens) {
       const color = parseCssColor(token);
       if (color) return color.a === 0 ? { kind: "none" } : { kind: "value", value: color };
+      // A token that TRIES to be a color but cannot be read — a hex
+      // value of the wrong length, a malformed rgb()/hsl() — means
+      // the shorthand's color layer is beyond this checker. Guessing
+      // "no color here" would lose a real background and falsely
+      // fail a readable page, so the element is unjudgeable.
+      if (token.startsWith("#") || /^(rgba?|hsla?)\(/i.test(token)) return { kind: "unknown" };
     }
     return { kind: "none" }; // shorthand without a color resets to transparent
   }
@@ -801,11 +900,11 @@ function effectiveBackground(
   chain: P5Node[],
   rules: CssRule[],
   inlineStyles: Map<P5Node, Map<string, CssDeclaration>>,
-  scope: Map<string, string>,
+  scopes: Array<Map<string, string>>,
 ): Resolved<Rgba> {
   const layers: Rgba[] = [];
   for (let i = chain.length - 1; i >= 0; i -= 1) {
-    const own = ownBackground(chain[i], rules, inlineStyles, scope);
+    const own = ownBackground(chain[i], rules, inlineStyles, scopes[i]);
     if (own.kind === "unknown") return { kind: "unknown" };
     if (own.kind === "value") {
       layers.push(own.value);
@@ -889,11 +988,26 @@ export function findContrastViolations(html: string): DocumentContrastResult {
   // decided elsewhere.
   const styleTexts: string[] = [];
   let externalColorsPossible = false;
+  let tailwindRuntime = false;
   const scan = (node: P5Node) => {
     for (const child of node.childNodes ?? []) {
       const tag = (child.tagName ?? "").toLowerCase();
       if (tag === "style") {
-        styleTexts.push(directText(child));
+        // A text/tailwindcss block is source for the Tailwind browser
+        // runtime, not plain CSS: the runtime compiles it (and the
+        // utility classes in the markup) into CSS this checker never
+        // sees, so the document is beyond it.
+        if ((attrOf(child, "type") ?? "").trim().toLowerCase() === "text/tailwindcss") {
+          tailwindRuntime = true;
+        } else {
+          styleTexts.push(directText(child));
+        }
+      } else if (tag === "script") {
+        // The Tailwind browser build (Play CDN, or the v4 browser
+        // package) generates the document's color CSS at runtime
+        // from utility classes — again, CSS this checker cannot see.
+        const src = attrOf(child, "src") ?? "";
+        if (/tailwindcss/i.test(src)) tailwindRuntime = true;
       } else if (tag === "link") {
         const rel = (attrOf(child, "rel") ?? "").toLowerCase();
         if (rel.split(/\s+/).includes("stylesheet")) {
@@ -913,12 +1027,12 @@ export function findContrastViolations(html: string): DocumentContrastResult {
   scan(doc);
 
   const allCss = styleTexts.join("\n");
-  if (externalColorsPossible || /@import/i.test(allCss)) {
+  if (externalColorsPossible || tailwindRuntime || /@import/i.test(allCss)) {
     return { violations: [], reasoned: false };
   }
 
-  const { rules, opaqueAtRule } = parseStylesheet(allCss);
-  if (opaqueAtRule) return { violations: [], reasoned: false };
+  const { rules, opaque } = parseStylesheet(allCss);
+  if (opaque) return { violations: [], reasoned: false };
 
   const inlineStyles = new Map<P5Node, Map<string, CssDeclaration>>();
   const violations: Array<Omit<ContrastViolation, "path">> = [];
@@ -930,12 +1044,18 @@ export function findContrastViolations(html: string): DocumentContrastResult {
     if (SKIP_SUBTREE_TAGS.has(tag)) return;
 
     const styleAttr = attrOf(el, "style");
-    if (styleAttr) inlineStyles.set(el, parseDeclarations(styleAttr));
+    if (styleAttr) inlineStyles.set(el, parseDeclarations(styleAttr, { next: 0 }));
 
     const text = directText(el);
     if (text.length >= 2 && /[A-Za-z0-9]/.test(text) && !SKIP_ELEMENT_TAGS.has(tag)) {
       const chain = ancestorChain(el);
-      const scope = customPropertyScope(chain, rules, inlineStyles);
+      // One custom-property scope per chain prefix: scopes[i] is the
+      // scope in force AT chain[i], so an ancestor's declarations
+      // resolve with its own variables, not the target's.
+      const scopes = chain.map((_, idx) =>
+        customPropertyScope(chain.slice(0, idx + 1), rules, inlineStyles),
+      );
+      const scope = scopes[scopes.length - 1];
       if (!isDeliberatelyHidden(chain, rules, inlineStyles, scope)) {
         // Gradient-clipped text wears its background as its fill —
         // its declared color (usually transparent) is not its
@@ -944,9 +1064,9 @@ export function findContrastViolations(html: string): DocumentContrastResult {
           ?? winningDeclaration(el, rules, inlineStyles, "-webkit-background-clip");
         const clipValue = clip ? resolveVars(clip.value, scope)?.trim().toLowerCase() : null;
         if (clipValue !== "text") {
-          const fg = effectiveTextColor(chain, rules, inlineStyles, scope);
+          const fg = effectiveTextColor(chain, rules, inlineStyles, scopes);
           if (fg.kind === "value" && fg.value.a > 0) {
-            const bg = effectiveBackground(chain, rules, inlineStyles, scope);
+            const bg = effectiveBackground(chain, rules, inlineStyles, scopes);
             if (bg.kind === "value") {
               const painted = fg.value.a >= 1 ? fg.value : compositeOver(fg.value, bg.value);
               const ratio = contrastRatio(painted, bg.value);

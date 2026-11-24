@@ -253,6 +253,250 @@ describe("findContrastViolations — pages it cannot reason about", () => {
   });
 });
 
+describe("findContrastViolations — Greptile round 2 (PR #1107)", () => {
+  it("finding 1: does not judge a page using the Tailwind browser CDN", () => {
+    // Colors live in utility classes the Tailwind Play runtime turns
+    // into CSS in the browser; this checker never sees that CSS, so
+    // the white text must not be judged against the default canvas.
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.tailwindcss.com"></script>',
+      "  <style>p { color: #f5f5f4; }</style>",
+      "</head>",
+      '  <body class="bg-black"><p>Fresh from the oven every morning.</p></body></html>',
+    ].join("\n");
+    const { violations, reasoned } = findContrastViolations(page);
+    expect(reasoned).toBe(false);
+    expect(violations).toEqual([]);
+  });
+
+  it("finding 1: does not judge a page using the Tailwind v4 browser build", () => {
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      "</head>",
+      '  <body class="bg-black">',
+      '  <p style="color: #f5f5f4">Fresh from the oven every morning.</p>',
+      "</body></html>",
+    ].join("\n");
+    const { violations, reasoned } = findContrastViolations(page);
+    expect(reasoned).toBe(false);
+    expect(violations).toEqual([]);
+  });
+
+  it("finding 1: does not judge a page with a text/tailwindcss style block", () => {
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <style type="text/tailwindcss">.hero { @apply bg-black text-white; }</style>',
+      "</head>",
+      '  <body class="bg-black">',
+      '  <p style="color: #f5f5f4">Fresh from the oven every morning.</p>',
+      "</body></html>",
+    ].join("\n");
+    const { violations, reasoned } = findContrastViolations(page);
+    expect(reasoned).toBe(false);
+    expect(violations).toEqual([]);
+  });
+});
+
+describe("findContrastViolations — Greptile round 2 (PR #1107), continued", () => {
+  it("finding 2: reads a dark rgb() background written with spaces", () => {
+    const page = [
+      "<!DOCTYPE html><html><head><style>",
+      "  body { background: rgb(3, 5, 10); color: #f5f5f4; }",
+      "</style></head><body><p>Fresh from the oven every morning.</p></body></html>",
+    ].join("\n");
+    const { violations, reasoned } = findContrastViolations(page);
+    expect(reasoned).toBe(true);
+    expect(violations).toEqual([]);
+  });
+
+  it("finding 2: reads the color inside a fuller background shorthand", () => {
+    const page = [
+      "<!DOCTYPE html><html><head><style>",
+      "  body { background: rgb(3, 5, 10) center / cover no-repeat; color: #f5f5f4; }",
+      "</style></head><body><p>Fresh from the oven every morning.</p></body></html>",
+    ].join("\n");
+    expect(findContrastViolations(page).violations).toEqual([]);
+  });
+
+  it("finding 2: an unreadable color function makes the background unknown, not transparent", () => {
+    const page = [
+      "<!DOCTYPE html><html><head><style>",
+      "  body { background: rgba(3, 5, 10, bogus); color: #f5f5f4; }",
+      "</style></head><body><p>Fresh from the oven every morning.</p></body></html>",
+    ].join("\n");
+    expect(findContrastViolations(page).violations).toEqual([]);
+  });
+});
+
+describe("findContrastViolations — Greptile round 2 (PR #1107), continued", () => {
+  it("finding 3: a later background shorthand beats an earlier background-color in the same block", () => {
+    const page = [
+      "<!DOCTYPE html><html><head><style>",
+      "  .hero { background-color: #ffffff; background: #03050a; }",
+      "  .hero p { color: #f5f5f4; }",
+      "</style></head><body>",
+      '  <section class="hero"><p>Fresh from the oven every morning.</p></section>',
+      "</body></html>",
+    ].join("\n");
+    expect(findContrastViolations(page).violations).toEqual([]);
+  });
+
+  it("finding 3: a later background-color beats an earlier background shorthand in the same block", () => {
+    // The page really is light-on-light — the win must go to the
+    // LATER declaration, not to whichever property the checker
+    // happens to prefer.
+    const page = [
+      "<!DOCTYPE html><html><head><style>",
+      "  .hero { background: #03050a; background-color: #ffffff; }",
+      "  .hero p { color: #f5f5f4; }",
+      "</style></head><body>",
+      '  <section class="hero"><p>Fresh from the oven every morning.</p></section>',
+      "</body></html>",
+    ].join("\n");
+    const { violations } = findContrastViolations(page);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].background).toBe("#ffffff");
+  });
+
+  it("finding 3: declaration order inside a style attribute is honored too", () => {
+    const page = [
+      "<!DOCTYPE html><html><head></head><body>",
+      '  <p style="background-color: #ffffff; background: #03050a; color: #f5f5f4">Fresh from the oven every morning.</p>',
+      "</body></html>",
+    ].join("\n");
+    expect(findContrastViolations(page).violations).toEqual([]);
+  });
+});
+
+describe("findContrastViolations — Greptile round 2 (PR #1107), continued", () => {
+  it("finding 4: does not judge when a dropped attribute-selector rule may carry the background", () => {
+    const page = [
+      "<!DOCTYPE html><html><head><style>",
+      "  p { color: #f5f5f4; }",
+      '  body[data-theme="dark"] { background: #03050a; }',
+      "</style></head>",
+      '  <body data-theme="dark"><p>Fresh from the oven every morning.</p></body></html>',
+    ].join("\n");
+    const { violations, reasoned } = findContrastViolations(page);
+    expect(reasoned).toBe(false);
+    expect(violations).toEqual([]);
+  });
+
+  it("finding 4: does not judge when one selector of a list is dropped and the rule declares colors", () => {
+    const page = [
+      "<!DOCTYPE html><html><head><style>",
+      "  p { color: #f5f5f4; }",
+      '  .hero, body[data-theme="dark"] { background: #03050a; }',
+      "</style></head>",
+      '  <body data-theme="dark"><p>Fresh from the oven every morning.</p></body></html>',
+    ].join("\n");
+    const { violations, reasoned } = findContrastViolations(page);
+    expect(reasoned).toBe(false);
+    expect(violations).toEqual([]);
+  });
+
+  it("finding 4: does not judge when an @media block changes only colors", () => {
+    const page = [
+      "<!DOCTYPE html><html><head><style>",
+      "  p { color: #f5f5f4; }",
+      "  @media (max-width: 600px) { p { color: #1c1917; } }",
+      "</style></head><body><p>Fresh from the oven every morning.</p></body></html>",
+    ].join("\n");
+    const { violations, reasoned } = findContrastViolations(page);
+    expect(reasoned).toBe(false);
+    expect(violations).toEqual([]);
+  });
+
+  it("finding 4: does not judge when a nested rule may carry the background", () => {
+    const page = [
+      "<!DOCTYPE html><html><head><style>",
+      "  p { color: #f5f5f4; }",
+      "  section { .inner { background: #03050a; } }",
+      "</style></head><body>",
+      '  <section><div class="inner"><p>Fresh from the oven every morning.</p></div></section>',
+      "</body></html>",
+    ].join("\n");
+    const { violations, reasoned } = findContrastViolations(page);
+    expect(reasoned).toBe(false);
+    expect(violations).toEqual([]);
+  });
+
+  it("finding 4: a dropped selector whose rule declares no colors does not block judging", () => {
+    const page = [
+      "<!DOCTYPE html><html><head><style>",
+      "  a:hover { text-decoration: underline; }",
+      "  p { color: #f5f5f4; }",
+      "</style></head><body><p>Fresh from the oven every morning.</p></body></html>",
+    ].join("\n");
+    const { violations, reasoned } = findContrastViolations(page);
+    expect(reasoned).toBe(true);
+    expect(violations).toHaveLength(1);
+  });
+});
+
+describe("findContrastViolations — Greptile round 2 (PR #1107), continued", () => {
+  it("finding 5: an ancestor's background resolves var() in the ancestor's own scope", () => {
+    // .panel redefines --bg for ITSELF; body's background must
+    // still read the :root value. Resolving body's var(--bg) with
+    // the child's scope would paint the page white and falsely
+    // fail the panel's light text.
+    const page = [
+      "<!DOCTYPE html><html><head><style>",
+      "  :root { --bg: #03050a; }",
+      "  body { background: var(--bg); }",
+      "  .panel { --bg: #ffffff; color: #f5f5f4; }",
+      "</style></head><body>",
+      '  <div class="panel"><p>Fresh from the oven every morning.</p></div>',
+      "</body></html>",
+    ].join("\n");
+    const { violations, reasoned } = findContrastViolations(page);
+    expect(reasoned).toBe(true);
+    expect(violations).toEqual([]);
+  });
+
+  it("finding 5: an inherited color resolves var() in the declaring ancestor's scope", () => {
+    const page = [
+      "<!DOCTYPE html><html><head><style>",
+      "  :root { --ink: #1c1917; }",
+      "  body { color: var(--ink); background: #ffffff; }",
+      "  .panel { --ink: #f5f5f4; }",
+      "</style></head><body>",
+      '  <div class="panel"><p>Fresh from the oven every morning.</p></div>',
+      "</body></html>",
+    ].join("\n");
+    expect(findContrastViolations(page).violations).toEqual([]);
+  });
+});
+
+describe("findContrastViolations — Greptile round 2 (PR #1107), continued", () => {
+  it("finding 6: --bg and --BG are different properties (dark one wins its own name)", () => {
+    const page = [
+      "<!DOCTYPE html><html><head><style>",
+      "  :root { --bg: #03050a; --BG: #ffffff; }",
+      "  body { background: var(--bg); color: #f5f5f4; }",
+      "</style></head><body><p>Fresh from the oven every morning.</p></body></html>",
+    ].join("\n");
+    expect(findContrastViolations(page).violations).toEqual([]);
+  });
+
+  it("finding 6: --bg and --BG are different properties (light one keeps its own value)", () => {
+    // var(--bg) really is white here, so the light text really is
+    // invisible — merging --BG into --bg would paint it dark and
+    // the catch would be missed.
+    const page = [
+      "<!DOCTYPE html><html><head><style>",
+      "  :root { --bg: #ffffff; --BG: #03050a; }",
+      "  body { background: var(--bg); color: #f5f5f4; }",
+      "</style></head><body><p>Fresh from the oven every morning.</p></body></html>",
+    ].join("\n");
+    const { violations } = findContrastViolations(page);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].background).toBe("#ffffff");
+  });
+});
+
 describe("color math", () => {
   it("parses hex, rgb, hsl and named colors", () => {
     expect(parseCssColor("#fff")).toEqual({ r: 255, g: 255, b: 255, a: 1 });
