@@ -15,8 +15,8 @@
  * in the capability-planner mold): the instruction asks to deploy /
  * publish / ship AND asks for no content work. For such a run the
  * agent loop
- *   - never OFFERS the content-mutation tools,
- *   - REFUSES a content-mutation call if the model emits one anyway
+ *   - never OFFERS the mutation tools,
+ *   - REFUSES a mutation call if the model emits one anyway
  *     (no checkpoint, no approval card, no execution — the refusal
  *     is fed back as a tool result so the model proceeds to
  *     project.deploy), and
@@ -31,16 +31,35 @@
  * content-verb net.
  */
 
-/** Tool ids that create or rewrite project content. In a deploy-only
- *  run these are neither offered nor executed. (Deploy itself —
- *  project.deploy — is transport and stays available.) */
-export const CONTENT_MUTATION_TOOL_IDS: ReadonlySet<string> = new Set([
-  "files.write",
-  "apply_patch",
-  "site.compose",
-  "site.patch",
-  "project.insert_asset",
+/** The one mutation-marked tool a deploy-only run exists to use:
+ *  project.deploy publishes the workspace exactly as it stands — it
+ *  is the transport itself, and it neither creates, rewrites, moves
+ *  nor deletes project content. (deploy.execute is NOT transport
+ *  here: it redeploys the LiTT app service itself, and stays
+ *  blocked like every other mutation.) */
+export const DEPLOY_TRANSPORT_TOOL_IDS: ReadonlySet<string> = new Set([
+  "project.deploy",
 ]);
+
+/**
+ * True when a tool must be withheld and refused in a deploy-only
+ * run. Derived from the registry's own metadata — every tool the
+ * registry marks as mutating (`readOnly: false`, which is also how
+ * station actions advertise `mutating`) is blocked, except the
+ * deploy transport itself. Deriving the set, rather than listing
+ * content tools by hand, is the guarantee: a hand-picked list
+ * silently left files.delete / files.rename / files.patch /
+ * terminal.execute executable in a "deploy" (Greptile, PR #1108),
+ * and the next tool added to the registry would slip through the
+ * same way. The registry-enumeration test in deploy-intent.test.ts
+ * pins this against the live registry.
+ */
+export function isBlockedInDeployOnlyRun(tool: {
+  id: string;
+  readOnly: boolean;
+}): boolean {
+  return !tool.readOnly && !DEPLOY_TRANSPORT_TOOL_IDS.has(tool.id);
+}
 
 const DEPLOY_PATTERNS = [
   /\bdeploy(?:s|ed|ing|ment)?\b/i,
@@ -54,7 +73,15 @@ const DEPLOY_PATTERNS = [
 ];
 
 /** Any of these in the instruction means the user asked for content
- *  work, so the run is not deploy-only — even alongside a deploy ask. */
+ *  work, so the run is not deploy-only — even alongside a deploy ask.
+ *  The net is deliberately wide and keeps widening toward the safe
+ *  side: a false deploy-only both blocks the user's edit AND
+ *  publishes the unchanged page, while a missed deploy-only just
+ *  behaves like a normal run. Greptile (PR #1108) caught "Make the
+ *  header blue and deploy" and "Translate the page and publish"
+ *  slipping through as deploy-only — hence the translation verbs,
+ *  the appearance verbs, and the make-<color/comparative> shapes
+ *  below, on top of the plain edit verbs. */
 const CONTENT_CHANGE_PATTERNS = [
   /\bbuild(?:s|ing)?\b/i,
   /\bcreate(?:s|d)?\b/i,
@@ -63,6 +90,8 @@ const CONTENT_CHANGE_PATTERNS = [
   /\bedit(?:s|ed|ing)?\b/i,
   /\bfix(?:es|ed|ing)?\b/i,
   /\bwrite(?:s)?\b/i,
+  /\brewrite(?:s|n)?\b/i,
+  /\brewriting\b/i,
   /\bredesign\b/i,
   /\bgenerate(?:s|d)?\b/i,
   /\badd(?:s|ed|ing)?\b/i,
@@ -72,6 +101,44 @@ const CONTENT_CHANGE_PATTERNS = [
   /\bmodif(?:y|ies|ied)\b/i,
   /\brebuild\b/i,
   /\bredo\b/i,
+  /\brename(?:s|d|ing)?\b/i,
+  /\binsert(?:s|ed|ing)?\b/i,
+  /\bupload(?:s|ed|ing)?\b/i,
+  /\bswap(?:s|ped|ping)?\b/i,
+  /\bmove(?:s|d)?\b/i,
+  /\bresiz(?:e|es|ed|ing)\b/i,
+  /\bhide(?:s|ing)?\b/i,
+  /\bcenter(?:s|ed|ing)?\b/i,
+  /\balign(?:s|ed|ing|ment)?\b/i,
+  /\b(?:in|de)creas(?:e|es|ed|ing)\b/i,
+  /\b(?:darken|lighten|brighten)(?:s|ed|ing)?\b/i,
+  /\btweak(?:s|ed|ing)?\b/i,
+  /\badjust(?:s|ed|ing|ment|ments)?\b/i,
+  /\bpolish(?:es|ed|ing)?\b/i,
+  /\bimprov(?:e|es|ed|ing|ement|ements)\b/i,
+  /\benhanc(?:e|es|ed|ing)\b/i,
+  /\brefin(?:e|es|ed|ing)\b/i,
+  /\bstyle(?:s|d)?\b/i,
+  /\btheme\b/i,
+  /\bcolou?r(?:s|ed|ing)?\b/i,
+  // Translation and language work is content work.
+  /\btranslate(?:s|d|ing)?\b/i,
+  /\btranslation\b/i,
+  /\blocali[sz]\w*\b/i,
+  /\breword(?:s|ed|ing)?\b/i,
+  /\bparaphras(?:e|es|ed|ing)\b/i,
+  /\bconvert(?:s|ed|ing)?\b/i,
+  // "Set the price to $5", "set the title to …": a set with a
+  // direct object names content. (Bare "set up" is not matched.)
+  /\bset\s+(?:the|it|this|my)\b/i,
+  // "Turn the menu into a grid", "turn it into a blog".
+  /\bturn\s+(?:it|the|this)\s+\w+\s+into\b/i,
+  // Appearance edits phrased as "make …": "make the header blue",
+  // "make it darker", "make the text bigger". The object must be
+  // named (it/this/the <word>/my <word>) and the result must be a
+  // color or comparative — "make it live" and "make the site live"
+  // are deploy phrasings and stay deploy-only (asserted in tests).
+  /\bmake\s+(?:it|this|the\s+\w+|my\s+\w+)\s+(?:\w+\s+)?(?:blue|red|green|yellow|orange|purple|pink|violet|teal|cyan|magenta|brown|gold|silver|black|white|gray|grey|dark|light|darker|lighter|bigger|smaller|taller|shorter|wider|narrower|brighter|bolder|bold)\b/i,
   /\bbefore (?:you )?(?:deploy|publish|ship)/i,
 ];
 
@@ -88,11 +155,12 @@ export function isDeployOnlyInstruction(instruction: string): boolean {
 }
 
 /** The tool-result error fed back when a deploy-only run's model
- *  emits a content-mutation call anyway. */
+ *  emits a mutation call anyway. */
 export function deployOnlyRefusalError(toolId: string): string {
   return (
     `${toolId} refused: this is a deploy-only request — the user asked to publish the project ` +
-    `exactly as it is, so this run must not create, rewrite, or patch any file. ` +
+    `exactly as it is, so this run must not create, rewrite, patch, move, delete, or otherwise ` +
+    `modify any project content. ` +
     `Call project.deploy to publish the current workspace unchanged. ` +
     `If the user wants content changes, they will ask for them separately.`
   );
@@ -101,5 +169,6 @@ export function deployOnlyRefusalError(toolId: string): string {
 /** System-prompt note appended for deploy-only runs. */
 export const DEPLOY_ONLY_PROMPT_NOTE =
   "DEPLOY-ONLY REQUEST: the user asked to publish/deploy the project exactly as it exists. " +
-  "Do NOT write, patch, compose, or regenerate any file in this run — the content tools are disabled. " +
+  "Do NOT write, patch, compose, regenerate, move, or delete any file in this run — every " +
+  "mutation tool is disabled. " +
   "Call project.deploy to publish the current workspace unchanged, then report the stable project URL it returns.";

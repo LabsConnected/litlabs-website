@@ -1102,7 +1102,9 @@ export function findContrastViolations(html: string): DocumentContrastResult {
         tailwindModel !== null &&
         chain.some((n) =>
           classListOf(n).some(
-            (tok) => isColorUtilityToken(tok) || tailwindModel.classWriters.has(tok),
+            (tok) =>
+              isColorUtilityToken(tok, tailwindModel.themeVars) ||
+              tailwindModel.classWriters.has(tok),
           ),
         );
       if (chainRuntimeAffected) anyRuntimeAffectedText = true;
@@ -1230,11 +1232,38 @@ type UtilityColor =
   | { kind: "dropped" }
   | { kind: "unknown" };
 
+/** Strip Tailwind variant prefixes (md:, lg:, hover:, dark:, …)
+ *  from a class token, leaving the base utility. A prefixed color
+ *  utility still paints its color whenever its condition holds —
+ *  and a contrast check must assume the condition holds (the
+ *  conservative direction), so prefixed tokens are judged exactly
+ *  like their base utility (Greptile, PR #1108). Bracketed variant
+ *  forms (data-[state=open]:, supports-[…]:) are stripped through
+ *  their closing bracket. */
+function stripVariantPrefixes(token: string): string {
+  let t = token;
+  while (!/^(?:bg|text)-/.test(t)) {
+    const bracketed = t.indexOf("]:");
+    if (bracketed >= 0 && t.startsWith("[") === false && /^[a-zA-Z][a-zA-Z0-9_-]*-\[/.test(t)) {
+      t = t.slice(bracketed + 2);
+      continue;
+    }
+    const m = /^([a-zA-Z0-9_-]+):/.exec(t);
+    if (!m) break;
+    t = t.slice(m[0].length);
+  }
+  return t;
+}
+
 /** True when a class token has the shape of a COLOR utility (as
  *  opposed to typography/layout tokens like text-lg or bg-cover,
- *  which decide no color and are ignored). */
-function isColorUtilityToken(token: string): boolean {
-  const m = /^(?:bg|text)-(.+)$/.exec(token);
+ *  which decide no color and are ignored). Variant prefixes are
+ *  stripped first. Theme-named colors (bg-background,
+ *  text-foreground) count when the document's @theme defines the
+ *  matching --color-* variable — in Tailwind v4 that definition is
+ *  precisely what makes the utility exist. */
+function isColorUtilityToken(token: string, themeVars?: Map<string, string>): boolean {
+  const m = /^(?:bg|text)-(.+)$/.exec(stripVariantPrefixes(token));
   if (!m) return false;
   const body = m[1].replace(/\/\d{1,3}$/, "");
   return (
@@ -1247,13 +1276,16 @@ function isColorUtilityToken(token: string): boolean {
     body.startsWith("(") ||
     body.startsWith("gradient-") ||
     /^#(?:[0-9a-f]{3,8})$/i.test(body) ||
-    /^[a-z]+-[0-9]{2,3}$/.test(body)
+    /^[a-z]+-[0-9]{2,3}$/.test(body) ||
+    (themeVars !== undefined &&
+      /^[a-zA-Z][a-zA-Z0-9_-]*$/.test(body) &&
+      themeVars.has(`--color-${body}`))
   );
 }
 
 /** Classify one color-utility token against the @theme variables. */
 function classifyUtilityColor(token: string, themeVars: Map<string, string>): UtilityColor {
-  const m = /^(?:bg|text)-(.+)$/.exec(token);
+  const m = /^(?:bg|text)-(.+)$/.exec(stripVariantPrefixes(token));
   if (!m) return { kind: "unknown" };
   let body = m[1];
   let alpha = 1;
@@ -1289,6 +1321,24 @@ function classifyUtilityColor(token: string, themeVars: Map<string, string>): Ut
   if (/^#(?:[0-9a-f]{3,8})$/i.test(body)) {
     const color = parseCssColor(body);
     return color ? withAlpha(color) : { kind: "unknown" };
+  }
+  // Theme-named colors (Greptile, PR #1108): bg-background /
+  // text-foreground resolve through the @theme variable of the
+  // same name — --color-background, --color-foreground — exactly
+  // like the bg-(--color-x) form above. A variable that exists but
+  // does not resolve to a concrete color is unknown (the document
+  // goes UNVERIFIABLE, never silently clean); a name with no
+  // @theme definition generates no utility at all in v4 and falls
+  // through to unknown as well when it reached classification via
+  // a palette-shaped sibling — either way it is never guessed.
+  if (/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(body)) {
+    const raw = themeVars.get(`--color-${body}`);
+    if (raw !== undefined) {
+      const resolved = resolveVars(raw, themeVars);
+      if (resolved === null) return { kind: "unknown" };
+      const color = parseCssColor(resolved);
+      return color ? withAlpha(color) : { kind: "unknown" };
+    }
   }
   // Palette shades, gradients, currentColor, anything unrecognized:
   // a real color the narrow judgment will not guess.
@@ -1330,12 +1380,12 @@ function foldUtilityToken(
   token: string,
   themeVars: Map<string, string>,
 ): void {
-  if (!isColorUtilityToken(token)) return;
+  if (!isColorUtilityToken(token, themeVars)) return;
   const c = classifyUtilityColor(token, themeVars);
   if (c.kind === "dropped") return;
   const next: ColorWriter =
     c.kind === "color" ? { kind: "color", color: c.color } : { kind: "unknown" };
-  if (token.startsWith("bg-")) w.bg = next;
+  if (stripVariantPrefixes(token).startsWith("bg-")) w.bg = next;
   else w.color = next;
 }
 
@@ -1485,7 +1535,6 @@ function judgeTailwindRuntimeColors(
   inlineStyles: Map<P5Node, Map<string, CssDeclaration>>,
 ): Array<Omit<ContrastViolation, "path">> | null {
   if (model.unmodelable) return null;
-  if (model.root.bg.kind === "unknown" || model.root.color.kind === "unknown") return null;
 
   const violations: Array<Omit<ContrastViolation, "path">> = [];
   const seen = new Set<string>();
@@ -1511,77 +1560,129 @@ function judgeTailwindRuntimeColors(
       );
       const scope = scopes[scopes.length - 1];
       if (!isDeliberatelyHidden(chain, rules, inlineStyles, scope)) {
-        // Runtime writers along the chain, root first: the root
-        // rule seeds the base; each element's modeled class writers
-        // apply, then its own utilities (the utilities layer wins
-        // over @apply'd component classes in v4's cascade). Text
-        // color is a single inherited value — last writer wins.
-        // Backgrounds PAINT in layers: keep the runtime layers as a
-        // composited stack (a translucent card background composites
-        // over the root background beneath it, not over the canvas).
-        let fgWriter: ColorWriter = model.root.color;
-        let bgRuntime: Rgba | null = null;
-        let bgUnknown = false;
-        const foldBgWriter = (current: Rgba | null, w: ColorWriter): Rgba | null => {
-          if (w.kind !== "color" || w.color.a <= 0) return current;
-          if (w.color.a >= 1) return w.color;
-          return current ? compositeOver(w.color, current) : w.color;
-        };
-        if (model.root.bg.kind === "unknown") bgUnknown = true;
-        bgRuntime = foldBgWriter(bgRuntime, model.root.bg);
-        for (const node of chain) {
+        // Compose runtime and plain colors BY PROXIMITY
+        // (Greptile, PR #1108). The first version folded every
+        // runtime writer in the chain into a single value that
+        // overrode the plain cascade wholesale — so a body's
+        // bg-black / text-white utilities hid a child section's own
+        // plain background:white, and the white-on-white inside it
+        // was missed. Now each chain node contributes its own
+        // writers — the block's html/body rules (model.root) attach
+        // at the body node, then the node's modeled class writers,
+        // then its own utilities (the utilities layer wins over
+        // @apply'd component classes in v4's cascade) — and the
+        // NEAREST deciding node wins, exactly as paint and
+        // inheritance behave:
+        //
+        //   - Text color is a single inherited value: walking from
+        //     the element up, the first node carrying a runtime
+        //     color writer or a plain color declaration decides it.
+        //     At one node, an inline plain declaration outranks the
+        //     node's runtime writer (inline styles beat utilities
+        //     in the real cascade); any other same-node tie goes to
+        //     the runtime, the theme the document leads with. The
+        //     per-node plain step mirrors effectiveTextColor's
+        //     semantics (inherit/unset climb, initial is black, an
+        //     unresolvable value skips the element).
+        //   - Backgrounds paint in layers: walking up, each node's
+        //     layer is its runtime bg writer when it has one, else
+        //     its plain paint (ownBackground); layers composite
+        //     nearest-over-farther until the stack is opaque, then
+        //     over the white canvas.
+        //
+        // An unknown RUNTIME writer (palette shade, unresolved
+        // theme variable) makes the document unjudgeable only when
+        // the walk actually reaches it — a nearer decider overrides
+        // it exactly as the browser paints over it. An unknown
+        // PLAIN paint (an image, a gradient) skips just the
+        // element, as the plain path has always done — skipped,
+        // never failed. Where the walk is decided by plain
+        // declarations alone the verdict is the plain cascade's,
+        // so plain authority is extended node by node, not
+        // replaced.
+        const rootAttachIdx = (() => {
+          let idx = -1;
+          for (let i = 0; i < chain.length; i += 1) {
+            const t = (chain[i].tagName ?? "").toLowerCase();
+            if (t === "body") return i;
+            if (t === "html") idx = i;
+          }
+          return idx;
+        })();
+        const nodeWriters: TailwindColorWriters[] = chain.map((node, i) => {
+          const w = emptyWriters();
+          if (i === rootAttachIdx) {
+            w.bg = model.root.bg;
+            w.color = model.root.color;
+          }
           for (const cls of classListOf(node)) {
-            const w = model.classWriters.get(cls);
-            if (w) {
-              if (w.color.kind !== "none") fgWriter = w.color;
-              if (w.bg.kind === "unknown") bgUnknown = true;
-              bgRuntime = foldBgWriter(bgRuntime, w.bg);
+            const cw = model.classWriters.get(cls);
+            if (cw) {
+              if (cw.color.kind !== "none") w.color = cw.color;
+              if (cw.bg.kind !== "none") w.bg = cw.bg;
             }
           }
-          for (const tok of classListOf(node)) {
-            if (!isColorUtilityToken(tok)) continue;
-            const c = classifyUtilityColor(tok, model.themeVars);
-            if (c.kind === "dropped") continue;
-            const next: ColorWriter =
-              c.kind === "color" ? { kind: "color", color: c.color } : { kind: "unknown" };
-            if (tok.startsWith("bg-")) {
-              if (next.kind === "unknown") bgUnknown = true;
-              bgRuntime = foldBgWriter(bgRuntime, next);
-            } else {
-              fgWriter = next;
-            }
+          for (const tok of classListOf(node)) foldUtilityToken(w, tok, model.themeVars);
+          return w;
+        });
+
+        // Text color: nearest deciding node wins.
+        let fg: Rgba | null = null;
+        let fgUnknown = false;
+        let fgSkipped = false;
+        for (let i = chain.length - 1; i >= 0; i -= 1) {
+          const winner = winningDeclaration(chain[i], rules, inlineStyles, "color");
+          if (!winner || !winner.inline) {
+            const rt = nodeWriters[i].color;
+            if (rt.kind === "color") { fg = rt.color; break; }
+            if (rt.kind === "unknown") { fgUnknown = true; break; }
           }
+          if (!winner) continue;
+          const resolved = resolveVars(winner.value, scopes[i]);
+          if (resolved === null) { fgSkipped = true; break; }
+          const keyword = resolved.trim().toLowerCase();
+          if (keyword === "inherit" || keyword === "unset") continue;
+          if (keyword === "initial") { fg = { r: 0, g: 0, b: 0, a: 1 }; break; }
+          const color = parseCssColor(resolved);
+          if (!color) { fgSkipped = true; break; }
+          fg = color;
+          break;
         }
-        if (fgWriter.kind === "unknown" || bgUnknown) {
+        if (fgUnknown) {
           unjudgeable = true;
           return;
         }
+        if (!fgSkipped && fg === null) fg = { r: 0, g: 0, b: 0, a: 1 };
 
-        // Compose with the plain cascade: a property no runtime
-        // writer claims keeps its plain-cascade value; a runtime
-        // background stack composites over the plain result (the
-        // contract shapes never interleave the two systems at
-        // different depths — where they could, this errs toward the
-        // runtime theme the document leads with).
-        const plainFg = effectiveTextColor(chain, rules, inlineStyles, scopes);
-        const plainBg = effectiveBackground(chain, rules, inlineStyles, scopes);
-        let fg: Rgba | null = null;
-        if (fgWriter.kind === "color") fg = fgWriter.color;
-        else if (plainFg.kind === "value") fg = plainFg.value;
-        let bg: Rgba | null = null;
-        if (bgRuntime !== null && bgRuntime.a >= 1) {
-          bg = bgRuntime;
-        } else if (plainBg.kind === "value") {
-          bg = bgRuntime !== null ? compositeOver(bgRuntime, plainBg.value) : plainBg.value;
-        } else if (bgRuntime !== null) {
-          bg = compositeOver(bgRuntime, { r: 255, g: 255, b: 255, a: 1 });
+        // Background: per-node layers composited to opacity.
+        let bgStack: Rgba | null = null;
+        let bgUnknown = false;
+        let bgSkipped = false;
+        for (let i = chain.length - 1; i >= 0; i -= 1) {
+          if (bgStack !== null && bgStack.a >= 1) break;
+          const rt = nodeWriters[i].bg;
+          let layer: Rgba | null = null;
+          if (rt.kind === "unknown") { bgUnknown = true; break; }
+          if (rt.kind === "color" && rt.color.a > 0) {
+            layer = rt.color;
+          } else {
+            const own = ownBackground(chain[i], rules, inlineStyles, scopes[i]);
+            if (own.kind === "unknown") { bgSkipped = true; break; }
+            if (own.kind === "value") layer = own.value;
+          }
+          if (layer !== null) {
+            bgStack = bgStack === null ? layer : compositeOver(bgStack, layer);
+          }
         }
-        // plainBg unknown with no runtime background: the paint
-        // behind the text cannot be resolved — skip the element.
-        // fg unresolved (plain cascade could not resolve it) or bg
-        // unknown: the plain path skips such elements, and so does
-        // this judgment — skipped, never failed.
-        if (fg !== null && bg !== null && fg.a > 0) {
+        if (bgUnknown) {
+          unjudgeable = true;
+          return;
+        }
+        const bg: Rgba = bgStack === null
+          ? { r: 255, g: 255, b: 255, a: 1 }
+          : compositeOver(bgStack, { r: 255, g: 255, b: 255, a: 1 });
+
+        if (!fgSkipped && !bgSkipped && fg !== null && fg.a > 0) {
           const painted = fg.a >= 1 ? fg : compositeOver(fg, bg);
           const ratio = contrastRatio(painted, bg);
           if (ratio < INVISIBLE_RATIO) {

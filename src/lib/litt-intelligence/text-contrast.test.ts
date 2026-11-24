@@ -434,6 +434,165 @@ describe("findContrastViolations — ACC-03: the Tailwind runtime blind spot", (
   });
 });
 
+describe("findContrastViolations — Greptile (PR #1108): theme names, prefixes, proximity", () => {
+  const THEME_HEAD = (vars: string) => [
+    "<!DOCTYPE html><html><head>",
+    '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+    `  <style type="text/tailwindcss">@theme { ${vars} }</style>`,
+    "</head>",
+  ];
+
+  it("catches white-on-white painted with theme-named utilities (bg-background / text-foreground)", () => {
+    // Greptile finding 3: theme-named colors were not recognized as
+    // color utilities at all, so this page set neither runtime flag
+    // and passed clean on default colors.
+    const page = [
+      ...THEME_HEAD("--color-background: #ffffff; --color-foreground: #ffffff;"),
+      '  <body class="bg-background"><p class="text-foreground">Fresh from the oven every morning.</p></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations.length).toBeGreaterThanOrEqual(1);
+    expect(result.violations[0].background).toBe("#ffffff");
+  });
+
+  it("passes a theme-named page whose @theme colors pair correctly", () => {
+    const page = [
+      ...THEME_HEAD("--color-background: #03050a; --color-foreground: #f5f5f4;"),
+      '  <body class="bg-background"><p class="text-foreground">Fresh from the oven every morning.</p></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations).toEqual([]);
+  });
+
+  it("reports a theme-named color that cannot resolve as UNVERIFIABLE, never clean", () => {
+    const page = [
+      ...THEME_HEAD("--color-background: #ffffff; --color-foreground: oklch(100% 0 0);"),
+      '  <body class="bg-background"><p class="text-foreground">Fresh from the oven every morning.</p></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(false);
+    expect(result.unreasonedReason).toBe("tailwind-runtime");
+    expect(result.violations).toEqual([]);
+  });
+
+  it("judges variant-prefixed utilities as applying (md:text-white on a white page)", () => {
+    // Greptile finding 3: md:bg-white / hover: shapes were not
+    // recognized, so the prefixed text color never reached the
+    // judgment and the page passed on defaults.
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      "</head>",
+      '  <body class="bg-white"><p class="md:text-white">Fresh from the oven every morning.</p></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("judges a prefixed theme-named utility through @theme (lg:bg-background)", () => {
+    const page = [
+      ...THEME_HEAD("--color-background: #ffffff; --color-foreground: #ffffff;"),
+      '  <body class="lg:bg-background"><p class="text-foreground">Fresh from the oven every morning.</p></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("passes when a prefixed utility supplies the readable color (hover:text-white on black)", () => {
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      "</head>",
+      '  <body><section class="bg-black"><p class="hover:text-white">Fresh from the oven every morning.</p></section></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations).toEqual([]);
+  });
+
+  it("catches white text on a child section's own plain white background (proximity)", () => {
+    // Greptile finding 4: the body's runtime bg-black used to
+    // override the nearer plain background wholesale, hiding the
+    // white-on-white inside the section.
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      "  <style>section { background-color: #ffffff; }</style>",
+      "</head>",
+      '  <body class="bg-black text-white"><section><p>Fresh from the oven every morning.</p></section></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations.length).toBeGreaterThanOrEqual(1);
+    expect(result.violations[0].background).toBe("#ffffff");
+  });
+
+  it("catches the same shape when the child's white background is an inline style", () => {
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      "</head>",
+      '  <body class="bg-black text-white"><section style="background-color: #ffffff"><p>Fresh from the oven every morning.</p></section></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations.length).toBeGreaterThanOrEqual(1);
+    expect(result.violations[0].background).toBe("#ffffff");
+  });
+
+  it("lets a nearer plain text color beat an ancestor's runtime text color", () => {
+    // The mirror image of finding 4 for the foreground: the
+    // section's own plain color is nearer than the body's
+    // text-white utility, so the text is dark on white — readable.
+    // The old whole-chain override reported it as a violation.
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      "  <style>section { color: #111111; background-color: #ffffff; }</style>",
+      "</head>",
+      '  <body class="text-white"><section><p>Fresh from the oven every morning.</p></section></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations).toEqual([]);
+  });
+
+  it("judges elements a nearer decider covers even when the root runtime color is unmodelable", () => {
+    // The root @apply carries a palette color (unknown to the
+    // narrow model), but the only text sits in a section whose own
+    // plain colors decide it — proximity means the root's unknown
+    // never gets a say.
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      '  <style type="text/tailwindcss">body { @apply bg-zinc-900 text-white; }</style>',
+      "  <style>section { background-color: #ffffff; color: #111111; }</style>",
+      "</head>",
+      "  <body><section><p>Fresh from the oven every morning.</p></section></body></html>",
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations).toEqual([]);
+  });
+
+  it("still reports UNVERIFIABLE when the unmodelable root color is the one that decides", () => {
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      '  <style type="text/tailwindcss">body { @apply bg-zinc-900 text-white; }</style>',
+      "</head>",
+      "  <body><p>Fresh from the oven every morning.</p></body></html>",
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(false);
+    expect(result.unreasonedReason).toBe("tailwind-runtime");
+  });
+});
+
 describe("findContrastViolations — Greptile round 2 (PR #1107), continued", () => {
   it("finding 2: reads a dark rgb() background written with spaces", () => {
     const page = [

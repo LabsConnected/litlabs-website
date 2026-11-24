@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
-  CONTENT_MUTATION_TOOL_IDS,
+  DEPLOY_TRANSPORT_TOOL_IDS,
   deployOnlyRefusalError,
+  isBlockedInDeployOnlyRun,
   isDeployOnlyInstruction,
 } from "./deploy-intent";
+import { toolRegistry } from "./tool-registry";
 
 /**
  * ACC-03 item 1 — deploy-only classification. The Run 1 failure was
@@ -24,6 +26,9 @@ describe("isDeployOnlyInstruction", () => {
     "Ship it",
     "Go live",
     "Put the site live",
+    "Make it live",
+    "Make the site live",
+    "Make the project live",
     "Please deploy this project to production.",
   ])("classifies %j as deploy-only", (instruction) => {
     expect(isDeployOnlyInstruction(instruction)).toBe(true);
@@ -46,10 +51,89 @@ describe("isDeployOnlyInstruction", () => {
     expect(isDeployOnlyInstruction(instruction)).toBe(false);
   });
 
-  it("keeps project.deploy out of the content-mutation set", () => {
-    expect(CONTENT_MUTATION_TOOL_IDS.has("project.deploy")).toBe(false);
-    for (const id of ["files.write", "apply_patch", "site.compose", "site.patch", "project.insert_asset"]) {
-      expect(CONTENT_MUTATION_TOOL_IDS.has(id)).toBe(true);
+  // Greptile (PR #1108): genuine edit phrasing paired with a deploy
+  // word used to classify deploy-only — the loop then refused the
+  // edit and published the unchanged page. Every phrase below asks
+  // for content work, so NONE of them may be deploy-only.
+  it.each([
+    "Make the header blue and deploy",
+    "Make the background dark and publish it",
+    "Make it darker, then ship it",
+    "Make the text bigger and deploy",
+    "Make my site bolder and redeploy",
+    "Translate the page and publish",
+    "Translate the page to Spanish and deploy it",
+    "Convert the page to Spanish and go live",
+    "Localize the site and deploy",
+    "Reword the headline and publish",
+    "Rewrite the headline and ship it",
+    "Rename the title and publish",
+    "Move the logo to the top and deploy",
+    "Swap the hero photo and deploy",
+    "Resize the hero image and publish",
+    "Hide the banner and redeploy",
+    "Center the title and go live",
+    "Darken the background and publish",
+    "Increase the font size and deploy",
+    "Decrease the spacing and publish",
+    "Set the price to $5 and publish",
+    "Turn the menu into a grid and deploy",
+    "Upload a new logo and deploy",
+    "Insert a photo gallery and publish",
+    "Tweak the spacing and publish",
+    "Adjust the layout and deploy",
+    "Improve the homepage and ship it",
+  ])("does not classify the mixed request %j as deploy-only", (instruction) => {
+    expect(isDeployOnlyInstruction(instruction)).toBe(false);
+  });
+
+  it("blocks every mutation-marked tool except the deploy transport", () => {
+    // The Greptile hole: the old hand-picked set covered writes but
+    // left removal/move tools executable in a deploy.
+    for (const id of [
+      "files.write",
+      "files.patch",
+      "files.delete",
+      "files.rename",
+      "files.mkdir",
+      "apply_patch",
+      "site.compose",
+      "site.patch",
+      "project.insert_asset",
+      "image.generate",
+      "image.stock",
+      "checkpoint.restore",
+      "git.commit",
+      "terminal.execute",
+      "deploy.execute",
+    ]) {
+      expect(isBlockedInDeployOnlyRun({ id, readOnly: false })).toBe(true);
+    }
+    // The transport itself stays available — the run exists to call it.
+    expect(DEPLOY_TRANSPORT_TOOL_IDS.has("project.deploy")).toBe(true);
+    expect(isBlockedInDeployOnlyRun({ id: "project.deploy", readOnly: false })).toBe(false);
+    // Read-only tools are never blocked.
+    for (const id of ["files.read", "files.list", "project.scan", "deploy.verify"]) {
+      expect(isBlockedInDeployOnlyRun({ id, readOnly: true })).toBe(false);
+    }
+  });
+
+  it("enumerates the live registry: no mutating tool slips past the guard", () => {
+    const all = toolRegistry.list();
+    // The enumeration must not be vacuous: the registry really does
+    // carry the removal/move tools this fix exists to block.
+    const ids = new Set(all.map((t) => t.id));
+    for (const id of ["files.delete", "files.rename", "files.patch", "terminal.execute"]) {
+      expect(ids.has(id)).toBe(true);
+    }
+    for (const tool of all) {
+      if (tool.readOnly) {
+        expect(isBlockedInDeployOnlyRun(tool)).toBe(false);
+      } else if (tool.id === "project.deploy") {
+        expect(isBlockedInDeployOnlyRun(tool)).toBe(false);
+      } else {
+        expect(isBlockedInDeployOnlyRun(tool)).toBe(true);
+      }
     }
   });
 

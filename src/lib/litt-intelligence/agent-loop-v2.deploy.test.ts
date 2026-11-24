@@ -49,6 +49,18 @@ vi.mock("./tool-registry", () => ({
         permissionLevel: "workspace-write",
         approvalPolicy: { required: true, autoApproveReadOnly: false, requireExplicitForMutations: true, neverAllow: false },
       },
+      {
+        id: "files.delete",
+        name: "Delete File",
+        description: "Delete a file",
+        inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+        readOnly: false,
+        enabled: true,
+        risk: "high",
+        requiredPermissions: ["files:write"],
+        permissionLevel: "workspace-write",
+        approvalPolicy: { required: true, autoApproveReadOnly: false, requireExplicitForMutations: true, neverAllow: false },
+      },
     ],
     execute,
     validateInputs: () => null,
@@ -327,6 +339,46 @@ describe("I. a provider failure after deployment neither repeats nor loses it", 
     expect(refusal?.summary).toMatch(/deploy-only/i);
     // The run proceeded to the deploy itself, which pauses for its
     // approval exactly as before.
+    expect(result.pendingApproval?.toolId).toBe("project.deploy");
+  });
+
+  // Greptile (PR #1108): the guard's original hand-picked set left
+  // files.delete / files.rename executable in a deploy-only run —
+  // publishing could still REMOVE content. The blocked set is now
+  // derived from the registry's readOnly metadata.
+  it("refuses a file deletion in a deploy-only run and still reaches the deploy approval", async () => {
+    callLLMWithTools
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [
+          {
+            toolCallId: "tc-delete",
+            toolId: "files.delete",
+            inputs: { projectId: "proj_ember", path: "index.html" },
+          },
+        ],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [
+          { toolCallId: "tc-deploy", toolId: "project.deploy", inputs: { projectId: "proj_ember" } },
+        ],
+        finishReason: "tool_calls",
+        model: "test-model",
+      });
+
+    const result = await runAgentLoopV2(
+      "Deploy this project to production",
+      transport(),
+      { ...config },
+    );
+
+    expect(execute).not.toHaveBeenCalled();
+    const refusal = result.toolCalls.find((t) => t.toolId === "files.delete");
+    expect(refusal?.success).toBe(false);
+    expect(refusal?.summary).toMatch(/deploy-only/i);
     expect(result.pendingApproval?.toolId).toBe("project.deploy");
   });
 

@@ -31,7 +31,7 @@ import { buildPatchRecoveryMessage, existingPageOverwriteError, validateApplyPat
 import { computeWorkspaceChange, workspaceChangeFromVolumeListing, workspaceChangeFromDirectReads } from "./workspace-change-producer";
 import { checkRequestedLiteral, requestedLiteralFailureMessage, requestedLiteralRepairPrompt } from "./requested-literal";
 import { checkTextContrast, textContrastFailureMessage, textContrastRepairPrompt, textContrastUnverifiableMessage, textContrastUnverifiableRepairPrompt } from "./text-contrast";
-import { CONTENT_MUTATION_TOOL_IDS, DEPLOY_ONLY_PROMPT_NOTE, deployOnlyRefusalError, isDeployOnlyInstruction } from "./deploy-intent";
+import { DEPLOY_ONLY_PROMPT_NOTE, deployOnlyRefusalError, isBlockedInDeployOnlyRun, isDeployOnlyInstruction } from "./deploy-intent";
 import { settleRunOutcome, type RunFailureContributor } from "./run-settlement";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { recordModelFailure } from "./provider-registry";
@@ -2255,17 +2255,21 @@ async function runAgentLoopV2Inner(
     cfg.systemPrompt += "\n\n" + healthNote;
   }
 
-  // ── ACC-03 item 1: a deploy-only run offers no content tools ──
+  // ── ACC-03 item 1: a deploy-only run offers no mutation tools ──
   // "Deploy this project to production" is transport, not a build.
   // Acceptance Run 1 on 055ae851: the deploy hand-off's prefilled
   // instruction was answered by REGENERATING index.html through five
   // approved writes (menu, prices, hours, theme all changed) before
-  // publishing. When the instruction is deploy-only, the
-  // content-mutation tools are removed from the offer, refused at
-  // execution below if emitted anyway, and the model is told why.
+  // publishing. When the instruction is deploy-only, every tool the
+  // registry marks as mutating (except project.deploy itself) is
+  // removed from the offer, refused at execution below if emitted
+  // anyway, and the model is told why. The blocked set is derived
+  // from registry metadata (isBlockedInDeployOnlyRun), not listed
+  // by hand — the hand-picked list left files.delete / files.rename
+  // executable in a deploy (Greptile, PR #1108).
   const deployOnlyRun = isDeployOnlyInstruction(userMessage);
   const offeredTools = deployOnlyRun
-    ? offerableTools.filter((t) => !CONTENT_MUTATION_TOOL_IDS.has(t.id))
+    ? offerableTools.filter((t) => !isBlockedInDeployOnlyRun(t))
     : offerableTools;
   if (deployOnlyRun) {
     cfg.systemPrompt += "\n\n" + DEPLOY_ONLY_PROMPT_NOTE;
@@ -2791,13 +2795,13 @@ async function runAgentLoopV2Inner(
         continue;
       }
 
-      // ACC-03 item 1: in a deploy-only run a content-mutation call is
+      // ACC-03 item 1: in a deploy-only run a mutation call is
       // refused outright — never checkpointed, never turned into an
       // approval card, never executed. The offer-side filter above
       // means a well-behaved model never emits one; this is the hard
       // guarantee behind it. The refusal is fed back as a tool result
       // so the model proceeds to project.deploy.
-      if (deployOnlyRun && CONTENT_MUTATION_TOOL_IDS.has(toolCall.toolId)) {
+      if (deployOnlyRun && isBlockedInDeployOnlyRun(toolDef)) {
         const result: ToolCallResult = {
           toolCallId: toolCall.toolCallId,
           toolId: toolCall.toolId,
@@ -4396,7 +4400,7 @@ async function resumeAgentLoopV2Inner(
   // act and is untouched; only NEW calls are gated.
   const resumeDeployOnlyRun = isDeployOnlyInstruction(resumeUserMessage);
   const resumeOfferedTools = resumeDeployOnlyRun
-    ? resumeOfferableTools.filter((t) => !CONTENT_MUTATION_TOOL_IDS.has(t.id))
+    ? resumeOfferableTools.filter((t) => !isBlockedInDeployOnlyRun(t))
     : resumeOfferableTools;
   if (resumeDeployOnlyRun) {
     cfg.systemPrompt += "\n\n" + DEPLOY_ONLY_PROMPT_NOTE;
@@ -5088,10 +5092,10 @@ async function resumeAgentLoopV2Inner(
         continue;
       }
 
-      // ACC-03 item 1 (resume half): a NEW content-mutation call in a
+      // ACC-03 item 1 (resume half): a NEW mutation call in a
       // deploy-only run is refused before any checkpoint or approval
       // gate — same guarantee as the initial loop.
-      if (resumeDeployOnlyRun && CONTENT_MUTATION_TOOL_IDS.has(toolCall.toolId)) {
+      if (resumeDeployOnlyRun && isBlockedInDeployOnlyRun(toolDef)) {
         const result: ToolCallResult = {
           toolCallId: toolCall.toolCallId,
           toolId: toolCall.toolId,
