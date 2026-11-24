@@ -102,6 +102,34 @@ describe("extractExpectedLiteral", () => {
   it("extracts a quoted span presented by a read/say pattern with no separator", () => {
     expect(extractExpectedLiteral('Correct the sign so it reads "Open daily"')).toBe("Open daily");
   });
+
+  // Greptile PR #1106, round 2: the separator search found the
+  // " to " INSIDE the quoted replacement ("Welcome to our bakery"),
+  // concluded no quote followed the separator, and returned null —
+  // quoted replacements containing separator words skipped
+  // verification entirely.
+  it("extracts a quoted replacement that itself contains ' to ' (Greptile round 2)", () => {
+    expect(extractExpectedLiteral('Change the heading to "Welcome to our bakery"')).toBe(
+      "Welcome to our bakery",
+    );
+    expect(extractExpectedLiteral("Change the heading to 'Welcome to our bakery'")).toBe(
+      "Welcome to our bakery",
+    );
+  });
+
+  it("extracts a quoted replacement containing both ' to ' and ' with '", () => {
+    expect(
+      extractExpectedLiteral('Change the heading to "Welcome to our bakery with fresh bread daily"'),
+    ).toBe("Welcome to our bakery with fresh bread daily");
+  });
+
+  it("keeps round-1 source rules when the quoted SOURCE contains ' to '", () => {
+    // The quoted span is the text being replaced; with an unquoted
+    // replacement the check stays off (round-1 rule), and with a
+    // quoted replacement the span AFTER the real separator wins.
+    expect(extractExpectedLiteral('Change "back to basics" to plain text')).toBeNull();
+    expect(extractExpectedLiteral('Change "back to basics" to "Fresh start"')).toBe("Fresh start");
+  });
 });
 
 describe("contentContainsLiteral", () => {

@@ -75,6 +75,12 @@ function patchToRow(patch: Partial<DeploymentRecord>): Record<string, unknown> {
   if (patch.errorClass !== undefined) row.error_class = patch.errorClass;
   if (patch.errorMessage !== undefined) row.error_message = patch.errorMessage;
   if (patch.externalSiteId !== undefined) row.external_site_id = patch.externalSiteId;
+  // created_at is the publish-event stamp every "newest publish"
+  // lookup orders by. Its one legitimate rewrite is the republish
+  // restamp: when a deploy REUSES an existing deployment (identical
+  // content), that deployment becomes the project's newest publish
+  // event without a new row being created (Greptile, PR #1106).
+  if (patch.createdAt !== undefined) row.created_at = patch.createdAt;
   return row;
 }
 

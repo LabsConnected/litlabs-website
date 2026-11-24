@@ -492,6 +492,79 @@ describe("findLatestReadyDeploymentForProjectPublic — stable public address (F
   });
 });
 
+describe("republish after unpublish — full sequence (Greptile PR #1106, round 2)", () => {
+  // A faithful miniature of the deployments table: unlike the shared
+  // publishHistory handler above, this one applies the captured eq
+  // filters and the newest-first ordering itself (the mock chain
+  // records order() but does not apply it), and applies update
+  // payloads to the stored rows — so the whole publish / unpublish /
+  // republish sequence runs against the real store code.
+  function tableHandler(rows: Array<Record<string, unknown>>) {
+    return (table: string, call: QueryCall) => {
+      if (table !== DEPLOYMENTS) return { data: null, error: null };
+      if (call.method === "update") {
+        const id = call.filters.find(([c]) => c === "id")?.[1];
+        const row = rows.find((r) => r.id === id);
+        if (!row) return { data: null, error: { message: "row not found" } };
+        Object.assign(row, call.payload as Record<string, unknown>);
+        return { data: row, error: null };
+      }
+      const matched = rows.filter((row) =>
+        call.filters.every(([c, v]) => row[c] === v),
+      );
+      matched.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      return { data: matched[0] ?? null, error: null };
+    };
+  }
+
+  const rowA = {
+    ...readyRow,
+    id: "dep-A",
+    content_hash: "sha-A",
+    created_at: "2026-11-23T10:00:00.000Z",
+    updated_at: "2026-11-23T10:00:00.000Z",
+  };
+  const rowB = {
+    ...readyRow,
+    id: "dep-B",
+    content_hash: "sha-B",
+    public_url: "https://www.litlabs.net/sites/dep-B",
+    created_at: "2026-11-23T11:00:00.000Z",
+    updated_at: "2026-11-23T11:00:00.000Z",
+  };
+
+  it("A → B → unpublish B → republish A: the stable address serves A again", async () => {
+    const rows = [{ ...rowA }, { ...rowB }];
+    handler = tableHandler(rows);
+
+    // B is the newest publish and it is live.
+    expect((await findLatestReadyDeploymentForProjectPublic("proj-A"))?.id).toBe("dep-B");
+
+    // Unpublish B: the newest word is "offline" — A must not resurface.
+    await supabaseDeploymentStore.update("dep-B", { status: "unpublished" });
+    expect(await findLatestReadyDeploymentForProjectPublic("proj-A")).toBeNull();
+
+    // Republishing A's exact contents reuses A's row (dedupe); the
+    // deploy records the republish by restamping A as the newest
+    // publish. The stable address serves A again.
+    await supabaseDeploymentStore.update("dep-A", {
+      createdAt: "2026-11-23T12:00:00.000Z",
+    });
+    const record = await findLatestReadyDeploymentForProjectPublic("proj-A");
+    expect(record?.id).toBe("dep-A");
+    expect(record?.status).toBe("ready");
+  });
+
+  it("update maps a createdAt patch onto the created_at column", async () => {
+    handler = () => ({ data: readyRow, error: null });
+    await supabaseDeploymentStore.update("dep-1", {
+      createdAt: "2026-11-23T12:00:00.000Z",
+    });
+    const call = calls.find((c) => c.table === DEPLOYMENTS && c.method === "update");
+    expect(call?.payload).toMatchObject({ created_at: "2026-11-23T12:00:00.000Z" });
+  });
+});
+
 describe("findLatestReadyDeploymentForProject + readDeploymentSnapshotFiles (workspace restore reads)", () => {
   it("finds the latest deployment only when it filters on status=ready", async () => {
     handler = (table, call) => {

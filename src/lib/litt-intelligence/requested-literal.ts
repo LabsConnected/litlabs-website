@@ -118,10 +118,15 @@ const STYLE_SUBJECT =
  *
  *   (a) A quoted span of ≥3 chars in REPLACEMENT position: after the
  *       last " to " or " with " separator ("change 'old' to 'new'",
- *       "replace 'old' with 'new'"). A quoted span BEFORE the
- *       separator is the text being replaced and must NEVER become
- *       the expected literal; when every quoted span sits before the
- *       separator the replacement is unquoted and ambiguous → null.
+ *       "replace 'old' with 'new'"). Separator words INSIDE a quoted
+ *       span are part of that span's text, never separators — in
+ *       'Change the heading to "Welcome to our bakery"' the real
+ *       separator precedes the quote, and the " to " inside the
+ *       replacement must not hide it (Greptile, PR #1106 round 2).
+ *       A quoted span BEFORE the separator is the text being
+ *       replaced and must NEVER become the expected literal; when
+ *       every quoted span sits before the separator the replacement
+ *       is unquoted and ambiguous → null.
  *       With no separator at all, a quoted span counts only when a
  *       content-introducing verb (set/read/say/be) presents it as the
  *       new content. Quoted spans only count in edit-style
@@ -137,18 +142,37 @@ export function extractExpectedLiteral(instruction: string): string | null {
   const text = instruction.trim();
   if (!text || !EDIT_VERB.test(text)) return null;
 
-  const quoted: Array<{ value: string; index: number }> = [];
+  const quoted: Array<{ value: string; index: number; end: number }> = [];
   const quoteRe = /"([^"]{3,})"|'([^']{3,})'/g;
   let match: RegExpExecArray | null;
   while ((match = quoteRe.exec(text)) !== null) {
-    quoted.push({ value: match[1] ?? match[2], index: match.index });
+    quoted.push({
+      value: match[1] ?? match[2],
+      index: match.index,
+      end: match.index + match[0].length,
+    });
   }
 
   const lower = text.toLowerCase();
   // The replacement separator: whatever is named AFTER the last
   // " to " / " with " is the replacement; quoted text named before
-  // it is the source being replaced.
-  const sepIndex = Math.max(lower.lastIndexOf(" to "), lower.lastIndexOf(" with "));
+  // it is the source being replaced. Occurrences that fall inside a
+  // quoted span are that span's own words, not separators — a
+  // separator cannot straddle a quote character, so testing the
+  // occurrence's start position is exact.
+  const insideQuotedSpan = (index: number) =>
+    quoted.some((q) => index >= q.index && index < q.end);
+  const lastSeparatorOutsideQuotes = (needle: string): number => {
+    let idx = lower.lastIndexOf(needle);
+    while (idx >= 0 && insideQuotedSpan(idx)) {
+      idx = lower.lastIndexOf(needle, idx - 1);
+    }
+    return idx;
+  };
+  const sepIndex = Math.max(
+    lastSeparatorOutsideQuotes(" to "),
+    lastSeparatorOutsideQuotes(" with "),
+  );
 
   if (quoted.length > 0) {
     if (sepIndex >= 0) {
