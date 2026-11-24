@@ -601,6 +601,90 @@ describe("findContrastViolations — Greptile (PR #1108): theme names, prefixes,
     expect(result.violations[0].background).toBe("#000000");
   });
 
+  it("passes text whose structural color genuinely applies (first:text-white, first child)", () => {
+    // Greptile (PR #1108, round 3): structural conditions can
+    // already hold when the page loads. This paragraph IS the
+    // first child, so first:text-white paints it in the default
+    // state — the page is genuinely readable. The state-variant
+    // round dropped every non-environment variant, structural
+    // included, and reported black-on-black: a false failure.
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      "</head>",
+      '  <body class="bg-black"><p class="first:text-white">Hello</p></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations).toEqual([]);
+  });
+
+  it("does not count a structural color that does not hold (first:text-white, not first child)", () => {
+    // The mirror: a preceding sibling means :first-child does
+    // not match this paragraph, so the white never paints and
+    // the text is judged on its default colors — black on black.
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      "</head>",
+      '  <body class="bg-black"><span></span><p class="first:text-white">Hello</p></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations.length).toBeGreaterThanOrEqual(1);
+    expect(result.violations[0].background).toBe("#000000");
+  });
+
+  it("evaluates first-of-type against same-tag siblings (holds past another tag)", () => {
+    // The paragraph is not the first child — a span precedes it
+    // — but it IS the first <p>, so first-of-type:text-white
+    // paints in the default state and the text is readable.
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      "</head>",
+      '  <body class="bg-black"><span></span><p class="first-of-type:text-white">Hello</p></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations).toEqual([]);
+  });
+
+  it("evaluates first-of-type against same-tag siblings (does not hold for the second)", () => {
+    // The second <p> is not first of its type, so its white
+    // never paints; the first <p> carries its own text-white
+    // and stays readable. Exactly one violation: the second.
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      "</head>",
+      '  <body class="bg-black"><p class="text-white">First paragraph stays readable.</p><p class="first-of-type:text-white">Second paragraph text.</p></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations.length).toBe(1);
+    expect(result.violations[0].text).toContain("Second paragraph");
+  });
+
+  it("reports an undecidable conditional color as UNVERIFIABLE (odd:text-white)", () => {
+    // odd: is a condition this narrow model does not decide
+    // (no sibling-position arithmetic beyond the named
+    // structural forms). The honest verdict is UNVERIFIABLE —
+    // never the silent absence the state-variant round gave it
+    // (a black-on-black failure) and never a silent presence
+    // (a clean pass on a color that may not paint).
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      "</head>",
+      '  <body class="bg-black"><p class="odd:text-white">Hello</p></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(false);
+    expect(result.unreasonedReason).toBe("tailwind-runtime");
+    expect(result.violations).toEqual([]);
+  });
+
   it("catches white text on a child section's own plain white background (proximity)", () => {
     // Greptile finding 4: the body's runtime bg-black used to
     // override the nearer plain background wholesale, hiding the

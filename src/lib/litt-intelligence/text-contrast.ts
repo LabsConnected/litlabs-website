@@ -1238,7 +1238,7 @@ type UtilityColor =
  *  so its chain is runtime-affected and the runtime judge decides
  *  it (Greptile, PR #1108). Whether a prefixed token may also
  *  WRITE the colors the default state is judged on is a separate
- *  question — see isStateConditionalToken. Bracketed variant
+ *  question — see conditionalDisposition. Bracketed variant
  *  forms (data-[state=open]:, supports-[…]:) are stripped through
  *  their closing bracket. */
 function stripVariantPrefixes(token: string): string {
@@ -1300,21 +1300,121 @@ function isEnvironmentVariant(prefix: string): boolean {
   );
 }
 
-/** True when a token's color is conditional on anything beyond
- *  the environment: an interaction or element state (hover,
- *  focus, active, visited, group-*, peer-*, disabled, checked,
- *  …), a structural position (first, odd, …), or an attribute
- *  (data-[…]:, aria-*:). A state-conditional color paints
- *  nothing in the state a visitor first sees the page in, so it
- *  can never be the color the default state is judged on
- *  (Greptile, PR #1108): hover:text-white on a black page leaves
- *  the unhovered text at its inherited default color — black on
- *  black — however white the hover state would be. One
- *  non-environment prefix anywhere in the stack (md:hover:…)
- *  makes the whole token state-conditional. */
-function isStateConditionalToken(token: string): boolean {
+/** Interaction variants: conditions on a transient interaction
+ *  or form state (hover, focus, active, visited, checked,
+ *  disabled, group-*, peer-*, …). None of them hold in the state
+ *  a visitor first sees the page in, so a color behind one
+ *  paints nothing in the default state and can never be the
+ *  color the default state is judged on (Greptile, PR #1108):
+ *  hover:text-white on a black page leaves the unhovered text at
+ *  its inherited default color — black on black — however white
+ *  the hover state would be. group- and peer- conditions live on
+ *  another element's interaction state, so they are interaction
+ *  conditions too, not this element's. */
+function isInteractionVariant(prefix: string): boolean {
+  const p = prefix.toLowerCase();
+  return (
+    p === "hover" || p === "focus" || p === "focus-visible" || p === "focus-within" ||
+    p === "active" || p === "visited" || p === "target" ||
+    p === "checked" || p === "disabled" || p === "enabled" || p === "indeterminate" ||
+    p === "read-only" || p === "required" ||
+    p === "invalid" || p === "valid" || p === "user-valid" || p === "user-invalid" ||
+    p === "placeholder-shown" || p === "autofilled" ||
+    p === "in-range" || p === "out-of-range" ||
+    p === "default" || p === "empty" || p === "open" || p === "inert" ||
+    p.startsWith("group-") || p.startsWith("peer-")
+  );
+}
+
+/** The structural variants this narrow model can DECIDE from
+ *  the parsed document: conditions on the element's own position
+ *  among its siblings. Unlike an interaction state, a structural
+ *  condition can already hold when the page loads — a paragraph
+ *  that IS the first child is painted by first:text-white in the
+ *  default state, and dropping that color reported a genuinely
+ *  readable page as black-on-black (Greptile, PR #1108). */
+const STRUCTURAL_VARIANTS = new Set([
+  "first",
+  "last",
+  "only",
+  "first-of-type",
+  "last-of-type",
+  "only-of-type",
+]);
+
+/** The element children of el's parent, el included; an element
+ *  with no reachable parent stands alone, trivially first, last
+ *  and only. Text and comment nodes are not siblings for
+ *  :first-child and kin — only elements count. */
+function elementSiblings(el: P5Node): P5Node[] {
+  const parent = el.parentNode;
+  if (!parent || !parent.childNodes) return [el];
+  const els = parent.childNodes.filter((c) => c.tagName);
+  return els.length > 0 ? els : [el];
+}
+
+/** Whether a decidable structural variant holds for THIS
+ *  element, from its actual position among its siblings
+ *  (of-type = among siblings with the same tag name). */
+function structuralVariantHolds(prefix: string, el: P5Node): boolean {
+  const siblings = elementSiblings(el);
+  switch (prefix.toLowerCase()) {
+    case "first":
+      return siblings[0] === el;
+    case "last":
+      return siblings[siblings.length - 1] === el;
+    case "only":
+      return siblings.length === 1;
+    case "first-of-type": {
+      const tag = (el.tagName ?? "").toLowerCase();
+      return siblings.find((s) => (s.tagName ?? "").toLowerCase() === tag) === el;
+    }
+    case "last-of-type": {
+      const tag = (el.tagName ?? "").toLowerCase();
+      const ofType = siblings.filter((s) => (s.tagName ?? "").toLowerCase() === tag);
+      return ofType[ofType.length - 1] === el;
+    }
+    case "only-of-type": {
+      const tag = (el.tagName ?? "").toLowerCase();
+      return siblings.filter((s) => (s.tagName ?? "").toLowerCase() === tag).length === 1;
+    }
+    default:
+      return false;
+  }
+}
+
+/** How a token's color stands in the DEFAULT state — the only
+ *  state this check certifies:
+ *
+ *  - "applies": unconditional, environment-only (the previous
+ *    rounds' rule: for a whole class of visitors the condition
+ *    holds full-time), or behind decidable structural variants
+ *    that all HOLD for the element being folded.
+ *  - "absent": behind an interaction variant anywhere in the
+ *    stack (md:hover:… paints nothing unhovered at any
+ *    viewport), or behind decidable structural variants that do
+ *    not hold for this element — the color genuinely does not
+ *    paint it, so it contributes nothing.
+ *  - "unknown": behind any other condition this narrow model
+ *    does not decide — odd/even/nth-*, data-[…]:, aria-*:, and
+ *    structural variants folded without an element to judge
+ *    them against (@apply tokens in a rule body apply to
+ *    elements whose positions the fold cannot see). Unknown is
+ *    honest: the writer feeds the module's unverifiable path
+ *    rather than being silently absent or silently present. */
+type ConditionalDisposition = "applies" | "absent" | "unknown";
+
+function conditionalDisposition(token: string, el?: P5Node): ConditionalDisposition {
   const prefixes = variantPrefixesOf(token);
-  return prefixes.length > 0 && !prefixes.every(isEnvironmentVariant);
+  if (prefixes.length === 0) return "applies";
+  if (prefixes.every(isEnvironmentVariant)) return "applies";
+  if (prefixes.some(isInteractionVariant)) return "absent";
+  const conditional = prefixes.filter((p) => !isEnvironmentVariant(p));
+  if (conditional.every((p) => STRUCTURAL_VARIANTS.has(p.toLowerCase()))) {
+    if (!el) return "unknown";
+    return conditional.every((p) => structuralVariantHolds(p, el)) ? "applies" : "absent";
+  }
+  return "unknown";
 }
 
 /** True when a class token has the shape of a COLOR utility (as
@@ -1441,15 +1541,27 @@ function foldUtilityToken(
   w: TailwindColorWriters,
   token: string,
   themeVars: Map<string, string>,
+  el?: P5Node,
 ): void {
   if (!isColorUtilityToken(token, themeVars)) return;
-  // State-conditional colors (hover:, focus:, group-*, …) never
-  // write a default-state writer — see isStateConditionalToken.
-  // The element is then judged on whatever its default state
-  // actually declares (its own unprefixed utilities, class
-  // writers, plain CSS, inheritance, the initial colors), which
-  // is the only state this check certifies.
-  if (isStateConditionalToken(token)) return;
+  // Conditional colors are disposed of before they can write —
+  // see conditionalDisposition. "absent" colors (interaction
+  // states, structural conditions that do not hold for this
+  // element) never write a default-state writer: the element is
+  // judged on whatever its default state actually declares (its
+  // own unprefixed utilities, class writers, plain CSS,
+  // inheritance, the initial colors). "unknown" colors
+  // (conditions the narrow model does not decide) write an
+  // unknown writer instead: reached by the walk, the document is
+  // unverifiable — never silently clean, never silently failed.
+  const disposition = conditionalDisposition(token, el);
+  if (disposition === "absent") return;
+  if (disposition === "unknown") {
+    const unknown: ColorWriter = { kind: "unknown" };
+    if (stripVariantPrefixes(token).startsWith("bg-")) w.bg = unknown;
+    else w.color = unknown;
+    return;
+  }
   const c = classifyUtilityColor(token, themeVars);
   if (c.kind === "dropped") return;
   const next: ColorWriter =
@@ -1691,7 +1803,7 @@ function judgeTailwindRuntimeColors(
               if (cw.bg.kind !== "none") w.bg = cw.bg;
             }
           }
-          for (const tok of classListOf(node)) foldUtilityToken(w, tok, model.themeVars);
+          for (const tok of classListOf(node)) foldUtilityToken(w, tok, model.themeVars, node);
           return w;
         });
 
