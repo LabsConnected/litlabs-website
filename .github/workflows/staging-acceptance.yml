@@ -80,7 +80,7 @@ jobs:
           terminal="$(curl -fsS --max-time 30 "$STAGING_TERMINAL_URL/health")"
           echo "$terminal" | jq -e --arg commit "${EXPECTED_SHA:0:8}" \
             '.status == "ok" and .readiness == "ready" and .commit == $commit and
-             (.terminal.execution == "disabled" or .terminal.sandbox.state == "verified")' \
+             .terminal.sandbox.execution == "enabled" and .terminal.sandbox.state == "verified"' \
             > /dev/null || { echo "::error::staging terminal SHA, readiness, or isolation check failed"; exit 1; }
 
       - name: Clean up tagged disposable acceptance users
@@ -104,6 +104,7 @@ jobs:
           passes=0
           for i in $(seq 1 "$ACCEPTANCE_RUNS"); do
             echo "=== acceptance iteration $i/$ACCEPTANCE_RUNS ==="
+            echo "CONSECUTIVE_PASSES=$passes" >> "$GITHUB_ENV"
             # Recheck both services before every paid journey: a merge may
             # move staging web while this four-hour workflow is running.
             detail="$(curl -fsS --max-time 20 "$STAGING_URL/api/health" | jq -r '.checks.build.detail')"
@@ -112,12 +113,24 @@ jobs:
             terminal="$(curl -fsS --max-time 20 "$STAGING_TERMINAL_URL/health")"
             echo "$terminal" | jq -e --arg commit "${EXPECTED_SHA:0:8}" \
               '.status == "ok" and .readiness == "ready" and .commit == $commit and
-               (.terminal.execution == "disabled" or .terminal.sandbox.state == "verified")' \
+               .terminal.sandbox.execution == "enabled" and .terminal.sandbox.state == "verified"' \
               > /dev/null || { echo "::error::terminal drift or isolation failure at iteration $i"; echo "CONSECUTIVE_PASSES=$passes" >> "$GITHUB_ENV"; exit 1; }
             user_id="$(node scripts/final-acceptance/create-fresh-user.mjs)"
             echo "fresh user: $user_id"
+            journey_passed=0
             if LITT_ACCEPTANCE_USER_ID="$user_id" \
                node scripts/final-acceptance/prod-mobile-golden.mjs; then
+              journey_passed=1
+            fi
+            detail="$(curl -fsS --max-time 20 "$STAGING_URL/api/health" | jq -r '.checks.build.detail')"
+            [ "$detail" = "$EXPECTED_SHA" ] \
+              || { echo "::error::web SHA drift after iteration $i: serving $detail, expected $EXPECTED_SHA"; echo "CONSECUTIVE_PASSES=$passes" >> "$GITHUB_ENV"; exit 1; }
+            terminal="$(curl -fsS --max-time 20 "$STAGING_TERMINAL_URL/health")"
+            echo "$terminal" | jq -e --arg commit "${EXPECTED_SHA:0:8}" \
+              '.status == "ok" and .readiness == "ready" and .commit == $commit and
+               .terminal.sandbox.execution == "enabled" and .terminal.sandbox.state == "verified"' \
+              > /dev/null || { echo "::error::terminal drift or isolation failure after iteration $i"; echo "CONSECUTIVE_PASSES=$passes" >> "$GITHUB_ENV"; exit 1; }
+            if [ "$journey_passed" -eq 1 ]; then
               passes=$((passes + 1))
               echo "iteration $i: PASS (consecutive=$passes)"
             else
