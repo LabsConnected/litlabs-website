@@ -30,7 +30,8 @@ import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { buildPatchRecoveryMessage, existingPageOverwriteError, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange, workspaceChangeFromVolumeListing, workspaceChangeFromDirectReads } from "./workspace-change-producer";
 import { checkRequestedLiteral, requestedLiteralFailureMessage, requestedLiteralRepairPrompt } from "./requested-literal";
-import { checkTextContrast, textContrastFailureMessage, textContrastRepairPrompt } from "./text-contrast";
+import { checkTextContrast, textContrastFailureMessage, textContrastRepairPrompt, textContrastUnverifiableMessage, textContrastUnverifiableRepairPrompt } from "./text-contrast";
+import { CONTENT_MUTATION_TOOL_IDS, DEPLOY_ONLY_PROMPT_NOTE, deployOnlyRefusalError, isDeployOnlyInstruction } from "./deploy-intent";
 import { settleRunOutcome, type RunFailureContributor } from "./run-settlement";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { recordModelFailure } from "./provider-registry";
@@ -2254,10 +2255,26 @@ async function runAgentLoopV2Inner(
     cfg.systemPrompt += "\n\n" + healthNote;
   }
 
+  // ── ACC-03 item 1: a deploy-only run offers no content tools ──
+  // "Deploy this project to production" is transport, not a build.
+  // Acceptance Run 1 on 055ae851: the deploy hand-off's prefilled
+  // instruction was answered by REGENERATING index.html through five
+  // approved writes (menu, prices, hours, theme all changed) before
+  // publishing. When the instruction is deploy-only, the
+  // content-mutation tools are removed from the offer, refused at
+  // execution below if emitted anyway, and the model is told why.
+  const deployOnlyRun = isDeployOnlyInstruction(userMessage);
+  const offeredTools = deployOnlyRun
+    ? offerableTools.filter((t) => !CONTENT_MUTATION_TOOL_IDS.has(t.id))
+    : offerableTools;
+  if (deployOnlyRun) {
+    cfg.systemPrompt += "\n\n" + DEPLOY_ONLY_PROMPT_NOTE;
+  }
+
   // ── Observability: record what the model was offered (Part J) ──
   recordToolsOffered(
     runObs,
-    offerableTools.map((t) => t.id),
+    offeredTools.map((t) => t.id),
     [...toolHealthMap.values()],
   );
   if (degradedToolIds.length > 0) {
@@ -2270,7 +2287,7 @@ async function runAgentLoopV2Inner(
     }
   }
 
-  const toolDefs = offerableTools.map(toToolDefinition);
+  const toolDefs = offeredTools.map(toToolDefinition);
 
   // Conversation messages for the LLM. A reprompt continues the SAME
   // conversation: seeded messages (e.g. a patch-recovery message with the
@@ -2770,6 +2787,37 @@ async function runAgentLoopV2Inner(
           type: "approval_required",
           toolId: toolCall.toolId,
           reason: permResult.reason ?? "Permission denied",
+        });
+        continue;
+      }
+
+      // ACC-03 item 1: in a deploy-only run a content-mutation call is
+      // refused outright — never checkpointed, never turned into an
+      // approval card, never executed. The offer-side filter above
+      // means a well-behaved model never emits one; this is the hard
+      // guarantee behind it. The refusal is fed back as a tool result
+      // so the model proceeds to project.deploy.
+      if (deployOnlyRun && CONTENT_MUTATION_TOOL_IDS.has(toolCall.toolId)) {
+        const result: ToolCallResult = {
+          toolCallId: toolCall.toolCallId,
+          toolId: toolCall.toolId,
+          result: null,
+          success: false,
+          error: deployOnlyRefusalError(toolCall.toolId),
+        };
+        llmMessages.push(buildToolResultMessage(result));
+        toolCallLog.push({
+          toolId: toolCall.toolId,
+          success: false,
+          summary: "Refused — a deploy-only run does not modify content",
+          mutating: false,
+        });
+        localProgress.emit({
+          type: "tool_result",
+          toolId: toolCall.toolId,
+          success: false,
+          summary: "Refused — a deploy-only run does not modify content",
+          durationMs: 0,
         });
         continue;
       }
@@ -3331,6 +3379,19 @@ async function runAgentLoopV2Inner(
           type: "status",
           summary: "Some text in the page would be invisible — asking for a fix before this can be called done.",
         });
+      } else if (contrastCheck.applies && contrastCheck.unverifiableFiles.length > 0) {
+        // ACC-03: colors decided by the Tailwind runtime beyond the
+        // checker's judgment are UNVERIFIABLE, not clean — same one
+        // repair chance, asking for plain-CSS colors.
+        contrastRepairFeedbackGiven = true;
+        llmMessages.push({
+          role: "user",
+          content: textContrastUnverifiableRepairPrompt(contrastCheck.unverifiableFiles),
+        });
+        localProgress.emit({
+          type: "status",
+          summary: "Some page colors couldn't be verified — asking for plain-CSS colors before this can be called done.",
+        });
       }
     }
 
@@ -3402,7 +3463,10 @@ async function runAgentLoopV2Inner(
   // the document's own CSS), the page is not readable and the run has
   // NOT produced a finished site — settle it honestly as failed
   // instead of reporting an invisible page as a successful build.
-  // Pages the checker cannot reason about are untouched by this.
+  // Pages the checker cannot reason about for non-runtime reasons
+  // are untouched by this; a page whose colors are runtime-decided
+  // beyond judgment (ACC-03) settles the same honest way — an
+  // unverifiable page is not a clean page.
   if (!cancelled && !modelFailed && !failedHonestly) {
     const contrastCheck = await checkTextContrast({
       candidatePaths: successfulMutationPaths(toolCallLog),
@@ -3410,6 +3474,9 @@ async function runAgentLoopV2Inner(
     });
     if (contrastCheck.applies && contrastCheck.violations.length > 0) {
       failedHonestly = textContrastFailureMessage(contrastCheck.violations);
+      finalText = failedHonestly;
+    } else if (contrastCheck.applies && contrastCheck.unverifiableFiles.length > 0) {
+      failedHonestly = textContrastUnverifiableMessage(contrastCheck.unverifiableFiles);
       finalText = failedHonestly;
     }
   }
@@ -3622,12 +3689,25 @@ function readDeploymentOutcome(toolId: string, result: unknown): CompletedDeploy
   const payload = result as {
     success?: boolean;
     liveUrl?: unknown;
-    deployment?: { deploymentId?: unknown; publicUrl?: unknown; status?: unknown };
+    stablePublicUrl?: unknown;
+    deployment?: { deploymentId?: unknown; publicUrl?: unknown; stablePublicUrl?: unknown; status?: unknown };
   };
   if (payload.success !== true) return null;
-  const url = typeof payload.liveUrl === "string" && payload.liveUrl
-    ? payload.liveUrl
-    : typeof payload.deployment?.publicUrl === "string" ? payload.deployment.publicUrl : null;
+  // ACC-03 item 1: the URL a deploy reports is the project's STABLE
+  // address (/sites/project/<projectId>/, F8a) — the one that keeps
+  // serving the latest publish — not the per-deployment snapshot URL.
+  // Run 1 on 055ae851: the chat deploy reported a fresh /sites/<uuid>/
+  // URL while the stable address existed. Fall back to the
+  // per-deployment URLs only when no stable URL was produced.
+  const stableUrl = typeof payload.stablePublicUrl === "string" && payload.stablePublicUrl
+    ? payload.stablePublicUrl
+    : typeof payload.deployment?.stablePublicUrl === "string" && payload.deployment.stablePublicUrl
+      ? payload.deployment.stablePublicUrl
+      : null;
+  const url = stableUrl
+    ?? (typeof payload.liveUrl === "string" && payload.liveUrl
+      ? payload.liveUrl
+      : typeof payload.deployment?.publicUrl === "string" ? payload.deployment.publicUrl : null);
   if (!url) return null;
   return {
     deploymentId: typeof payload.deployment?.deploymentId === "string" ? payload.deployment.deploymentId : null,
@@ -4308,7 +4388,21 @@ async function resumeAgentLoopV2Inner(
     cfg.systemPrompt += "\n\n" + resumeHealthNote;
   }
 
-  const toolDefs = resumeOfferableTools.map(toToolDefinition);
+  // ACC-03 item 1 (resume half): a deploy-only run stays deploy-only
+  // across its approval pause — the deploy approval is the pause this
+  // run exists for, and the continuation must not gain the power to
+  // rewrite content the initial half never had. The run's own
+  // approved tool (already executed above) is the user's explicit
+  // act and is untouched; only NEW calls are gated.
+  const resumeDeployOnlyRun = isDeployOnlyInstruction(resumeUserMessage);
+  const resumeOfferedTools = resumeDeployOnlyRun
+    ? resumeOfferableTools.filter((t) => !CONTENT_MUTATION_TOOL_IDS.has(t.id))
+    : resumeOfferableTools;
+  if (resumeDeployOnlyRun) {
+    cfg.systemPrompt += "\n\n" + DEPLOY_ONLY_PROMPT_NOTE;
+  }
+
+  const toolDefs = resumeOfferedTools.map(toToolDefinition);
 
   // Resume from paused messages — these are server-verified, not client-supplied
   const llmMessages: LLMMessage[] = [
@@ -4719,6 +4813,18 @@ async function resumeAgentLoopV2Inner(
         type: "status",
         summary: "Some text in the page would be invisible — asking for a fix before this can be called done.",
       });
+    } else if (contrastCheck.applies && contrastCheck.unverifiableFiles.length > 0) {
+      // ACC-03: unverifiable runtime-decided colors get the same
+      // up-front repair offer — never a silent pass.
+      contrastRepairFeedbackGiven = true;
+      llmMessages.push({
+        role: "user",
+        content: textContrastUnverifiableRepairPrompt(contrastCheck.unverifiableFiles),
+      });
+      localProgress.emit({
+        type: "status",
+        summary: "Some page colors couldn't be verified — asking for plain-CSS colors before this can be called done.",
+      });
     }
   }
 
@@ -4982,6 +5088,34 @@ async function resumeAgentLoopV2Inner(
         continue;
       }
 
+      // ACC-03 item 1 (resume half): a NEW content-mutation call in a
+      // deploy-only run is refused before any checkpoint or approval
+      // gate — same guarantee as the initial loop.
+      if (resumeDeployOnlyRun && CONTENT_MUTATION_TOOL_IDS.has(toolCall.toolId)) {
+        const result: ToolCallResult = {
+          toolCallId: toolCall.toolCallId,
+          toolId: toolCall.toolId,
+          result: null,
+          success: false,
+          error: deployOnlyRefusalError(toolCall.toolId),
+        };
+        llmMessages.push(buildToolResultMessage(result));
+        toolCallLog.push({
+          toolId: toolCall.toolId,
+          success: false,
+          summary: "Refused — a deploy-only run does not modify content",
+          mutating: false,
+        });
+        localProgress.emit({
+          type: "tool_result",
+          toolId: toolCall.toolId,
+          success: false,
+          summary: "Refused — a deploy-only run does not modify content",
+          durationMs: 0,
+        });
+        continue;
+      }
+
       // Create the pre-mutation checkpoint BEFORE the approval gate, ahead of
       // EVERY mutating tool call (same per-mutation guarantee as the initial
       // loop): a nested approval pause carries the latest checkpoint so the
@@ -5232,6 +5366,18 @@ async function resumeAgentLoopV2Inner(
           type: "status",
           summary: "Some text in the page would be invisible — asking for a fix before this can be called done.",
         });
+      } else if (contrastCheck.applies && contrastCheck.unverifiableFiles.length > 0) {
+        // ACC-03: unverifiable runtime-decided colors — same one
+        // repair chance as a proven violation.
+        contrastRepairFeedbackGiven = true;
+        llmMessages.push({
+          role: "user",
+          content: textContrastUnverifiableRepairPrompt(contrastCheck.unverifiableFiles),
+        });
+        localProgress.emit({
+          type: "status",
+          summary: "Some page colors couldn't be verified — asking for plain-CSS colors before this can be called done.",
+        });
       }
     }
     if (!batchHasMutation) mutationBatchPending = false;
@@ -5282,7 +5428,9 @@ async function resumeAgentLoopV2Inner(
   // ACC-02 Defect A — the final word, identical to the initial loop:
   // a page whose text is invisible under its own declared colors is
   // not a finished page, so the run settles honestly as failed —
-  // never report an invisible page as success.
+  // never report an invisible page as success. ACC-03: a page whose
+  // colors are runtime-decided beyond judgment settles the same
+  // honest way — unverifiable is not clean.
   if (!cancelled && !modelFailed && !failedHonestly) {
     const contrastCheck = await checkTextContrast({
       candidatePaths: successfulMutationPaths(toolCallLog),
@@ -5290,6 +5438,9 @@ async function resumeAgentLoopV2Inner(
     });
     if (contrastCheck.applies && contrastCheck.violations.length > 0) {
       failedHonestly = textContrastFailureMessage(contrastCheck.violations);
+      finalText = failedHonestly;
+    } else if (contrastCheck.applies && contrastCheck.unverifiableFiles.length > 0) {
+      failedHonestly = textContrastUnverifiableMessage(contrastCheck.unverifiableFiles);
       finalText = failedHonestly;
     }
   }

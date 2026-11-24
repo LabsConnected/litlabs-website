@@ -254,10 +254,15 @@ describe("findContrastViolations — pages it cannot reason about", () => {
 });
 
 describe("findContrastViolations — Greptile round 2 (PR #1107)", () => {
-  it("finding 1: does not judge a page using the Tailwind browser CDN", () => {
-    // Colors live in utility classes the Tailwind Play runtime turns
-    // into CSS in the browser; this checker never sees that CSS, so
-    // the white text must not be judged against the default canvas.
+  // ACC-03 supersedes the mechanism these three tests originally
+  // pinned. ACC-02's rule was "never judge a Tailwind-runtime page"
+  // (reasoned: false) — which is precisely the blind spot that let
+  // Run 1 on 055ae851 publish a blank white page as a clean build.
+  // The property that matters is unchanged — these pages must NOT be
+  // falsely failed — but it is now earned by judging the runtime
+  // colors soundly (bg-black really is behind the light text) rather
+  // than by refusing to look.
+  it("finding 1: judges a Tailwind Play CDN page on its compiled colors, and passes it", () => {
     const page = [
       "<!DOCTYPE html><html><head>",
       '  <script src="https://cdn.tailwindcss.com"></script>',
@@ -266,11 +271,11 @@ describe("findContrastViolations — Greptile round 2 (PR #1107)", () => {
       '  <body class="bg-black"><p>Fresh from the oven every morning.</p></body></html>',
     ].join("\n");
     const { violations, reasoned } = findContrastViolations(page);
-    expect(reasoned).toBe(false);
+    expect(reasoned).toBe(true);
     expect(violations).toEqual([]);
   });
 
-  it("finding 1: does not judge a page using the Tailwind v4 browser build", () => {
+  it("finding 1: judges a Tailwind v4 browser page on its compiled colors, and passes it", () => {
     const page = [
       "<!DOCTYPE html><html><head>",
       '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
@@ -280,11 +285,11 @@ describe("findContrastViolations — Greptile round 2 (PR #1107)", () => {
       "</body></html>",
     ].join("\n");
     const { violations, reasoned } = findContrastViolations(page);
-    expect(reasoned).toBe(false);
+    expect(reasoned).toBe(true);
     expect(violations).toEqual([]);
   });
 
-  it("finding 1: does not judge a page with a text/tailwindcss style block", () => {
+  it("finding 1: judges a page with a text/tailwindcss style block, and passes it", () => {
     const page = [
       "<!DOCTYPE html><html><head>",
       '  <style type="text/tailwindcss">.hero { @apply bg-black text-white; }</style>',
@@ -294,8 +299,138 @@ describe("findContrastViolations — Greptile round 2 (PR #1107)", () => {
       "</body></html>",
     ].join("\n");
     const { violations, reasoned } = findContrastViolations(page);
-    expect(reasoned).toBe(false);
+    expect(reasoned).toBe(true);
     expect(violations).toEqual([]);
+  });
+});
+
+describe("findContrastViolations — ACC-03: the Tailwind runtime blind spot", () => {
+  // The actual Run 1 (055ae851) failure shape, reduced from the
+  // run's saved final index.html: the whole theme lives in a
+  // text/tailwindcss @apply block. Under @tailwindcss/browser@4,
+  // bg-[--color-background] compiles to `background-color:
+  // --color-background` — invalid, dropped — while text-white
+  // applies, so every serve path renders white text on white.
+  const RUN1_PAGE = [
+    "<!DOCTYPE html>",
+    '<html lang="en">',
+    "<head>",
+    "    <title>Sunny Crust Bakery</title>",
+    '    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+    '    <style type="text/tailwindcss">',
+    "        @theme {",
+    "            --color-primary: #a8ff2f;",
+    "            --color-background: #03050a;",
+    "            --color-card-bg: rgba(255, 255, 255, 0.05);",
+    "            --color-card-border: rgba(255, 255, 255, 0.1);",
+    '            --font-sans: "Inter", sans-serif;',
+    "        }",
+    "        body {",
+    "            @apply bg-[--color-background] text-white font-sans;",
+    "        }",
+    "        .glass-card {",
+    "            @apply bg-[--color-card-bg] border border-[--color-card-border] rounded-xl p-6 backdrop-blur-md shadow-lg;",
+    "        }",
+    "    </style>",
+    "</head>",
+    '<body class="flex flex-col min-h-screen">',
+    '    <header class="py-16 text-center">',
+    '        <h1 class="text-6xl font-bold text-[--color-primary] mb-4">Sunny Crust Bakery</h1>',
+    '        <p class="text-2xl text-white/80">Warm bread, honest prices, every single morning</p>',
+    "    </header>",
+    "    <main>",
+    '        <section class="glass-card">',
+    '            <h2 class="text-4xl font-semibold text-[--color-primary] mb-6">Opening Hours</h2>',
+    '            <ul class="space-y-3 text-lg">',
+    '                <li><span class="font-medium">Monday - Friday:</span> 7:00 AM - 6:00 PM</li>',
+    "            </ul>",
+    "        </section>",
+    "    </main>",
+    '    <footer class="py-8 text-center text-white/60 text-sm">',
+    "        &copy; 2024 Sunny Crust Bakery. All rights reserved.",
+    "    </footer>",
+    "</body>",
+    "</html>",
+  ].join("\n");
+
+  it("catches the Run 1 page: v3-shorthand background dropped, white text on white", () => {
+    const { violations, reasoned } = findContrastViolations(RUN1_PAGE);
+    expect(reasoned).toBe(true);
+    expect(violations.length).toBeGreaterThanOrEqual(3);
+    // The headline, the tagline, and the opening-hours times — the
+    // exact content the run's screenshots showed as invisible.
+    expect(violations.some((v) => v.text.includes("Sunny Crust Bakery"))).toBe(true);
+    expect(violations.some((v) => v.text.includes("Warm bread, honest prices"))).toBe(true);
+    expect(violations.some((v) => v.text.includes("7:00 AM - 6:00 PM"))).toBe(true);
+    for (const v of violations) {
+      expect(v.background).toBe("#ffffff");
+      expect(v.ratio).toBeLessThan(2);
+    }
+  });
+
+  it("passes the same page written with valid v4 variable syntax", () => {
+    const fixed = RUN1_PAGE.replaceAll("bg-[--color-background]", "bg-(--color-background)")
+      .replaceAll("bg-[--color-card-bg]", "bg-(--color-card-bg)")
+      .replaceAll("text-[--color-primary]", "text-(--color-primary)");
+    const { violations, reasoned } = findContrastViolations(fixed);
+    expect(reasoned).toBe(true);
+    expect(violations).toEqual([]);
+  });
+
+  it("reports palette-utility colors as UNVERIFIABLE, never clean", async () => {
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      "</head>",
+      '  <body><section class="bg-zinc-900"><p class="text-zinc-100">Fresh from the oven every morning.</p></section></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(false);
+    expect(result.unreasonedReason).toBe("tailwind-runtime");
+    expect(result.violations).toEqual([]);
+
+    const check = await checkTextContrast({
+      candidatePaths: ["index.html"],
+      readFile: async () => ({ content: page }),
+    });
+    expect(check.applies).toBe(true);
+    expect(check.violations).toEqual([]);
+    expect(check.unverifiableFiles).toEqual(["index.html"]);
+  });
+
+  it("reports @apply colors on an unmodelable selector as UNVERIFIABLE", () => {
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      '  <style type="text/tailwindcss">.hero p { @apply text-white; }</style>',
+      "</head>",
+      '  <body><section class="hero"><p>Fresh from the oven every morning.</p></section></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(false);
+    expect(result.unreasonedReason).toBe("tailwind-runtime");
+    expect(result.violations).toEqual([]);
+  });
+
+  it("passes a contract-compliant page: plain-CSS body colors under the Tailwind runtime", async () => {
+    // The PLAIN-CSS FLOOR shape (ACC-03 contract): the runtime is
+    // loaded and @theme tokens exist, but body colors are declared
+    // as plain CSS — judged on the plain cascade, fully verifiable.
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      '  <style type="text/tailwindcss">@theme { --color-primary: #a8ff2f; }</style>',
+      "  <style>body { background-color: #03050a; color: #f5f5f4; }</style>",
+      "</head>",
+      '  <body class="flex flex-col"><p>Fresh from the oven every morning.</p></body></html>',
+    ].join("\n");
+    const check = await checkTextContrast({
+      candidatePaths: ["index.html"],
+      readFile: async () => ({ content: page }),
+    });
+    expect(check.applies).toBe(true);
+    expect(check.violations).toEqual([]);
+    expect(check.unverifiableFiles).toEqual([]);
   });
 });
 
