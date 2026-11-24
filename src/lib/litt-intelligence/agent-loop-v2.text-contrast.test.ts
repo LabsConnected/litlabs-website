@@ -177,3 +177,139 @@ describe("runAgentLoopV2 — invisible-text verification (ACC-02 Defect A)", () 
     ).toBe(false);
   });
 });
+
+describe("runAgentLoopV2 — unverifiable runtime colors (ACC-03)", () => {
+  function toolCallReply(toolCallId: string, toolId: string, inputs: Record<string, unknown>) {
+    return {
+      text: "",
+      toolCalls: [{ toolCallId, toolId, inputs }],
+      finishReason: "tool_calls",
+      model: "test-model",
+    };
+  }
+  const doneReply = {
+    text: "Your bakery site is live.",
+    toolCalls: [],
+    finishReason: "stop",
+    model: "test-model",
+  };
+
+  // Colors decided entirely by palette utilities the checker will
+  // not guess: before ACC-03 this page passed the contrast check
+  // silently (the Tailwind runtime made the whole document
+  // "unreasoned" and unreasoned meant ignored). It is the same
+  // blind spot that shipped Run 1's blank page, one shape over.
+  const UNVERIFIABLE = [
+    "<!DOCTYPE html>",
+    "<html>",
+    "<head><title>Sunny Crust Bakery</title>",
+    '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+    "</head>",
+    "<body>",
+    '  <section class="bg-zinc-900">',
+    '    <p class="text-zinc-100">Fresh from the oven every morning.</p>',
+    "  </section>",
+    "</body>",
+    "</html>",
+  ].join("\n");
+
+  // The repair the feedback asks for: the same design with its
+  // colors declared as plain CSS — verifiable by construction.
+  const PLAIN_FIXED = [
+    "<!DOCTYPE html>",
+    "<html>",
+    "<head><title>Sunny Crust Bakery</title>",
+    "<style>",
+    "  body { background: #18181b; }",
+    "  p { color: #f4f4f5; }",
+    "</style>",
+    "</head>",
+    "<body>",
+    "  <p>Fresh from the oven every morning.</p>",
+    "</body>",
+    "</html>",
+  ].join("\n");
+
+  function memoryTransport() {
+    const files = new Map<string, string>();
+    const transport = {
+      workspaceId: "ws-test",
+      userId: "u-test",
+      workspaceRoot: "/tmp/test",
+      projectId: "p-test",
+      createCheckpointBeforeMutation: vi.fn().mockResolvedValue(null),
+      readFile: vi.fn(async (p: string) => {
+        const content = files.get(p);
+        if (content === undefined) throw new Error(`404 not found: ${p}`);
+        return { content, size: content.length };
+      }),
+      writeFile: vi.fn(async (p: string, content: string) => {
+        files.set(p, content);
+        return { saved: true };
+      }),
+      listFiles: vi.fn(async (dir: string) => ({
+        entries: [...files.keys()]
+          .filter((k) => (dir === "." ? !k.includes("/") : k.startsWith(`${dir}/`)))
+          .map((k) => ({ name: k.split("/").pop() as string, type: "file" })),
+      })),
+    } as unknown as WorkspaceTransport;
+    return { transport, files };
+  }
+
+  const INSTRUCTION = "Build a one-page website for a bakery called Sunny Crust Bakery";
+  const config = {
+    model: "test-model",
+    systemPrompt: "You are LiTT.",
+    executionMode: "auto" as const,
+    enableBuildFix: false,
+  };
+
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  it("feeds back the unverifiable page once, then settles failedHonestly when it is not repaired", async () => {
+    const { transport } = memoryTransport();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(
+        toolCallReply("tc-1", "files.write", { projectId: "p-test", path: "index.html", content: UNVERIFIABLE }),
+      )
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2(INSTRUCTION, transport, config);
+
+    const secondCallMessages = vi.mocked(callLLMWithTools).mock.calls[1][1] as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(
+      secondCallMessages.some(
+        (m) =>
+          m.role === "user" &&
+          m.content.includes("Verification could not judge") &&
+          m.content.includes("plain CSS"),
+      ),
+    ).toBe(true);
+    expect(result.failedHonestly).toBeTruthy();
+    expect(result.failedHonestly).toContain("can't verify");
+    expect(result.finalText).toBe(result.failedHonestly);
+  });
+
+  it("succeeds when the model repairs the page with plain-CSS colors", async () => {
+    const { transport, files } = memoryTransport();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(
+        toolCallReply("tc-1", "files.write", { projectId: "p-test", path: "index.html", content: UNVERIFIABLE }),
+      )
+      .mockResolvedValueOnce(
+        toolCallReply("tc-2", "files.write", { projectId: "p-test", path: "index.html", content: PLAIN_FIXED }),
+      )
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2(INSTRUCTION, transport, config);
+
+    expect(files.get("index.html")).toContain("background: #18181b");
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.finalText).toContain("Your bakery site is live.");
+  });
+});

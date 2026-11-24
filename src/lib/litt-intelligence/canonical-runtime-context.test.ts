@@ -67,6 +67,20 @@ describe("buildRuntimeContextBlock — project identity", () => {
     expect(block).toContain("a page whose words cannot be read on its own declared colors is a failed build");
   });
 
+  it("requires the plain-CSS floor and names the invalid v3 variable shorthand (ACC-03 item 2)", () => {
+    const block = buildRuntimeContextBlock(makeCtx({ framework: "static" }));
+    // Run 1 on 055ae851 published a blank white page: the whole theme
+    // lived in @apply rules whose bg-[--color-background] compiled to
+    // an invalid declaration the browser dropped, leaving white text
+    // on no background. The contract must demand plain-CSS body
+    // colors and forbid the v3 shorthand by name.
+    expect(block).toContain("PLAIN-CSS FLOOR");
+    expect(block).toContain("background-color: #03050a");
+    expect(block).toContain("V4 VARIABLE RULE");
+    expect(block).toContain("never bg-[--color-x]");
+    expect(block).toContain("bg-[var(--color-x)]");
+  });
+
   it("does not include project_id instruction when projectId is null", () => {
     const block = buildRuntimeContextBlock(makeCtx({ projectId: null }));
     expect(block).not.toContain("project_id=\"");

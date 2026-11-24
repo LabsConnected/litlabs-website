@@ -789,12 +789,28 @@ export const handleProjectDeploy: ToolHandler = async (inputs, transport) => {
     };
   }
 
+  // ACC-03 item 1: the deploy result also carries the project's
+  // STABLE public URL (F8a — /sites/project/<projectId>/, the address
+  // that always serves the latest publish). Run 1 on 055ae851: the
+  // chat deploy reported a fresh per-deployment /sites/<uuid>/ URL
+  // and the stable address appeared only in the Deploy panel after a
+  // reload. The agent loop prefers the stable URL for its report;
+  // the per-deployment URL stays available as liveUrl.
+  let stablePublicUrl: string | null = null;
+  try {
+    const { stablePublicUrlFor } = await import("@/lib/deployments/litt-hosting");
+    stablePublicUrl = await stablePublicUrlFor(transport.projectId);
+  } catch {
+    stablePublicUrl = null;
+  }
+
   return {
     success: true,
     deployment: {
       deploymentId: result.deploymentId,
       status: result.status,
       publicUrl: result.publicUrl,
+      ...(stablePublicUrl ? { stablePublicUrl } : {}),
       urlVerified: result.urlVerified,
       target: result.target,
       projectId: result.projectId,
@@ -805,6 +821,7 @@ export const handleProjectDeploy: ToolHandler = async (inputs, transport) => {
     },
     // Stated explicitly so the model's closing answer can cite it.
     liveUrl: result.publicUrl,
+    ...(stablePublicUrl ? { stablePublicUrl } : {}),
   };
 };
 
