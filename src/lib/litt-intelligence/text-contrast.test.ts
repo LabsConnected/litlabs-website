@@ -502,7 +502,15 @@ describe("findContrastViolations — Greptile (PR #1108): theme names, prefixes,
     expect(result.violations.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("passes when a prefixed utility supplies the readable color (hover:text-white on black)", () => {
+  it("catches text whose only color is a state variant (hover:text-white on black)", () => {
+    // Greptile (PR #1108, on the prefixed-utilities round): a
+    // hover: color paints only while hovered. In the default
+    // state this text has no color of its own and renders in the
+    // inherited default (black) on the black section — invisible.
+    // The previous round stripped hover: and judged the white as
+    // the text's color, passing the page on a state no visitor
+    // starts in. State-conditional colors never decide the
+    // default-state check.
     const page = [
       "<!DOCTYPE html><html><head>",
       '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
@@ -511,7 +519,86 @@ describe("findContrastViolations — Greptile (PR #1108): theme names, prefixes,
     ].join("\n");
     const result = findContrastViolations(page);
     expect(result.reasoned).toBe(true);
+    expect(result.violations.length).toBeGreaterThanOrEqual(1);
+    expect(result.violations[0].color).toBe("#000000");
+    expect(result.violations[0].background).toBe("#000000");
+  });
+
+  it("catches the finding's exact shape (bg-black body, hover:text-white paragraph)", () => {
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      "</head>",
+      '  <body class="bg-black"><p class="hover:text-white">Hello</p></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations.length).toBeGreaterThanOrEqual(1);
+    expect(result.violations[0].background).toBe("#000000");
+  });
+
+  it("judges an element on its default color when it also carries a hover color", () => {
+    // text-white is the default writer; hover:text-black would
+    // fold after it and blacken the text if state variants wrote
+    // default-state colors — a false failure. Judged on the
+    // default state alone, white on black passes.
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      "</head>",
+      '  <body class="bg-black"><p class="text-white hover:text-black">Fresh from the oven every morning.</p></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
     expect(result.violations).toEqual([]);
+  });
+
+  it("catches white text whose only background is a state variant (hover:bg-black)", () => {
+    // The mirror image: the dark background exists only on
+    // hover, so in the default state the white text sits on the
+    // white page — invisible, however readable the hover state is.
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      "</head>",
+      '  <body class="bg-white"><p class="text-white hover:bg-black">Fresh from the oven every morning.</p></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations.length).toBeGreaterThanOrEqual(1);
+    expect(result.violations[0].background).toBe("#ffffff");
+  });
+
+  it("treats a stacked state variant as state-conditional (md:hover:text-white on black)", () => {
+    // A responsive prefix does not rescue a state prefix: at any
+    // viewport the unhovered text still has no color of its own.
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      "</head>",
+      '  <body class="bg-black"><p class="md:hover:text-white">Fresh from the oven every morning.</p></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations.length).toBeGreaterThanOrEqual(1);
+    expect(result.violations[0].background).toBe("#000000");
+  });
+
+  it("catches a class whose only color comes from @apply hover: (state variant in a class rule)", () => {
+    // @apply tokens flow through the same writer fold as class
+    // utilities, so a state-conditional @apply color must not
+    // become the class's default-state writer either.
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+      '  <style type="text/tailwindcss">.card { @apply hover:text-white; }</style>',
+      "</head>",
+      '  <body class="bg-black"><p class="card">Fresh from the oven every morning.</p></body></html>',
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations.length).toBeGreaterThanOrEqual(1);
+    expect(result.violations[0].background).toBe("#000000");
   });
 
   it("catches white text on a child section's own plain white background (proximity)", () => {

@@ -1233,11 +1233,12 @@ type UtilityColor =
   | { kind: "unknown" };
 
 /** Strip Tailwind variant prefixes (md:, lg:, hover:, dark:, …)
- *  from a class token, leaving the base utility. A prefixed color
- *  utility still paints its color whenever its condition holds —
- *  and a contrast check must assume the condition holds (the
- *  conservative direction), so prefixed tokens are judged exactly
- *  like their base utility (Greptile, PR #1108). Bracketed variant
+ *  from a class token, leaving the base utility. Stripping serves
+ *  DETECTION: a prefixed color utility is still a color utility,
+ *  so its chain is runtime-affected and the runtime judge decides
+ *  it (Greptile, PR #1108). Whether a prefixed token may also
+ *  WRITE the colors the default state is judged on is a separate
+ *  question — see isStateConditionalToken. Bracketed variant
  *  forms (data-[state=open]:, supports-[…]:) are stripped through
  *  their closing bracket. */
 function stripVariantPrefixes(token: string): string {
@@ -1253,6 +1254,67 @@ function stripVariantPrefixes(token: string): string {
     t = t.slice(m[0].length);
   }
   return t;
+}
+
+/** The variant prefixes on a class token, in order, using the
+ *  same scan as stripVariantPrefixes: named segments (hover,
+ *  md, group-hover, …) and bracketed forms kept whole
+ *  (data-[state=open], min-[400px], …). */
+function variantPrefixesOf(token: string): string[] {
+  const prefixes: string[] = [];
+  let t = token;
+  while (!/^(?:bg|text)-/.test(t)) {
+    const bracketed = t.indexOf("]:");
+    if (bracketed >= 0 && t.startsWith("[") === false && /^[a-zA-Z][a-zA-Z0-9_-]*-\[/.test(t)) {
+      prefixes.push(t.slice(0, bracketed + 1));
+      t = t.slice(bracketed + 2);
+      continue;
+    }
+    const m = /^([a-zA-Z0-9_-]+):/.exec(t);
+    if (!m) break;
+    prefixes.push(m[1]);
+    t = t.slice(m[0].length);
+  }
+  return prefixes;
+}
+
+/** Environment variants: conditions of the page's environment
+ *  (viewport, color scheme, orientation, direction, motion and
+ *  contrast preferences, print) rather than of a transient
+ *  interaction state. For a whole class of real visitors the
+ *  condition holds full-time, so the previous round's rule —
+ *  assume it holds and judge the color as applying — stands for
+ *  these (Greptile, PR #1108). */
+function isEnvironmentVariant(prefix: string): boolean {
+  const p = prefix.toLowerCase();
+  return (
+    p === "sm" || p === "md" || p === "lg" || p === "xl" || p === "2xl" ||
+    p.startsWith("min-") || p.startsWith("max-") ||
+    p === "dark" ||
+    p === "portrait" || p === "landscape" ||
+    p === "ltr" || p === "rtl" ||
+    p === "motion-safe" || p === "motion-reduce" ||
+    p === "contrast-more" || p === "contrast-less" ||
+    p === "forced-colors" ||
+    p === "print"
+  );
+}
+
+/** True when a token's color is conditional on anything beyond
+ *  the environment: an interaction or element state (hover,
+ *  focus, active, visited, group-*, peer-*, disabled, checked,
+ *  …), a structural position (first, odd, …), or an attribute
+ *  (data-[…]:, aria-*:). A state-conditional color paints
+ *  nothing in the state a visitor first sees the page in, so it
+ *  can never be the color the default state is judged on
+ *  (Greptile, PR #1108): hover:text-white on a black page leaves
+ *  the unhovered text at its inherited default color — black on
+ *  black — however white the hover state would be. One
+ *  non-environment prefix anywhere in the stack (md:hover:…)
+ *  makes the whole token state-conditional. */
+function isStateConditionalToken(token: string): boolean {
+  const prefixes = variantPrefixesOf(token);
+  return prefixes.length > 0 && !prefixes.every(isEnvironmentVariant);
 }
 
 /** True when a class token has the shape of a COLOR utility (as
@@ -1381,6 +1443,13 @@ function foldUtilityToken(
   themeVars: Map<string, string>,
 ): void {
   if (!isColorUtilityToken(token, themeVars)) return;
+  // State-conditional colors (hover:, focus:, group-*, …) never
+  // write a default-state writer — see isStateConditionalToken.
+  // The element is then judged on whatever its default state
+  // actually declares (its own unprefixed utilities, class
+  // writers, plain CSS, inheritance, the initial colors), which
+  // is the only state this check certifies.
+  if (isStateConditionalToken(token)) return;
   const c = classifyUtilityColor(token, themeVars);
   if (c.kind === "dropped") return;
   const next: ColorWriter =
