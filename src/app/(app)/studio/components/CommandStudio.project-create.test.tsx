@@ -543,6 +543,35 @@ describe("CommandStudio — New project journey", () => {
     });
   });
 
+  it("leaves the URL on the NEW project even when the URL still carries the previous project", async () => {
+    // Greptile PR #1109: the common case the item-6 fix missed — a
+    // project is already open, so the URL carries ?project=<old> while
+    // the create navigation commits. The sync effect ranked that stale
+    // URL param above the pending navigation (the pending id was only
+    // the resolver's fallback), so the effect's replace landed after
+    // the create handler's and Studio stayed on the old project. The
+    // pending navigation must outrank the stale param too.
+    stableSearchParams.set("project", "project-1");
+    try {
+      installFetchMock();
+      const user = await openPickerToNewProject();
+
+      await user.clear(screen.getByLabelText("Project name"));
+      await user.type(screen.getByLabelText("Project name"), "Landing revamp");
+      await user.click(screen.getByRole("button", { name: /create project/i }));
+
+      await waitFor(() => {
+        expect(routerReplace.mock.calls.length).toBeGreaterThan(0);
+        const lastUrl = routerReplace.mock.calls[routerReplace.mock.calls.length - 1][0] as string;
+        expect(
+          new URL(`http://localhost${lastUrl}`).searchParams.get("project"),
+        ).toBe("proj-created");
+      });
+    } finally {
+      stableSearchParams.delete("project");
+    }
+  });
+
   it("keeps the dialog open with a visible error when the create fails", async () => {
     installFetchMock(() =>
       new Response(JSON.stringify({ error: "quota exceeded" }), { status: 402 }),

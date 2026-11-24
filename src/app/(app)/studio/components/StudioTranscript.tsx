@@ -101,9 +101,15 @@ function deriveWorkLog(
         color: "#ef4444",
       };
     }
+    // Count the steps that actually succeeded: this fallback never goes
+    // through verdict evaluation, and hardcoding 0 erased successful
+    // work — a run that read files fine and then failed elsewhere was
+    // recorded as "0 of N steps complete" (Greptile PR #1109). The
+    // transcript's own convention (workLogLabel) counts successes.
+    const completed = (execution?.toolCalls ?? []).filter((call) => call.success).length;
     return {
       label: attempted > 0
-        ? `0 of ${attempted} steps complete — failed`
+        ? `${completed} of ${attempted} steps complete — failed`
         : "Failed — no work completed",
       color: "#ef4444",
     };

@@ -2001,15 +2001,25 @@ export function useCanonicalConversation({
     // carried into that resolution as a failed ref instead of dying.
     const targetRef = target ?? { id: assistantMessageId, status: "failed" };
 
+    // A rejected re-send only earns the "busy" message when send turned
+    // it away silently: its pre-flight busy guard returns no errorKind
+    // and sets no error of its own. Every classified rejection (expired
+    // session, rate limit, server error) already set the real, more
+    // useful error inside send — overwriting it with "busy" hid the
+    // cause and sent the user waiting on a run that did not exist
+    // (Greptile PR #1109). Both re-send paths below share this rule.
+    const noteResendRejected = (sent: SendResult) => {
+      if (!sent.accepted && !sent.errorKind) {
+        setSendError("Couldn't re-run that turn — LiTT is busy with the current run. Try Retry again once it settles.");
+      }
+    };
+
     // A failed turn means the work never completed — re-send the parent user
     // message through the normal send pipeline so the turn is genuinely
     // re-run (see findRetryResendText).
     const resendText = target ? findRetryResendText(target, allMessages) : null;
     if (resendText) {
-      const sent = await send(resendText);
-      if (!sent.accepted) {
-        setSendError("Couldn't re-run that turn — LiTT is busy with the current run. Try Retry again once it settles.");
-      }
+      noteResendRejected(await send(resendText));
       return;
     }
 
@@ -2030,10 +2040,7 @@ export function useCanonicalConversation({
       if (canonicalTarget?.status === "failed") {
         const canonicalResendText = findRetryResendText(canonicalTarget, freshMessages);
         if (canonicalResendText) {
-          const sent = await send(canonicalResendText);
-          if (!sent.accepted) {
-            setSendError("Couldn't re-run that turn — LiTT is busy with the current run. Try Retry again once it settles.");
-          }
+          noteResendRejected(await send(canonicalResendText));
           return;
         }
         // Canonically failed and no parent exists anywhere to re-send:

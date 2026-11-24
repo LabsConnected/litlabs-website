@@ -1800,14 +1800,19 @@ function CommandStudioContent() {
     // (capabilities) is written back so context is durable across
     // refresh and surface navigation instead of silently re-resolving
     // to a different project (audit ART-20261111-082). While a create /
-    // switch navigation is still committing, its target outranks the
-    // not-yet-refreshed capabilities value (ACC-03 item 6).
+    // switch navigation is still committing, its target is the explicit
+    // selection: it outranks BOTH the not-yet-refreshed capabilities
+    // value and the stale ?project= the URL still carries from the
+    // previously open project — ranking it only above capabilities left
+    // the common case (creating while another project is open) to the
+    // stale param, whose replace landed last (ACC-03 item 6; Greptile
+    // PR #1109).
     const pendingProjectId = pendingProjectNavigationRef.current;
     if (pendingProjectId && searchParams.get("project") === pendingProjectId) {
       pendingProjectNavigationRef.current = null;
     }
     const projectId = resolveActiveProjectIdForUrl(
-      searchParams.get("project"),
+      pendingProjectId ?? searchParams.get("project"),
       pendingProjectId ?? capabilities.projectId,
     );
     if (projectId) params.set("project", projectId);

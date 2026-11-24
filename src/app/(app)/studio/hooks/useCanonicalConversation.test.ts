@@ -869,6 +869,68 @@ describe("regenerate() Retry honesty", () => {
     await act(async () => { releaseSend?.(); await sendPromise; });
   });
 
+  it("keeps send's rate-limit error when the direct re-send is rejected — does not overwrite it with 'busy' (Greptile PR #1109)", async () => {
+    // The resend paths replaced EVERY rejected send's error with
+    // "LiTT is busy", including rejections where send had already set
+    // the real, more useful error (expired session, rate limit, server
+    // error). A rate-limited Retry told the user to wait for a run that
+    // did not exist instead of waiting out the limit.
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "POST" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        return new Response(JSON.stringify({ error: "rate limited" }), {
+          status: 429,
+          headers: { "Content-Type": "application/json", "Retry-After": "30" },
+        });
+      }
+      if (url.startsWith("/api/studio/conversations")) {
+        return jsonResponse({ conversations: [] });
+      }
+      return jsonResponse({});
+    }));
+    const result = await renderAndSeed([
+      makeChatMsg({ id: "u1", role: "user", content: PROMPT, status: "completed" }),
+      makeChatMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: "u1" }),
+    ]);
+
+    await act(async () => { await result.current.regenerate("asst-1"); });
+
+    expect(result.current.sendError).toContain("sending messages too fast");
+    expect(result.current.sendError).not.toContain("LiTT is busy");
+  });
+
+  it("keeps send's session-expired error when the canonical re-send is rejected — does not overwrite it with 'busy' (Greptile PR #1109)", async () => {
+    canonicalMessages = [
+      makeMsg({ id: "u1", role: "user", content: PROMPT, clientRequestId: "req-1" }),
+      makeMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: "u1", clientRequestId: "req-1" }),
+    ];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "GET" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        return jsonResponse({ messages: canonicalMessages, revision: 2 });
+      }
+      if (method === "POST" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        return jsonResponse({ error: "unauthorized" }, 401);
+      }
+      if (url.startsWith("/api/studio/conversations")) {
+        return jsonResponse({ conversations: [] });
+      }
+      return jsonResponse({});
+    }));
+    // Hazard shape again: the store's copy lost the linkage, so Retry
+    // resolves the parent canonically before re-sending.
+    const result = await renderAndSeed([
+      makeChatMsg({ id: "asst-1", content: "Task failed.", status: "failed", parentMessageId: null }),
+    ]);
+
+    await act(async () => { await result.current.regenerate("asst-1"); });
+
+    expect(result.current.sendError).toContain("Your Studio session expired");
+    expect(result.current.sendError).not.toContain("LiTT is busy");
+  });
+
   it("keeps plain Regenerate (no id, completed turn) on the chat-only endpoint", async () => {
     const result = await renderAndSeed([
       makeChatMsg({ id: "u1", role: "user", content: "Say hi", status: "completed" }),

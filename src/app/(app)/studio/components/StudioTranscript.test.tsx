@@ -963,7 +963,11 @@ describe("StudioTranscript — failed-run work log truthfulness (ACC-03 item 5)"
       workspaceChange: null,
     });
     expect(screen.queryByText(/could not verify whether files changed/)).toBeNull();
-    expect(screen.getByText(/steps complete — failed/)).toBeTruthy();
+    // The read SUCCEEDED — the step count must credit it. The fallback
+    // used to hardcode "0 of N steps complete", erasing successful
+    // read-only work from the record of a failed run (Greptile PR #1109).
+    expect(screen.getByText(/1 of 1 steps complete — failed/)).toBeTruthy();
+    expect(screen.queryByText(/0 of 1 steps complete/)).toBeNull();
   });
 
   it("keeps the verification label when a mutation was attempted but no evidence came back", () => {
