@@ -72,6 +72,36 @@ describe("extractExpectedLiteral", () => {
     expect(extractExpectedLiteral("Change the label to OK")).toBeNull();
     expect(extractExpectedLiteral('Set the badge to "New"')).toBe("New");
   });
+
+  // Greptile PR #1106, finding 2: the extractor could demand the WRONG
+  // text — the source being replaced, or a style value that valid code
+  // expresses differently. A skipped check is always better than a
+  // wrong one.
+  it("never demands the SOURCE text when the replacement is unquoted (Greptile example A)", () => {
+    // The only quoted span sits BEFORE " to " — it is the text being
+    // replaced. Demanding it would order a repair that restores the
+    // old text after a correct replacement.
+    expect(extractExpectedLiteral('Change "Hello there" to Welcome back')).toBeNull();
+  });
+
+  it("does not enforce an unquoted style value (Greptile example B)", () => {
+    // "dark blue" is a style descriptor; valid CSS may express it as a
+    // hex color, so the words need never appear in any file.
+    expect(extractExpectedLiteral("Change the background to dark blue")).toBeNull();
+    expect(extractExpectedLiteral("Change the text color to red")).toBeNull();
+  });
+
+  it("still extracts a quoted replacement after ' to '", () => {
+    expect(extractExpectedLiteral('Change the tagline to "Fresh daily"')).toBe("Fresh daily");
+  });
+
+  it("extracts the replacement after ' with ' when both sides are quoted", () => {
+    expect(extractExpectedLiteral('Replace "old slogan" with "new slogan"')).toBe("new slogan");
+  });
+
+  it("extracts a quoted span presented by a read/say pattern with no separator", () => {
+    expect(extractExpectedLiteral('Correct the sign so it reads "Open daily"')).toBe("Open daily");
+  });
 });
 
 describe("contentContainsLiteral", () => {
@@ -90,6 +120,33 @@ describe("contentContainsLiteral", () => {
         "<p>Fresh from1 the oven every morning.</p>",
         "Fresh from the oven every morning",
       ),
+    ).toBe(false);
+  });
+
+  // Greptile PR #1106, finding 3: files store text HTML-escaped, so a
+  // literal containing & < > or quotes can be present and correct yet
+  // never match the raw comparison — an unpassable check.
+  it("matches a literal whose & is stored HTML-escaped as &amp;", () => {
+    expect(
+      contentContainsLiteral(
+        "<p>Coffee &amp; pastries served daily</p>",
+        "Coffee & pastries served daily",
+      ),
+    ).toBe(true);
+  });
+
+  it("matches a literal with tag-like text stored escaped", () => {
+    expect(contentContainsLiteral("Use &lt;b&gt; for bold text", "Use <b> for bold text")).toBe(
+      true,
+    );
+    expect(
+      contentContainsLiteral("Say &quot;hello&quot; to everyone", 'Say "hello" to everyone'),
+    ).toBe(true);
+  });
+
+  it("escaping does not invent a match for text that is not there", () => {
+    expect(
+      contentContainsLiteral("<p>Coffee &amp; pastries</p>", "Coffee & pastries served daily"),
     ).toBe(false);
   });
 });
@@ -159,5 +216,40 @@ describe("checkRequestedLiteral", () => {
     });
     expect(result.applies).toBe(false);
     expect(readFile).not.toHaveBeenCalled();
+  });
+
+  // Greptile PR #1106, finding 5: the candidate cap (8) silently
+  // truncated the evidence — a literal landing in the 9th changed
+  // file read as a confirmed miss and failed an honest run.
+  const ninePages = Array.from({ length: 9 }, (_, i) => `page${i + 1}.html`);
+  const literalInNinth = async (path: string) => ({
+    content:
+      path === "page9.html"
+        ? "<p>Fresh from the oven every morning.</p>"
+        : "<p>unrelated content</p>",
+  });
+
+  it("does not apply when the candidate cap truncated the evidence and the literal was not found", async () => {
+    const result = await checkRequestedLiteral({
+      instruction,
+      candidatePaths: ninePages,
+      readFile: literalInNinth,
+    });
+    // The literal IS in a changed file — just beyond the cap. The
+    // verdict must be "unknown" (applies: false), never a miss.
+    expect(result.found).toBe(false);
+    expect(result.applies).toBe(false);
+  });
+
+  it("checks the file the instruction named first, ahead of the cap", async () => {
+    const result = await checkRequestedLiteral({
+      instruction:
+        "In page9.html, change the tagline to Fresh from the oven every morning",
+      candidatePaths: ninePages,
+      readFile: literalInNinth,
+    });
+    expect(result.applies).toBe(true);
+    expect(result.found).toBe(true);
+    expect(result.checkedFiles).toContain("page9.html");
   });
 });

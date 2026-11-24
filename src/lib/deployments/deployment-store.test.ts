@@ -87,6 +87,7 @@ import {
   readPublishedFile,
   findLatestDeploymentForProject,
   findLatestReadyDeploymentForProject,
+  findLatestReadyDeploymentForProjectPublic,
   readDeploymentSnapshotFiles,
 } from "./deployment-store";
 
@@ -441,6 +442,53 @@ describe("error propagation", () => {
     // Public reads surface store failures — a transient error must not be
     // reported to the public as a missing file.
     await expect(readPublishedFile("dep-1", "index.html")).rejects.toThrow();
+  });
+});
+
+describe("findLatestReadyDeploymentForProjectPublic — stable public address (F8a, Greptile PR #1106)", () => {
+  const olderReadyRow = { ...readyRow, id: "dep-A" };
+  const newerReadyRow = { ...readyRow, id: "dep-B" };
+
+  // The mock chain ignores ORDER BY, so the handler plays the database:
+  // a query WITHOUT a status filter resolves the project's newest row;
+  // a query filtered to status=ready resolves the newest READY row.
+  function publishHistory(newest: unknown, newestReady: unknown) {
+    handler = (_table, call) => {
+      const readyOnly = call.filters.some(([c, v]) => c === "status" && v === "ready");
+      return { data: readyOnly ? newestReady : newest, error: null };
+    };
+  }
+
+  it("serves the newest publish when it is ready (older one unpublished)", async () => {
+    publishHistory(newerReadyRow, newerReadyRow);
+    const record = await findLatestReadyDeploymentForProjectPublic("proj-A");
+    expect(record?.id).toBe("dep-B");
+    expectOnlyV1Tables();
+  });
+
+  it("serves NOTHING when the newest publish was unpublished — never the older ready one", async () => {
+    // Publish A, publish B, unpublish B: unpublishing is the owner's
+    // latest word. The stable address must go dark, not resurrect A.
+    publishHistory({ ...newerReadyRow, status: "unpublished" }, olderReadyRow);
+    expect(await findLatestReadyDeploymentForProjectPublic("proj-A")).toBeNull();
+  });
+
+  it("falls back to the newest ready publish while a newer one is still building", async () => {
+    publishHistory({ ...newerReadyRow, status: "building" }, olderReadyRow);
+    const record = await findLatestReadyDeploymentForProjectPublic("proj-A");
+    expect(record?.id).toBe("dep-A");
+  });
+
+  it("returns null when the project has never published", async () => {
+    publishHistory(null, null);
+    expect(await findLatestReadyDeploymentForProjectPublic("proj-A")).toBeNull();
+  });
+
+  it("throws on a store error — an outage must not read as 'never published' (route answers 503)", async () => {
+    handler = () => ({ data: null, error: { message: "postgrest down" } });
+    await expect(findLatestReadyDeploymentForProjectPublic("proj-A")).rejects.toThrow(
+      "Latest deployment lookup failed",
+    );
   });
 });
 

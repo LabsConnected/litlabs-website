@@ -57,10 +57,31 @@ export function normalizeLiteralText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+const HTML_ESCAPES: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+
+/** The literal as an HTML file would store it: text content is
+ *  entity-escaped, so "Coffee & pastries" lands as
+ *  "Coffee &amp; pastries". */
+export function escapeHtmlText(text: string): string {
+  return text.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+}
+
 export function contentContainsLiteral(content: string, literal: string): boolean {
   const needle = normalizeLiteralText(literal);
   if (needle.length === 0) return false;
-  return normalizeLiteralText(content).includes(needle);
+  const haystack = normalizeLiteralText(content);
+  if (haystack.includes(needle)) return true;
+  // The requested text may be present in its HTML-escaped stored
+  // form — equally correct, and a check that cannot see it can never
+  // pass no matter how often the model retries (Greptile, PR #1106).
+  const escapedNeedle = normalizeLiteralText(escapeHtmlText(literal));
+  return escapedNeedle !== needle && haystack.includes(escapedNeedle);
 }
 
 function cleanLiteral(raw: string): string | null {
@@ -75,20 +96,41 @@ function cleanLiteral(raw: string): string | null {
   return literal;
 }
 
+/** Content-introducing verbs: in "make it read/say X", X is the new
+ *  content even without a " to "/" with " separator. */
+const CONTENT_INTRODUCING_VERB = /\b(set|read|reads|say|says|be|become|becomes)\b/;
+
+/**
+ * Style properties: when the thing being changed IS one of these, an
+ * unquoted tail after " to " is a style VALUE ("dark blue", "red"),
+ * not file text — valid code may express it as a hex color or a
+ * keyword that never appears verbatim (Greptile, PR #1106).
+ */
+const STYLE_SUBJECT =
+  /\b(background|bg|colou?r|font|font size|text size|size|width|height|margin|padding|border|opacity|theme|alignment|align|style|styling|shade|hue)\b/;
+
 /**
  * Extract the literal target text an edit instruction specifies, or
- * null when it specifies none.
+ * null when it specifies none. Conservative by design (Greptile,
+ * PR #1106): a literal is enforced ONLY when the request clearly
+ * names replacement text, and a skipped check is always better than
+ * a wrong one.
  *
- *   (a) A quoted span of ≥3 chars — when the instruction names the
- *       target after " to " ("change 'old' to 'new'"), that span wins;
- *       a lone quoted span is the target; with several, the last one
- *       is (replacement targets come last in natural phrasing).
- *       Quoted spans only count in edit-style instructions — a build
- *       brief quoting a name ("a bakery called 'Sunny Crust'") is not
- *       an edit and extracts nothing here.
+ *   (a) A quoted span of ≥3 chars in REPLACEMENT position: after the
+ *       last " to " or " with " separator ("change 'old' to 'new'",
+ *       "replace 'old' with 'new'"). A quoted span BEFORE the
+ *       separator is the text being replaced and must NEVER become
+ *       the expected literal; when every quoted span sits before the
+ *       separator the replacement is unquoted and ambiguous → null.
+ *       With no separator at all, a quoted span counts only when a
+ *       content-introducing verb (set/read/say/be) presents it as the
+ *       new content. Quoted spans only count in edit-style
+ *       instructions — a build brief quoting a name ("a bakery
+ *       called 'Sunny Crust'") is not an edit and extracts nothing.
  *   (b) Otherwise, for change/set/update/rename-style instructions,
  *       the trailing span after the LAST " to " (trailing sentence
- *       period trimmed).
+ *       period trimmed) — unless the subject being changed is a style
+ *       property, which makes the tail a style value, not content.
  */
 export function extractExpectedLiteral(instruction: string): string | null {
   if (typeof instruction !== "string") return null;
@@ -101,17 +143,30 @@ export function extractExpectedLiteral(instruction: string): string | null {
   while ((match = quoteRe.exec(text)) !== null) {
     quoted.push({ value: match[1] ?? match[2], index: match.index });
   }
+
+  const lower = text.toLowerCase();
+  // The replacement separator: whatever is named AFTER the last
+  // " to " / " with " is the replacement; quoted text named before
+  // it is the source being replaced.
+  const sepIndex = Math.max(lower.lastIndexOf(" to "), lower.lastIndexOf(" with "));
+
   if (quoted.length > 0) {
-    // Prefer a quoted span that follows a " to " (the replacement
-    // target); otherwise the last quoted span.
-    const toIndex = text.toLowerCase().lastIndexOf(" to ");
-    const afterTo = toIndex >= 0 ? quoted.filter((q) => q.index > toIndex) : [];
-    const chosen = (afterTo.length > 0 ? afterTo : quoted)[(afterTo.length > 0 ? afterTo : quoted).length - 1];
-    return cleanLiteral(chosen.value);
+    if (sepIndex >= 0) {
+      const afterSep = quoted.filter((q) => q.index > sepIndex);
+      if (afterSep.length === 0) return null;
+      return cleanLiteral(afterSep[afterSep.length - 1].value);
+    }
+    const last = quoted[quoted.length - 1];
+    if (!CONTENT_INTRODUCING_VERB.test(lower.slice(0, last.index))) return null;
+    return cleanLiteral(last.value);
   }
 
-  const toIndex = text.toLowerCase().lastIndexOf(" to ");
+  const toIndex = lower.lastIndexOf(" to ");
   if (toIndex < 0) return null;
+  // Changing a style property to an unquoted value names a style
+  // descriptor, not literal file text ("change the background to
+  // dark blue" — the CSS may legitimately say #00008b).
+  if (STYLE_SUBJECT.test(lower.slice(0, toIndex))) return null;
   const tail = text.slice(toIndex + 4);
   if (tail.length > 240) return null;
   const literal = cleanLiteral(tail);
@@ -134,9 +189,15 @@ const INSTRUCTION_VERBS = new Set([
   "highlight", "emphasize", "link", "point", "refer",
 ]);
 
+/** Bounded read-back budget for one literal check. */
+const MAX_CHECKED_FILES = 8;
+
 export interface RequestedLiteralCheck {
   /** True when a literal was specified AND at least one mutated text
-   *  file could be read back and checked. */
+   *  file could be read back and checked AND the evidence is complete:
+   *  when the candidate cap truncated the set and the literal was not
+   *  found, the outcome is unknown and this is false — absence of
+   *  evidence never fails a run. */
   applies: boolean;
   /** The extracted literal, when one was specified. */
   literal: string | null;
@@ -161,16 +222,31 @@ export async function checkRequestedLiteral(opts: {
   const literal = opts.instruction ? extractExpectedLiteral(opts.instruction) : null;
   if (!literal) return { applies: false, literal: null, found: false, checkedFiles: [] };
 
-  const candidates = [
+  const allCandidates = [
     ...new Set(
       opts.candidatePaths
         .map((p) => p.replace(/\\/g, "/").replace(/^\/+/, ""))
         .filter((p) => p.length > 0 && isTextFilePath(p)),
     ),
-  ].slice(0, 8);
-  if (candidates.length === 0) {
+  ];
+  if (allCandidates.length === 0) {
     return { applies: false, literal, found: false, checkedFiles: [] };
   }
+  // Files the instruction itself names are checked first — they are
+  // where the requested text was directed, and the cap below must
+  // not push them out of the evidence set.
+  const instructionText = opts.instruction ?? "";
+  const prioritized = [...allCandidates].sort((a, b) => {
+    const aNamed = instructionText.includes(a) ? 0 : 1;
+    const bNamed = instructionText.includes(b) ? 0 : 1;
+    return aNamed - bNamed;
+  });
+  // The read-back budget is bounded, but a truncated candidate set is
+  // INCOMPLETE evidence: if the literal is not found in the files
+  // that were checked, the verdict is "unknown" (the check does not
+  // apply), never a confirmed miss (Greptile, PR #1106).
+  const truncated = prioritized.length > MAX_CHECKED_FILES;
+  const candidates = prioritized.slice(0, MAX_CHECKED_FILES);
 
   const checkedFiles: string[] = [];
   let found = false;
@@ -189,7 +265,7 @@ export async function checkRequestedLiteral(opts: {
   }
 
   return {
-    applies: checkedFiles.length > 0,
+    applies: checkedFiles.length > 0 && (found || !truncated),
     literal,
     found,
     checkedFiles,

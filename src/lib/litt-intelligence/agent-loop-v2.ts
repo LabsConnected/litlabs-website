@@ -4605,6 +4605,40 @@ async function resumeAgentLoopV2Inner(
     resumeZeroWriteSteps = 0;
   }
 
+  // ACC-01 F9 (Greptile, PR #1106): the approved mutation executed
+  // ABOVE — before this loop starts — never passes a mutation batch
+  // inside the loop, so when the model simply replies "done" the
+  // mid-loop repair feedback below never fires and the tail check
+  // would settle the run failed WITHOUT the one repair attempt the
+  // design promises. Offer that attempt up front: when the requested
+  // literal is missing from the files the approved/deferred calls
+  // mutated, feed the mismatch into the conversation before the
+  // first model step so the continuation can repair it. The tail
+  // check remains the final word.
+  if (
+    resume.decision === "approved" &&
+    !literalRepairFeedbackGiven &&
+    !cancelled &&
+    !failedHonestly
+  ) {
+    const literalCheck = await checkRequestedLiteral({
+      instruction: resumeUserMessage,
+      candidatePaths: successfulMutationPaths(toolCallLog),
+      readFile: (path) => transport.readFile(path),
+    });
+    if (literalCheck.applies && !literalCheck.found && literalCheck.literal) {
+      literalRepairFeedbackGiven = true;
+      llmMessages.push({
+        role: "user",
+        content: requestedLiteralRepairPrompt(literalCheck.literal, literalCheck.checkedFiles),
+      });
+      localProgress.emit({
+        type: "status",
+        summary: "The requested text wasn't in the edited file — asking for a fix before this can be called done.",
+      });
+    }
+  }
+
   // Route honesty: record the resumed run's first route plan too —
   // a resume is a fresh observability record for the continuation.
   const recordRoutePlan = makeRoutePlanRecorder(localProgress);

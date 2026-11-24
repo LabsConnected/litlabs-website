@@ -89,6 +89,13 @@ describe("sites/project route — stable public address", () => {
     expect(mockRead).not.toHaveBeenCalled();
   });
 
+  it("answers 503 (not 404) when the deployment lookup throws — a store outage is not 'never published'", async () => {
+    mockResolve.mockRejectedValue(new Error("Latest deployment lookup failed: postgrest down"));
+    const res = await get(PROJECT_ID);
+    expect(res.status).toBe(503);
+    expect(mockRead).not.toHaveBeenCalled();
+  });
+
   it("points the injected <base> at the stable mount so relative assets resolve", async () => {
     mockResolve.mockResolvedValue({ id: DEP_2 } as never);
     mockRead.mockResolvedValue({ content: V2_HTML, contentType: "text/html" });
