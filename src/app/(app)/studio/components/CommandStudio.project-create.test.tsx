@@ -377,6 +377,7 @@ vi.mock("../tools/BuilderTool", () => ({ default: () => <div data-testid="builde
 vi.mock("../tools/CanvasTool", () => ({ default: () => <div data-testid="canvas-tool" /> }));
 vi.mock("../tools/AgentTool", () => ({ default: () => <div data-testid="agent-tool" /> }));
 vi.mock("../tools/GalleryTool", () => ({ default: () => <div data-testid="gallery-tool" /> }));
+vi.mock("../tools/AgentsTerminalTool", () => ({ default: () => <div data-testid="terminal-tool" /> }));
 vi.mock("../tools/MissionForge", () => ({ default: () => <div data-testid="mission-forge" /> }));
 vi.mock("../tools/CLIBridgeTool", () => ({ default: () => <div data-testid="cli-bridge" /> }));
 vi.mock("../tools/SpaceTool", () => ({ default: () => <div data-testid="space-tool" /> }));
@@ -515,6 +516,60 @@ describe("CommandStudio — New project journey", () => {
     // The conversation rebinds to the new project so the next message
     // cannot land in the previous project's chat.
     expect(convState.resetForProject).toHaveBeenCalled();
+  });
+
+  it("leaves the URL on the NEW project — the URL-sync effect must not pin the previous project back", async () => {
+    installFetchMock();
+    const user = await openPickerToNewProject();
+
+    await user.clear(screen.getByLabelText("Project name"));
+    await user.type(screen.getByLabelText("Project name"), "Landing revamp");
+    await user.click(screen.getByRole("button", { name: /create project/i }));
+
+    // Regression (ACC-03 item 6): capabilities still resolves the PREVIOUS
+    // project (project-1) in this harness, exactly as it does in production
+    // until the post-navigation refresh lands. The state→URL sync effect
+    // re-runs on the create handler's own setState calls; if it derives the
+    // project to pin from the stale capabilities value while the URL has no
+    // settled explicit param yet, its replace lands AFTER the create
+    // handler's and Studio stays on the old project. The final URL write
+    // must therefore be the new project.
+    await waitFor(() => {
+      expect(routerReplace.mock.calls.length).toBeGreaterThan(0);
+      const lastUrl = routerReplace.mock.calls[routerReplace.mock.calls.length - 1][0] as string;
+      expect(
+        new URL(`http://localhost${lastUrl}`).searchParams.get("project"),
+      ).toBe("proj-created");
+    });
+  });
+
+  it("leaves the URL on the NEW project even when the URL still carries the previous project", async () => {
+    // Greptile PR #1109: the common case the item-6 fix missed — a
+    // project is already open, so the URL carries ?project=<old> while
+    // the create navigation commits. The sync effect ranked that stale
+    // URL param above the pending navigation (the pending id was only
+    // the resolver's fallback), so the effect's replace landed after
+    // the create handler's and Studio stayed on the old project. The
+    // pending navigation must outrank the stale param too.
+    stableSearchParams.set("project", "project-1");
+    try {
+      installFetchMock();
+      const user = await openPickerToNewProject();
+
+      await user.clear(screen.getByLabelText("Project name"));
+      await user.type(screen.getByLabelText("Project name"), "Landing revamp");
+      await user.click(screen.getByRole("button", { name: /create project/i }));
+
+      await waitFor(() => {
+        expect(routerReplace.mock.calls.length).toBeGreaterThan(0);
+        const lastUrl = routerReplace.mock.calls[routerReplace.mock.calls.length - 1][0] as string;
+        expect(
+          new URL(`http://localhost${lastUrl}`).searchParams.get("project"),
+        ).toBe("proj-created");
+      });
+    } finally {
+      stableSearchParams.delete("project");
+    }
   });
 
   it("keeps the dialog open with a visible error when the create fails", async () => {

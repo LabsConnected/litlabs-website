@@ -917,3 +917,74 @@ describe("StudioTranscript — mobile Show more", () => {
     expect(screen.queryByRole("button", { name: /show more/i })).toBeNull();
   });
 });
+
+describe("StudioTranscript — failed-run work log truthfulness (ACC-03 item 5)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function renderFailed(execution: ChatMessage["execution"]) {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "Build a bakery site", createdAt: Date.now() },
+      {
+        id: "a-failed",
+        role: "assistant",
+        content: "We hit a snag building that — try again.",
+        status: "failed",
+        createdAt: Date.now(),
+        execution,
+      },
+    ];
+    render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+      />,
+    );
+  }
+
+  it("does NOT blame file verification when the failed run attempted no work at all", () => {
+    // ACC-03 item 5: a first build that died before any tool call (e.g.
+    // the model call itself failed) settled with workspaceChange null,
+    // and the work log claimed "could not verify whether files changed"
+    // — verification was never the failure. The label must say the run
+    // simply completed no work.
+    renderFailed({ mode: "build", toolCalls: [], workspaceChange: null });
+    expect(screen.queryByText(/could not verify whether files changed/)).toBeNull();
+    expect(screen.getByText(/Failed — no work completed/)).toBeTruthy();
+  });
+
+  it("does NOT blame file verification when the failed run only read files", () => {
+    renderFailed({
+      mode: "build",
+      toolCalls: [{ toolId: "files.read", success: true, mutating: false }],
+      workspaceChange: null,
+    });
+    expect(screen.queryByText(/could not verify whether files changed/)).toBeNull();
+    // The read SUCCEEDED — the step count must credit it. The fallback
+    // used to hardcode "0 of N steps complete", erasing successful
+    // read-only work from the record of a failed run (Greptile PR #1109).
+    expect(screen.getByText(/1 of 1 steps complete — failed/)).toBeTruthy();
+    expect(screen.queryByText(/0 of 1 steps complete/)).toBeNull();
+  });
+
+  it("keeps the verification label when a mutation was attempted but no evidence came back", () => {
+    renderFailed({
+      mode: "build",
+      toolCalls: [{ toolId: "files.write", success: false, mutating: true }],
+      workspaceChange: null,
+    });
+    expect(screen.getByText(/could not verify whether files changed/)).toBeTruthy();
+  });
+
+  it("keeps the verification label when the workspace comparison itself was impossible", () => {
+    renderFailed({
+      mode: "build",
+      toolCalls: [],
+      workspaceChange: { status: "unknown" },
+    });
+    expect(screen.getByText(/could not verify whether files changed/)).toBeTruthy();
+  });
+});

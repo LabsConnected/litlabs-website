@@ -567,4 +567,21 @@ describe("StudioPreviewPanel", () => {
       }
     });
   });
+
+  it("Static View Publish routes through the canonical deploy request (ACC-03 item 4)", async () => {
+    mockFetch(() => jsonResponse({ runtimeStatus: "not_started", previewUrl: null, runtimeError: null }));
+    const seen: unknown[] = [];
+    const handler = (e: Event) => seen.push((e as CustomEvent).detail);
+    window.addEventListener("studio:request-deploy", handler);
+    try {
+      render(<StudioPreviewPanel projectId="project-1" projectName="Demo" repositoryName={null} branch="main" workspaceStatus="ready" />);
+      const button = await screen.findByRole("button", { name: "Publish site" });
+      fireEvent.click(button);
+      // The SAME action the Deploy panel uses — one publish path, no
+      // second implementation hidden in the toolbar.
+      expect(seen).toEqual([{ target: "litt" }]);
+    } finally {
+      window.removeEventListener("studio:request-deploy", handler);
+    }
+  });
 });
