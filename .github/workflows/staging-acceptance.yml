@@ -14,8 +14,8 @@ on:
   workflow_dispatch:
     inputs:
       expected_staging_sha:
-        description: "Optional 40-char SHA staging must serve; checked every iteration (drift fails the run)"
-        required: false
+        description: "Approved 40-char SHA staging web and terminal must serve"
+        required: true
         type: string
 
 permissions:
@@ -27,6 +27,7 @@ concurrency:
 
 env:
   STAGING_URL: https://litlabslitt-shell-staging.up.railway.app
+  STAGING_TERMINAL_URL: https://terminal-server-staging.up.railway.app
   ACCEPTANCE_RUNS: 10
 
 jobs:
@@ -39,6 +40,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Keep the acceptance assertions from the dispatched workflow ref;
+          # expected_staging_sha identifies the deployed app, not the harness.
+          ref: ${{ github.sha }}
+
+      - name: Validate approved SHA
+        run: |
+          if ! [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::expected_staging_sha must be a full lowercase commit SHA"
+            exit 1
+          fi
 
       - name: Install Node
         uses: actions/setup-node@v4
@@ -62,11 +74,14 @@ jobs:
           echo "$body" | jq -e '.status == "ok"' > /dev/null \
             || { echo "::error::staging not healthy — refusing acceptance run"; echo "$body" | head -c 500; exit 1; }
           echo "staging healthy: $(echo "$body" | jq -r .commit)"
-          if [ -n "$EXPECTED_SHA" ]; then
-            detail="$(echo "$body" | jq -r '.checks.build.detail')"
-            [ "$detail" = "$EXPECTED_SHA" ] \
-              || { echo "::error::staging serves $detail, expected $EXPECTED_SHA — redeploy first"; exit 1; }
-          fi
+          detail="$(echo "$body" | jq -r '.checks.build.detail')"
+          [ "$detail" = "$EXPECTED_SHA" ] \
+            || { echo "::error::staging web serves $detail, expected $EXPECTED_SHA"; exit 1; }
+          terminal="$(curl -fsS --max-time 30 "$STAGING_TERMINAL_URL/health")"
+          echo "$terminal" | jq -e --arg commit "${EXPECTED_SHA:0:8}" \
+            '.status == "ok" and .readiness == "ready" and .commit == $commit and
+             (.terminal.execution == "disabled" or .terminal.sandbox.state == "verified")' \
+            > /dev/null || { echo "::error::staging terminal SHA, readiness, or isolation check failed"; exit 1; }
 
       - name: Clean up tagged disposable acceptance users
         # The Clerk TEST instance caps at 100 users and every iteration
@@ -89,13 +104,16 @@ jobs:
           passes=0
           for i in $(seq 1 "$ACCEPTANCE_RUNS"); do
             echo "=== acceptance iteration $i/$ACCEPTANCE_RUNS ==="
-            if [ -n "$EXPECTED_SHA" ]; then
-              # Staging auto-deploys main merges AND the staging branch —
-              # drift mid-run would make the evidence name the wrong SHA.
-              detail="$(curl -fsS --max-time 20 "$STAGING_URL/api/health" | jq -r '.checks.build.detail')"
-              [ "$detail" = "$EXPECTED_SHA" ] \
-                || { echo "::error::SHA drift at iteration $i: serving $detail, expected $EXPECTED_SHA"; echo "CONSECUTIVE_PASSES=$passes" >> "$GITHUB_ENV"; exit 1; }
-            fi
+            # Recheck both services before every paid journey: a merge may
+            # move staging web while this four-hour workflow is running.
+            detail="$(curl -fsS --max-time 20 "$STAGING_URL/api/health" | jq -r '.checks.build.detail')"
+            [ "$detail" = "$EXPECTED_SHA" ] \
+              || { echo "::error::web SHA drift at iteration $i: serving $detail, expected $EXPECTED_SHA"; echo "CONSECUTIVE_PASSES=$passes" >> "$GITHUB_ENV"; exit 1; }
+            terminal="$(curl -fsS --max-time 20 "$STAGING_TERMINAL_URL/health")"
+            echo "$terminal" | jq -e --arg commit "${EXPECTED_SHA:0:8}" \
+              '.status == "ok" and .readiness == "ready" and .commit == $commit and
+               (.terminal.execution == "disabled" or .terminal.sandbox.state == "verified")' \
+              > /dev/null || { echo "::error::terminal drift or isolation failure at iteration $i"; echo "CONSECUTIVE_PASSES=$passes" >> "$GITHUB_ENV"; exit 1; }
             user_id="$(node scripts/final-acceptance/create-fresh-user.mjs)"
             echo "fresh user: $user_id"
             if LITT_ACCEPTANCE_USER_ID="$user_id" \

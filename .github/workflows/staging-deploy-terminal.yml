@@ -5,10 +5,8 @@ name: Deploy Terminal Server to Railway Staging
 # staging-deploy.yml (which covers @litlabs/litt-shell). Both must be run
 # with the SAME approved SHA so staging runs one consistent release.
 #
-# Safety: the target service is HARDCODED to the staging terminal-server
-# service inside the litlabs-website project — there is no input that can
-# redirect this workflow at the production litlabs-terminal-server project
-# or any other service, and a guard step rejects production identifiers.
+# Safety: the target project, environment, and service IDs are pinned below.
+# The credential scope is checked against those IDs before any Railway write.
 on:
   workflow_dispatch:
     inputs:
@@ -29,6 +27,9 @@ env:
   # deliberately NOT "litlabs-terminal-server" — that is the separate
   # production project's service and must never be targeted here.
   STAGING_SERVICE: "terminal-server"
+  STAGING_PROJECT_ID: 3d5b8abe-088c-4a6c-9b34-7054829247c9
+  STAGING_ENVIRONMENT_ID: 8631ff55-0835-449b-942e-a9c3748dea98
+  STAGING_SERVICE_ID: 3c06dd64-e82f-4bb5-8c47-d65dede36af9
   STAGING_ENVIRONMENT: staging
   STAGING_URL: https://terminal-server-staging.up.railway.app
 
@@ -86,13 +87,43 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Diagnose Railway token scope
+      - name: Verify Railway token scope and staging target
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
-        continue-on-error: true
         run: |
-          railway status || true
+          set -euo pipefail
+          if [ -n "$RAILWAY_TOKEN" ]; then
+            # A project token is bound to exactly one project and environment.
+            # Refuse a production-bound token even if the service name matches.
+            scope="$(railway api 'query { projectToken { projectId environmentId } }' --compact)"
+            if ! printf '%s' "$scope" | jq -e \
+              --arg project "$STAGING_PROJECT_ID" \
+              --arg environment "$STAGING_ENVIRONMENT_ID" \
+              '.data.projectToken.projectId == $project and .data.projectToken.environmentId == $environment' \
+              > /dev/null; then
+              echo "::error::Railway project token is not bound to the approved staging project and environment"
+              exit 1
+            fi
+            status="$(railway status --json)"
+          else
+            # Account tokens are not environment-bound. Every write below
+            # therefore passes the pinned project and environment IDs.
+            status="$(railway status --project "$STAGING_PROJECT_ID" \
+              --environment "$STAGING_ENVIRONMENT_ID" --json)"
+          fi
+          if ! printf '%s' "$status" | jq -e \
+            --arg project "$STAGING_PROJECT_ID" \
+            --arg environment "$STAGING_ENVIRONMENT_ID" \
+            --arg service "$STAGING_SERVICE_ID" \
+            '.id == $project and any(.environments.edges[]?.node;
+              .id == $environment and any(.serviceInstances.edges[]?.node;
+                .serviceId == $service and .serviceName == "terminal-server"))' \
+            > /dev/null; then
+            echo "::error::Railway target does not match the approved staging terminal service"
+            exit 1
+          fi
+          echo "Verified Railway staging project, environment, and terminal service IDs"
 
       - name: Deploy to staging terminal-server only
         env:
@@ -100,6 +131,7 @@ jobs:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
           INPUT_SHA: ${{ inputs.sha }}
         run: |
+          set -euo pipefail
           # railway up (CLI upload) does NOT inject RAILWAY_GIT_COMMIT_SHA —
           # set it explicitly with --skip-deploys so the upload below is the
           # deployment that picks it up. /health reports commit as the
@@ -108,15 +140,18 @@ jobs:
           # an account token needs --environment to select staging.
           if [ -n "$RAILWAY_TOKEN" ]; then
             railway variable set "RAILWAY_GIT_COMMIT_SHA=$INPUT_SHA" \
-              --service "$STAGING_SERVICE" \
+              --service "$STAGING_SERVICE_ID" \
               --skip-deploys
-            railway up --service "$STAGING_SERVICE" --detach
+            railway up --service "$STAGING_SERVICE_ID" --detach
           else
             railway variable set "RAILWAY_GIT_COMMIT_SHA=$INPUT_SHA" \
-              --service "$STAGING_SERVICE" \
-              --environment "$STAGING_ENVIRONMENT" \
+              --project "$STAGING_PROJECT_ID" \
+              --service "$STAGING_SERVICE_ID" \
+              --environment "$STAGING_ENVIRONMENT_ID" \
               --skip-deploys
-            railway up --service "$STAGING_SERVICE" --environment "$STAGING_ENVIRONMENT" --detach
+            railway up --project "$STAGING_PROJECT_ID" \
+              --service "$STAGING_SERVICE_ID" \
+              --environment "$STAGING_ENVIRONMENT_ID" --detach
           fi
 
       - name: Verify staging terminal health + deployed SHA

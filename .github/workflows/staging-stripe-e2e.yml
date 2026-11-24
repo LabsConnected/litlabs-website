@@ -27,8 +27,8 @@ on:
           - creator_beta
           - pro_builder_beta
       expected_staging_sha:
-        description: "Optional 40-char SHA staging must serve before the run (drift aborts early)"
-        required: false
+        description: "Approved 40-char SHA staging must serve before the run"
+        required: true
         type: string
 
 permissions:
@@ -51,6 +51,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.expected_staging_sha }}
+
+      - name: Validate approved SHA
+        run: |
+          if ! [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::expected_staging_sha must be a full lowercase commit SHA"
+            exit 1
+          fi
 
       - name: Install Node
         uses: actions/setup-node@v4
@@ -74,11 +83,9 @@ jobs:
           echo "$body" | jq -e '.status == "ok"' > /dev/null \
             || { echo "::error::staging not healthy — refusing paid-flow run"; echo "$body" | head -c 500; exit 1; }
           echo "staging healthy: $(echo "$body" | jq -r .commit)"
-          if [ -n "$EXPECTED_SHA" ]; then
-            detail="$(echo "$body" | jq -r '.checks.build.detail')"
-            [ "$detail" = "$EXPECTED_SHA" ] \
-              || { echo "::error::staging serves $detail, expected $EXPECTED_SHA — redeploy first"; exit 1; }
-          fi
+          detail="$(echo "$body" | jq -r '.checks.build.detail')"
+          [ "$detail" = "$EXPECTED_SHA" ] \
+            || { echo "::error::staging serves $detail, expected $EXPECTED_SHA — redeploy first"; exit 1; }
 
       - name: Create disposable Clerk TEST user
         id: user
