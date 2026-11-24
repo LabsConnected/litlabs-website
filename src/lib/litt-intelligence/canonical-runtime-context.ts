@@ -285,7 +285,11 @@ export function buildRuntimeContextBlock(ctx: CanonicalRuntimeContext): string {
         "(e.g. pt-16/pt-20 on the first section or main) — never let fixed navigation overlap the hero or headings. " +
         "DESIGN QUALITY (LiTT Black Label): default to a premium dark aesthetic — near-black background, ONE accent color, " +
         "generous whitespace, restrained borders (white/5-white/10), soft glass surfaces, consistent spacing rhythm, " +
-        "responsive stacking below md. Avoid template-looking centered walls of text; use real headings, hierarchy, and section padding.",
+        "responsive stacking below md. Avoid template-looking centered walls of text; use real headings, hierarchy, and section padding. " +
+        "READABILITY RULE: pair every text color with the background this same document actually declares behind it — " +
+        "light text is allowed ONLY where the element itself, a section ancestor, or body declares a dark background in the same CSS; " +
+        "if that dark background is not declared, the text must be dark. Describing a dark theme in your reply does not make it so: " +
+        "a page whose words cannot be read on its own declared colors is a failed build.",
       );
     }
   }

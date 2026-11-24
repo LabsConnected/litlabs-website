@@ -30,6 +30,7 @@ import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { buildPatchRecoveryMessage, existingPageOverwriteError, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange, workspaceChangeFromVolumeListing, workspaceChangeFromDirectReads } from "./workspace-change-producer";
 import { checkRequestedLiteral, requestedLiteralFailureMessage, requestedLiteralRepairPrompt } from "./requested-literal";
+import { checkTextContrast, textContrastFailureMessage, textContrastRepairPrompt } from "./text-contrast";
 import { settleRunOutcome, type RunFailureContributor } from "./run-settlement";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { recordModelFailure } from "./provider-registry";
@@ -2308,6 +2309,9 @@ async function runAgentLoopV2Inner(
   // ACC-01 F9: the requested-literal repair feedback fires at most
   // once per run; the tail check is the final word either way.
   let literalRepairFeedbackGiven = false;
+  // ACC-02 Defect A: same one-shot discipline for the invisible-text
+  // (contrast) repair feedback.
+  let contrastRepairFeedbackGiven = false;
   // True once the model has emitted at least one tool call this run. An
   // execution-required run (requireToolCallOnFirstStep) holds the
   // "required" tool choice until this flips — a provider that drops the
@@ -3299,6 +3303,37 @@ async function runAgentLoopV2Inner(
       }
     }
 
+    // ACC-02 Defect A: after a mutation batch, verify the page's text
+    // would actually be VISIBLE under the colors the document itself
+    // declares — the Run 2 build shipped a tagline and opening-hours
+    // times as light text on a light background while reporting a
+    // dark theme. On a clear violation, feed the mismatch back ONCE
+    // so the model can repair its own CSS before finishing; the tail
+    // check below has the final word.
+    if (
+      batchHasMutation &&
+      !contrastRepairFeedbackGiven &&
+      !cancelled &&
+      !modelFailed &&
+      !failedHonestly
+    ) {
+      const contrastCheck = await checkTextContrast({
+        candidatePaths: successfulMutationPaths(toolCallLog),
+        readFile: (path) => transport.readFile(path),
+      });
+      if (contrastCheck.applies && contrastCheck.violations.length > 0) {
+        contrastRepairFeedbackGiven = true;
+        llmMessages.push({
+          role: "user",
+          content: textContrastRepairPrompt(contrastCheck.violations),
+        });
+        localProgress.emit({
+          type: "status",
+          summary: "Some text in the page would be invisible — asking for a fix before this can be called done.",
+        });
+      }
+    }
+
     // Per-step timing: total step duration + cumulative elapsed, so the work log
     // can show exactly where the minutes went on a slow build.
     localProgress.emit({
@@ -3357,6 +3392,24 @@ async function runAgentLoopV2Inner(
     });
     if (literalCheck.applies && !literalCheck.found && literalCheck.literal) {
       failedHonestly = requestedLiteralFailureMessage(literalCheck.literal);
+      finalText = failedHonestly;
+    }
+  }
+
+  // ACC-02 Defect A — the final word on invisible text: if a page the
+  // run wrote still declares text with almost no contrast against
+  // the background behind it (read back from the workspace, judged on
+  // the document's own CSS), the page is not readable and the run has
+  // NOT produced a finished site — settle it honestly as failed
+  // instead of reporting an invisible page as a successful build.
+  // Pages the checker cannot reason about are untouched by this.
+  if (!cancelled && !modelFailed && !failedHonestly) {
+    const contrastCheck = await checkTextContrast({
+      candidatePaths: successfulMutationPaths(toolCallLog),
+      readFile: (path) => transport.readFile(path),
+    });
+    if (contrastCheck.applies && contrastCheck.violations.length > 0) {
+      failedHonestly = textContrastFailureMessage(contrastCheck.violations);
       finalText = failedHonestly;
     }
   }
@@ -4304,6 +4357,9 @@ async function resumeAgentLoopV2Inner(
   // ACC-01 F9: the requested-literal repair feedback fires at most
   // once per run; the tail check is the final word either way.
   let literalRepairFeedbackGiven = false;
+  // ACC-02 Defect A: same one-shot discipline for the invisible-text
+  // (contrast) repair feedback.
+  let contrastRepairFeedbackGiven = false;
   // A paused run exists BECAUSE the model emitted an approval-gated tool
   // call — the required-first-call contract was satisfied pre-pause, so
   // the resumed loop runs under "auto" tool choice throughout.
@@ -4635,6 +4691,33 @@ async function resumeAgentLoopV2Inner(
       localProgress.emit({
         type: "status",
         summary: "The requested text wasn't in the edited file — asking for a fix before this can be called done.",
+      });
+    }
+  }
+
+  // ACC-02 Defect A: the same up-front repair offer for invisible
+  // text — the approved mutation executed above never passes a
+  // mutation batch inside this loop, so without this the continuation
+  // could settle failed at the tail without the one repair attempt.
+  if (
+    resume.decision === "approved" &&
+    !contrastRepairFeedbackGiven &&
+    !cancelled &&
+    !failedHonestly
+  ) {
+    const contrastCheck = await checkTextContrast({
+      candidatePaths: successfulMutationPaths(toolCallLog),
+      readFile: (path) => transport.readFile(path),
+    });
+    if (contrastCheck.applies && contrastCheck.violations.length > 0) {
+      contrastRepairFeedbackGiven = true;
+      llmMessages.push({
+        role: "user",
+        content: textContrastRepairPrompt(contrastCheck.violations),
+      });
+      localProgress.emit({
+        type: "status",
+        summary: "Some text in the page would be invisible — asking for a fix before this can be called done.",
       });
     }
   }
@@ -5124,6 +5207,33 @@ async function resumeAgentLoopV2Inner(
         });
       }
     }
+    // ACC-02 Defect A: same invisible-text feedback as the initial
+    // loop — after a mutation batch, if a page the run wrote declares
+    // text that would be invisible on its own declared background,
+    // feed the mismatch back ONCE so the model can repair its CSS.
+    if (
+      batchHasMutation &&
+      !contrastRepairFeedbackGiven &&
+      !cancelled &&
+      !modelFailed &&
+      !failedHonestly
+    ) {
+      const contrastCheck = await checkTextContrast({
+        candidatePaths: successfulMutationPaths(toolCallLog),
+        readFile: (path) => transport.readFile(path),
+      });
+      if (contrastCheck.applies && contrastCheck.violations.length > 0) {
+        contrastRepairFeedbackGiven = true;
+        llmMessages.push({
+          role: "user",
+          content: textContrastRepairPrompt(contrastCheck.violations),
+        });
+        localProgress.emit({
+          type: "status",
+          summary: "Some text in the page would be invisible — asking for a fix before this can be called done.",
+        });
+      }
+    }
     if (!batchHasMutation) mutationBatchPending = false;
   }
 
@@ -5165,6 +5275,21 @@ async function resumeAgentLoopV2Inner(
     });
     if (literalCheck.applies && !literalCheck.found && literalCheck.literal) {
       failedHonestly = requestedLiteralFailureMessage(literalCheck.literal);
+      finalText = failedHonestly;
+    }
+  }
+
+  // ACC-02 Defect A — the final word, identical to the initial loop:
+  // a page whose text is invisible under its own declared colors is
+  // not a finished page, so the run settles honestly as failed —
+  // never report an invisible page as success.
+  if (!cancelled && !modelFailed && !failedHonestly) {
+    const contrastCheck = await checkTextContrast({
+      candidatePaths: successfulMutationPaths(toolCallLog),
+      readFile: (path) => transport.readFile(path),
+    });
+    if (contrastCheck.applies && contrastCheck.violations.length > 0) {
+      failedHonestly = textContrastFailureMessage(contrastCheck.violations);
       finalText = failedHonestly;
     }
   }
