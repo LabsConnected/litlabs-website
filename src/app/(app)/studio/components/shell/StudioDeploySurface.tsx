@@ -23,6 +23,7 @@ import {
   useBoardPanelStatusStore,
   type BoardPanelStatus,
 } from "../../stores/useBoardPanelStatusStore";
+import { useExecutionStore } from "../../stores/useExecutionStore";
 
 type DeploymentRecord = {
   id: string;
@@ -118,6 +119,38 @@ export default function StudioDeploySurface({
   const [buildCheckStatus, setBuildCheckStatus] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const loadedForProjectRef = useRef<string | null>(null);
+
+  // ACC-03 item 4: deploys run through LiTT in chat, so this surface's
+  // mount-time read goes stale the moment a chat deploy lands — it kept
+  // saying "not deployed yet" (and offered no Redeploy) until a full
+  // page reload. Refresh in place when a run completes: the execution
+  // store's isRunning falling edge is the run-settled signal every
+  // surface already shares.
+  const isRunning = useExecutionStore((s) => s.isRunning);
+  const wasRunningRef = useRef(false);
+  useEffect(() => {
+    if (wasRunningRef.current && !isRunning) {
+      // The run the hand-off note referred to has settled; the note is
+      // spent and the records below are about to be re-read.
+      setRequestSent(false);
+      setRefreshTick((tick) => tick + 1);
+    }
+    wasRunningRef.current = isRunning;
+  }, [isRunning]);
+
+  // A completed deploy also lands files (deploy.preview writes the
+  // preview copy), which broadcasts studio:files-changed for the
+  // project — a second, deploy-specific refresh trigger.
+  useEffect(() => {
+    if (!projectId) return;
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: string }>).detail;
+      if (detail?.projectId && detail.projectId !== projectId) return;
+      setRefreshTick((tick) => tick + 1);
+    };
+    window.addEventListener("studio:files-changed", handler);
+    return () => window.removeEventListener("studio:files-changed", handler);
+  }, [projectId]);
 
   useEffect(() => {
     if (!projectId) {

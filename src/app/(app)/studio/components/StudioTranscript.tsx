@@ -85,19 +85,31 @@ function deriveWorkLog(
       };
     }
 
-    // Only claim nothing happened when the diff actually says so. Without a
-    // diff we report the failure without asserting anything about the files.
-    // Only claim nothing happened when the diff actually says so. When the
-    // comparison could not be made we say that plainly rather than guessing.
-    if (change?.status === "unknown" || change === null) {
+    // The verification label is only truthful when file verification is
+    // actually what failed: either a workspace comparison was attempted
+    // and came back "unknown", or the run attempted a mutation and no
+    // evidence came back at all. A run that died before attempting any
+    // file work (a failed model call on a first build, say) settled with
+    // change === null too — blaming file verification for it sent the
+    // user (and the operator) hunting a verification bug that never
+    // happened (ACC-03 item 5). Those runs fall through to the plain
+    // failure labels below.
+    const attemptedMutation = execution?.toolCalls.some((call) => call.mutating) ?? false;
+    if (change?.status === "unknown" || (change === null && attemptedMutation)) {
       return {
         label: "Failed — could not verify whether files changed",
         color: "#ef4444",
       };
     }
+    // Count the steps that actually succeeded: this fallback never goes
+    // through verdict evaluation, and hardcoding 0 erased successful
+    // work — a run that read files fine and then failed elsewhere was
+    // recorded as "0 of N steps complete" (Greptile PR #1109). The
+    // transcript's own convention (workLogLabel) counts successes.
+    const completed = (execution?.toolCalls ?? []).filter((call) => call.success).length;
     return {
       label: attempted > 0
-        ? `0 of ${attempted} steps complete — failed`
+        ? `${completed} of ${attempted} steps complete — failed`
         : "Failed — no work completed",
       color: "#ef4444",
     };
