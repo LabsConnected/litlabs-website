@@ -53,39 +53,71 @@ export function boundFailureReason(raw: string): string {
 
 /**
  * Pair each failed assistant message with the failed run that produced
- * it, oldest first, each run used at most once. Returns messageId →
- * bounded failure reason. Messages with no matching run (or runs with
- * no recorded reason) are simply absent from the map.
+ * it. Returns messageId → bounded failure reason. Messages with no
+ * matching run (or runs with no recorded reason) are simply absent
+ * from the map.
+ *
+ * No saved identity links a run to its assistant message (the run's
+ * idempotency key names the send request, whose clientRequestId is
+ * persisted only on the USER message), so pairing is temporal — and
+ * the direction matters (Greptile round 2): a failed message can have
+ * NO run at all (a credit reservation error fails the send before run
+ * creation), so walking messages oldest-first and handing each the
+ * oldest run in its window gives a RETRY's reason to that earlier
+ * run-less message and leaves the retry bare. Instead, walk runs in
+ * chronological order and give each run to the still-unmatched failed
+ * message created CLOSEST to it inside the window — a run is created
+ * moments before its own message placeholder, so the closest failed
+ * message is its owner, never an earlier message that merely shares
+ * the tolerance window. Each run and each message is used at most
+ * once; a run with no message in its window is dropped rather than
+ * mis-attached.
  */
 export function failureReasonByMessageId(
   messages: FailureReasonMessage[],
   runs: FailureReasonRun[],
 ): Map<string, string> {
-  const failedMessages = messages
-    .filter((m) => m.role === "assistant" && m.status === "failed")
-    .slice()
-    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  const failedMessages = messages.filter(
+    (m) => m.role === "assistant" && m.status === "failed",
+  );
   const failedRuns = runs
     .filter((r) => r.status === "failed" && r.failureMessage && r.failureMessage.trim().length > 0)
     .slice()
-    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    .sort(
+      (a, b) =>
+        Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id),
+    );
 
-  const usedRunIds = new Set<string>();
+  const usedMessageIds = new Set<string>();
   const reasons = new Map<string, string>();
-  for (const message of failedMessages) {
-    const msgStart = Date.parse(message.createdAt);
-    const msgEnd = Date.parse(message.updatedAt ?? message.createdAt);
-    const run = failedRuns.find((candidate) => {
-      if (usedRunIds.has(candidate.id)) return false;
-      const runAt = Date.parse(candidate.createdAt);
-      if (!Number.isFinite(runAt)) return false;
-      if (Number.isFinite(msgStart) && runAt < msgStart - RUN_MESSAGE_TOLERANCE_MS) return false;
-      if (Number.isFinite(msgEnd) && runAt > msgEnd + RUN_MESSAGE_TOLERANCE_MS) return false;
-      return true;
-    });
-    if (run) {
-      usedRunIds.add(run.id);
-      reasons.set(message.id, boundFailureReason(run.failureMessage as string));
+  for (const run of failedRuns) {
+    const runAt = Date.parse(run.createdAt);
+    if (!Number.isFinite(runAt)) continue;
+    let best: FailureReasonMessage | null = null;
+    let bestDelta = Number.POSITIVE_INFINITY;
+    let bestStart = Number.NEGATIVE_INFINITY;
+    for (const message of failedMessages) {
+      if (usedMessageIds.has(message.id)) continue;
+      const msgStart = Date.parse(message.createdAt);
+      const msgEnd = Date.parse(message.updatedAt ?? message.createdAt);
+      if (Number.isFinite(msgStart) && runAt < msgStart - RUN_MESSAGE_TOLERANCE_MS) continue;
+      if (Number.isFinite(msgEnd) && runAt > msgEnd + RUN_MESSAGE_TOLERANCE_MS) continue;
+      const delta = Number.isFinite(msgStart) ? Math.abs(msgStart - runAt) : 0;
+      // Closest creation time wins; an exact tie goes to the later
+      // message, then to the higher id, so pairing is deterministic.
+      if (
+        delta < bestDelta ||
+        (delta === bestDelta &&
+          (msgStart > bestStart || (msgStart === bestStart && best !== null && message.id > best.id)))
+      ) {
+        best = message;
+        bestDelta = delta;
+        bestStart = msgStart;
+      }
+    }
+    if (best) {
+      usedMessageIds.add(best.id);
+      reasons.set(best.id, boundFailureReason(run.failureMessage as string));
     }
   }
   return reasons;

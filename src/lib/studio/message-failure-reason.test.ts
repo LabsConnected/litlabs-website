@@ -53,6 +53,38 @@ describe("failureReasonByMessageId", () => {
     expect(reasons.get("a1")).toBe("image.generate: Bad input: width not allowed");
   });
 
+  it("gives a retry's reason to the retry message, not the earlier run-less failure (Greptile round 2)", () => {
+    // Greptile's exact scenario: message A failed on a credit
+    // reservation error BEFORE any action run existed, so no run
+    // carries its failure. The user retries ~30s later; the retry's
+    // run fails with a recorded reason. Oldest-first pairing handed
+    // the retry's reason to A (its lifetime window still contains the
+    // retry run's timestamp) and left the retry message bare.
+    const reasons = failureReasonByMessageId(
+      [failedMessage("a1", 2, 10), failedMessage("a2", 40, 75)],
+      [failedRun("run-retry", 39, "files.write: workspace transport unavailable")],
+    );
+    expect(reasons.get("a2")).toBe("files.write: workspace transport unavailable");
+    expect(reasons.has("a1")).toBe(false);
+    expect(reasons.size).toBe(1);
+  });
+
+  it("does not cross reasons when a retry follows a real failure inside the window", () => {
+    // Both messages have runs; the retry was sent within the first
+    // message's tolerance window. Each run's reason must stay with
+    // the message created closest to that run.
+    const reasons = failureReasonByMessageId(
+      [failedMessage("a1", 2, 32), failedMessage("a2", 40, 75)],
+      [
+        failedRun("run-1", 1, "first failure reason"),
+        failedRun("run-2", 39, "retry failure reason"),
+      ],
+    );
+    expect(reasons.get("a1")).toBe("first failure reason");
+    expect(reasons.get("a2")).toBe("retry failure reason");
+    expect(reasons.size).toBe(2);
+  });
+
   it("pairs two failures in order without crossing reasons", () => {
     const reasons = failureReasonByMessageId(
       [failedMessage("a1", 2), failedMessage("a2", 200)],
