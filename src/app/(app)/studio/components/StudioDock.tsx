@@ -25,11 +25,14 @@ import {
 import {
   Activity,
   Clapperboard,
+  Folder,
   Globe,
+  ListChecks,
   Maximize2,
   Minimize2,
   PanelBottom,
   ScanSearch,
+  ShieldCheck,
   SquareTerminal,
   X,
 } from "lucide-react";
@@ -38,8 +41,20 @@ import { SelectionInspectorPanel } from "./StudioInspector";
 
 // Files is NOT a dock tab anymore (Larry, 2026-11-13): project files
 // live in the LiTT panel's top-row Files tab (desktop + mobile sheet).
+// Rail consolidation (Larry, 2026-11-25): the Regular layout's right
+// rail is retired, so the CLASSIC desktop dock additionally carries
+// optional Files / Checks / Approvals tabs — rendered only when the
+// parent passes the matching content slot. Checks and Approvals carry
+// their real read-model panels; the Files slot carries whatever the
+// parent composes (in Regular, a jump panel into the Code box, which
+// is Files' one home — the dock never mounts a second file tree).
+// The shell and mobile mounts pass none of these slots, so their tab
+// sets are unchanged.
 export type StudioDockTab =
   | "activity"
+  | "files"
+  | "checks"
+  | "approvals"
   | "terminal"
   | "inspector"
   | "media"
@@ -58,14 +73,27 @@ export interface StudioDockProps {
   fill?: boolean;
   onHeightChange: (h: number) => void;
   activityContent: ReactNode;
+  /** Optional project tabs (rail consolidation): rendered only when
+      the matching content slot is passed. */
+  filesContent?: ReactNode;
+  checksContent?: ReactNode;
+  approvalsContent?: ReactNode;
   /** Keep mounted always (PTY stays alive) — rendered with display:none when inactive */
   terminalContent: ReactNode;
   inspectorContent: ReactNode;
   mediaContent: ReactNode;
   /** The embedded web browser (Regular layout's Browser home; in the
       shell this slot carries a jump panel to the board Browser panel,
-      so the browser itself still exists exactly once). */
+      so the browser itself still exists exactly once). When
+      `onBrowserLaunch` is set, this slot is not rendered at all —
+      the Browser tab becomes a launcher for the side dock. */
   browserContent: ReactNode;
+  /** Rail consolidation (Regular): when provided, the Browser tab is
+      a launcher — clicking it opens the Browser side dock instead of
+      selecting a bottom-dock pane. */
+  onBrowserLaunch?: () => void;
+  /** Highlights the Browser launcher tab while the side dock is open. */
+  browserActive?: boolean;
   /** True while an agent run is in flight — pulses the Activity tab */
   activityPulse?: boolean;
   /** True when a terminal command failed — badges the Terminal tab */
@@ -88,8 +116,13 @@ const DOCK_TABS: {
   id: StudioDockTab;
   label: string;
   icon: typeof Activity;
+  /** Optional tabs render only when the parent passes their slot. */
+  optional?: "filesContent" | "checksContent" | "approvalsContent";
 }[] = [
   { id: "activity", label: "Activity", icon: Activity },
+  { id: "files", label: "Files", icon: Folder, optional: "filesContent" },
+  { id: "checks", label: "Checks", icon: ListChecks, optional: "checksContent" },
+  { id: "approvals", label: "Approvals", icon: ShieldCheck, optional: "approvalsContent" },
   { id: "terminal", label: "Terminal", icon: SquareTerminal },
   { id: "inspector", label: "Inspector", icon: ScanSearch },
   { id: "media", label: "Media", icon: Clapperboard },
@@ -106,10 +139,15 @@ export default function StudioDock({
   fill = false,
   onHeightChange,
   activityContent,
+  filesContent,
+  checksContent,
+  approvalsContent,
   terminalContent,
   inspectorContent,
   mediaContent,
   browserContent,
+  onBrowserLaunch,
+  browserActive = false,
   activityPulse = false,
   terminalBadge = false,
 }: StudioDockProps) {
@@ -170,13 +208,19 @@ export default function StudioDock({
 
   const handleTabClick = useCallback(
     (t: StudioDockTab) => {
+      // Browser launcher mode: the tab opens the side dock; it never
+      // becomes the dock's active pane and never expands the dock.
+      if (t === "browser" && onBrowserLaunch) {
+        onBrowserLaunch();
+        return;
+      }
       onTabChange(t);
       if (view === "collapsed") {
         setView("normal");
         onToggle();
       }
     },
-    [view, onTabChange, onToggle],
+    [view, onTabChange, onToggle, onBrowserLaunch],
   );
 
   // Escape collapses when maximized. No global keyboard shortcuts here —
@@ -253,8 +297,34 @@ export default function StudioDock({
           ? "calc(100dvh - 120px)"
           : height;
 
+  // Optional project tabs (Files / Checks / Approvals) render only
+  // when the parent passed their content slot; in Browser launcher
+  // mode the browser pane is not part of the dock at all.
+  const optionalSlots: Record<string, ReactNode> = {
+    filesContent,
+    checksContent,
+    approvalsContent,
+  };
+  const visibleTabs = DOCK_TABS.filter((t) => {
+    if (t.optional) return optionalSlots[t.optional] !== undefined;
+    if (t.id === "browser" && onBrowserLaunch) return true;
+    return true;
+  });
+  const paneTabs = visibleTabs.filter(
+    (t) => !(t.id === "browser" && onBrowserLaunch),
+  );
+  // If the controlled active tab names a pane that does not exist in
+  // this mount (e.g. "browser" in launcher mode), fall back to the
+  // first real pane so the content area is never blank.
+  const effectiveActiveTab = paneTabs.some((t) => t.id === activeTab)
+    ? activeTab
+    : (paneTabs[0]?.id ?? activeTab);
+
   const contents: Record<StudioDockTab, ReactNode> = {
     activity: activityContent,
+    files: filesContent,
+    checks: checksContent,
+    approvals: approvalsContent,
     terminal: terminalContent,
     // F1 slice C — the Inspector tab is contextual: the active Studio
     // selection (from StudioContext, any surface) renders above the
@@ -346,9 +416,12 @@ export default function StudioDock({
           </button>
         ) : (
           <div className="no-scrollbar flex h-full min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden pl-2 sm:overflow-visible" role="tablist" aria-label="Studio dock tabs">
-            {DOCK_TABS.map((t) => {
+            {visibleTabs.map((t) => {
               const Icon = t.icon;
-              const isActive = activeTab === t.id;
+              const isActive =
+                t.id === "browser" && onBrowserLaunch
+                  ? browserActive
+                  : effectiveActiveTab === t.id;
               return (
                 <button
                   key={t.id}
@@ -409,12 +482,12 @@ export default function StudioDock({
       {/* Content area — only when expanded; all slots stay mounted */}
       {view !== "collapsed" && (
         <div className="min-h-0 flex-1 overflow-hidden">
-          {DOCK_TABS.map((t) => (
+          {paneTabs.map((t) => (
             <div
               key={t.id}
               data-testid={`dock-content-${t.id}`}
               className="h-full"
-              style={{ display: activeTab === t.id ? undefined : "none" }}
+              style={{ display: effectiveActiveTab === t.id ? undefined : "none" }}
             >
               {contents[t.id] ?? (
                 <div
@@ -427,7 +500,13 @@ export default function StudioDock({
                       ? "Media not loaded"
                       : t.id === "browser"
                         ? "Browser not loaded"
-                        : "No activity yet"}
+                        : t.id === "files"
+                          ? "Files not loaded"
+                          : t.id === "checks"
+                            ? "Checks not loaded"
+                            : t.id === "approvals"
+                              ? "Approvals not loaded"
+                              : "No activity yet"}
                 </div>
               )}
             </div>

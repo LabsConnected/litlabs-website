@@ -163,4 +163,30 @@ describe("StudioDock", () => {
     // Desktop keeps the static strip.
     expect(tablist.className).toMatch(/sm:overflow-visible/);
   });
+
+  it("shows the optional project tabs only when their content slots are passed (rail consolidation)", () => {
+    renderDock({
+      filesContent: <div data-testid="files-slot">files</div>,
+      checksContent: <div data-testid="checks-slot">checks</div>,
+      approvalsContent: <div data-testid="approvals-slot">approvals</div>,
+    });
+    for (const id of ["files", "checks", "approvals"]) {
+      expect(screen.getByTestId(`dock-tab-${id}`)).toBeDefined();
+      expect(screen.getByTestId(`${id}-slot`)).toBeDefined();
+    }
+  });
+
+  it("browser launcher mode: clicking Browser fires onBrowserLaunch and renders no browser pane", () => {
+    const onBrowserLaunch = vi.fn();
+    const { props } = renderDock({ onBrowserLaunch, browserActive: true });
+    expect(screen.queryByTestId("dock-content-browser")).toBeNull();
+    expect(screen.queryByTestId("browser-slot")).toBeNull();
+    // The launcher tab reflects the side dock's open state.
+    expect(
+      screen.getByTestId("dock-tab-browser").getAttribute("aria-selected"),
+    ).toBe("true");
+    fireEvent.click(screen.getByTestId("dock-tab-browser"));
+    expect(onBrowserLaunch).toHaveBeenCalledTimes(1);
+    expect(props.onTabChange).not.toHaveBeenCalledWith("browser");
+  });
 });

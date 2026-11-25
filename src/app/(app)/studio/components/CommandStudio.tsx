@@ -53,7 +53,11 @@ import {
 import CommandStudioHeader from "./CommandStudioHeader";
 import StudioDock, { type StudioDockTab } from "./StudioDock";
 import StudioHealthPanel from "./StudioHealthPanel";
-import StudioRightRail, { type StudioRailTab } from "./StudioRightRail";
+import StudioBrowserSideDock, {
+  clampBrowserDockWidth,
+  BROWSER_DOCK_DEFAULT_WIDTH,
+  type BrowserDockSide,
+} from "./StudioBrowserSideDock";
 import { ApprovalCard } from "./ApprovalCard";
 import MissionCards from "./MissionCards";
 import PersistentMusicPlayer from "./PersistentMusicPlayer";
@@ -620,6 +624,44 @@ function CommandStudioContent() {
     },
     [userId, boardProjectId, boardProjectType],
   );
+  // Rail consolidation (Larry, 2026-11-25): the Regular layout's
+  // permanent right rail is retired. Its surfaces moved — Files into
+  // the Code box, Checks/Approvals/Changes/Activity/Deploy into the
+  // Code box's run section, and Checks/Approvals plus a Files jump
+  // into the bottom dock by Developer tools. What remains here is the
+  // Browser side dock's state: on-demand (never a permanent rail),
+  // right side by default, side + width persisted across sessions.
+  const [browserDockOpen, setBrowserDockOpen] = useState(false);
+  const [browserDockSide, setBrowserDockSide] = useState<BrowserDockSide>(() => {
+    if (typeof window === "undefined") return "right";
+    try {
+      return window.localStorage.getItem("studio-browser-dock-side") === "left"
+        ? "left"
+        : "right";
+    } catch {
+      return "right";
+    }
+  });
+  const [browserDockWidth, setBrowserDockWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return BROWSER_DOCK_DEFAULT_WIDTH;
+    try {
+      const stored = Number(window.localStorage.getItem("studio-browser-dock-width"));
+      if (Number.isFinite(stored) && stored > 0) return clampBrowserDockWidth(stored);
+    } catch { /* noop */ }
+    return BROWSER_DOCK_DEFAULT_WIDTH;
+  });
+  const [browserDockFree, setBrowserDockFree] = useState(false);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("studio-browser-dock-side", browserDockSide);
+    } catch { /* noop */ }
+  }, [browserDockSide]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("studio-browser-dock-width", String(browserDockWidth));
+    } catch { /* noop */ }
+  }, [browserDockWidth]);
+
   // Inspector-tab opens, with the retired "browser" tab re-driven:
   // a "browser" inspector intent no longer lands in inspector-tab
   // state (that InspectorTab member is being removed). It activates
@@ -632,12 +674,17 @@ function CommandStudioContent() {
       if ((tab as string) === "browser") {
         setBrowserJobsSurfaceActive(true);
         if (studioShellActive) summonBoardPanel("browser");
+        // Rail consolidation: in desktop Regular the browser intent
+        // opens the Browser side dock (the stage browser surface is
+        // not rendered by the classic body, so the intent used to
+        // land nowhere visible). Mobile keeps its existing routing.
+        else if (!isMobileLitt) setBrowserDockOpen(true);
         else openStageSurface("browser");
         return;
       }
       setInspectorTab(tab);
     },
-    [studioShellActive, summonBoardPanel, openStageSurface],
+    [studioShellActive, summonBoardPanel, openStageSurface, isMobileLitt],
   );
   // The browser-jobs surface flag follows the stage surface: leaving
   // the browser surface deactivates it, so the plain local state never
@@ -740,6 +787,9 @@ function CommandStudioContent() {
       // Board-only: dock tabs are board panels now — summon the panel.
       const panelByTab: Record<StudioDockTab, BoardPanelId> = {
         activity: "activity",
+        files: "files",
+        checks: "health",
+        approvals: "health",
         terminal: "terminal",
         // Inspector is retired as a board panel (Amendments 2-3): its
         // approvals/changes/plans live in the chat panel's Jobs tab.
@@ -750,9 +800,15 @@ function CommandStudioContent() {
       summonBoardPanel(panelByTab[tab]);
       return;
     }
+    // Rail consolidation: in Regular the Browser is the side dock,
+    // not a bottom-dock pane — open it directly.
+    if (tab === "browser" && !isMobileLitt) {
+      setBrowserDockOpen(true);
+      return;
+    }
     setDockTab(tab);
     setDockOpen(true);
-  }, [studioShellActive, summonBoardPanel]);
+  }, [studioShellActive, summonBoardPanel, isMobileLitt]);
 
   // Media routing for the Files panel (Kimi wiring item 7): opening an
   // image/video/audio file brings the Media surface forward (board:
@@ -997,11 +1053,23 @@ function CommandStudioContent() {
   // desktop rail, the mobile sheet, and header/activity actions.
   const [littActiveTab, setLittActiveTab] = useState<LiTTTab>("chat");
 
-  // Mockup port (2026-11-18): the Regular layout's right rail
-  // (Files · Activity · Checks · Approvals, from Larry's locked
-  // mockup) — its active tab. Desktop Regular only; the board has its
-  // own panels and mobile its sheet/drawer for the same surfaces.
-  const [railTab, setRailTab] = useState<StudioRailTab>("files");
+  // Code-view requests (rail consolidation): entry points that target
+  // a surface whose home is now inside the Code box record a request
+  // here; the classic CodeWorkspace receives it as a prop and applies
+  // it on mount and on every new nonce — no event/timing race with a
+  // freshly mounted Code box.
+  const [codeViewRequest, setCodeViewRequest] = useState<{
+    view: "files" | "run";
+    section?: string;
+    nonce: number;
+  } | null>(null);
+  const requestCodeView = useCallback((view: "files" | "run", section?: string) => {
+    setDestination("studio");
+    setStudioMode("code");
+    // Any explicit stage selection exits the Builder surface.
+    setWorkSurface("conversation");
+    setCodeViewRequest((prev) => ({ view, section, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
 
   // Board mode (B3): the single Files instance relocates onto the board,
   // so the LiTT panel's Files/Components tab has no content while the
@@ -1267,7 +1335,7 @@ function CommandStudioContent() {
   const mobileSurfaceLabel = (() => {
     if (dockOpen) {
       return (
-        { activity: "Activity", terminal: "Terminal", inspector: "Inspector", media: "Media", browser: "Browser" }[dockTab] ??
+        { activity: "Activity", files: "Files", checks: "Checks", approvals: "Approvals", terminal: "Terminal", inspector: "Inspector", media: "Media", browser: "Browser" }[dockTab] ??
         "Tools"
       );
     }
@@ -1307,13 +1375,13 @@ function CommandStudioContent() {
       setMobileLittOpen(true);
       setLittActiveTab("files");
     } else if (!studioShellActive) {
-      // The right rail is mounted in this same non-shell desktop body.
-      setRailTab("files");
+      // Rail consolidation: Files' home is the Code box's Files view.
+      requestCodeView("files");
     } else {
       setLittCollapsed(false);
       setLittActiveTab("files");
     }
-  }, [isMobileLitt, studioShellActive]);
+  }, [isMobileLitt, studioShellActive, requestCodeView]);
 
   // Listen for "Ask LiTT" events from Canvas and other surfaces.
   // Opens LiTT, switches to Chat, and optionally pre-fills the composer
@@ -1420,9 +1488,11 @@ function CommandStudioContent() {
         handleOpenFilesPanel();
         return;
       }
-      if (tab === "activity" || tab === "terminal" || tab === "inspector" || tab === "media") {
+      if (tab === "activity" || tab === "terminal" || tab === "inspector" || tab === "media" || tab === "browser") {
         // Agent intents preselect only — they never open the dock
-        // (Phase 0). The dock opens only by the user's hand.
+        // (Phase 0). The dock opens only by the user's hand. For
+        // "browser" the preselection highlights the dock's Browser
+        // launcher tab; the side dock itself opens only by hand too.
         handlePreselectDockTab(tab);
       }
     };
@@ -3505,15 +3575,16 @@ function CommandStudioContent() {
   // The Regular layout's Jobs tab body: the SAME shared ChatJobsView
   // the board chat panel's Jobs tab renders (Larry's decided chat
   // structure, 2026-11-18 — Chat | Jobs in both layouts, the run-status
-  // strip mounted only inside Jobs). Its Checks summon opens the right
-  // rail's Checks tab, the Regular layout's one Checks home.
+  // strip mounted only inside Jobs). Its Checks summon opens the Code
+  // box's run section on its Checks tab — the Regular layout's one
+  // Checks home after the rail consolidation (2026-11-25).
   const littJobsContent = (
     <ChatJobsView
       projectId={capabilities.projectId}
       conversationId={conversation.selectedConversationId}
       jobsBusy={conversation.busy}
       jobsRefreshKey={workspaceRevision}
-      onOpenChecks={() => setRailTab("checks")}
+      onOpenChecks={() => requestCodeView("run", "checks")}
     />
   );
 
@@ -3624,10 +3695,11 @@ function CommandStudioContent() {
 
   // The project-files composition (header + StudioProjectFiles) —
   // ONE element definition mounted in exactly one home per layout:
-  // the Regular layout's right rail Files tab (desktop, mockup port
-  // 2026-11-18 — it previously lived in the LiTT panel's top-row
-  // Files tab), the board's own Files panel (shell), the mobile
-  // LiTT sheet's Files tab, and the mobile ContextDrawer's Files tab.
+  // the Regular layout's Code box Files view (rail consolidation,
+  // 2026-11-25 — it previously lived in the right rail's Files tab,
+  // and before that in the LiTT panel's top-row Files tab), the
+  // board's own Files panel (shell), the mobile LiTT sheet's Files
+  // tab, and the mobile ContextDrawer's Files tab.
   // The shell's standalone Files sidebar slot was retired 2026-11-14
   // (Larry: Files already lives in the chat tab) — it mounted this
   // same element a second time beside the chat, running two live
@@ -4046,6 +4118,30 @@ function CommandStudioContent() {
   const studioSessionId = conversation.selectedConversationId
     ?? (capabilities.projectId ? `project:${capabilities.projectId}` : "studio:default");
 
+  // Rail consolidation: the Regular layout's Browser side dock
+  // element — rendered by the classic body only, in one of two
+  // mutually exclusive slots: docked-left (before <main>) or
+  // docked-right / free (after </main>, where the retired rail sat).
+  // It mounts only while open, and the browser panel inside it is
+  // the ONE BoardBrowserPanel (its tabs live in the browser store,
+  // so a flip that remounts it loses nothing).
+  const browserSideDockElement = browserDockOpen ? (
+    <StudioBrowserSideDock
+      side={browserDockSide}
+      onSideChange={setBrowserDockSide}
+      width={browserDockWidth}
+      onWidthChange={setBrowserDockWidth}
+      free={browserDockFree}
+      onFreeChange={setBrowserDockFree}
+      onClose={() => {
+        setBrowserDockOpen(false);
+        setBrowserDockFree(false);
+      }}
+    >
+      <BoardBrowserPanel />
+    </StudioBrowserSideDock>
+  ) : null;
+
   return (
     <StudioContextProvider
       projectId={capabilities.projectId ?? null}
@@ -4319,15 +4415,24 @@ function CommandStudioContent() {
               jobsContent={littJobsContent}
               // Mockup port (2026-11-18): no liveContent / filesContent
               // here anymore — in this non-shell desktop body the
-              // Activity feed and the Files surface live in the right
-              // rail (StudioRightRail, mounted beside <main> below),
-              // so this panel carries Chat + Jobs only, matching the
-              // mockup's Regular layout (chat column = conversation +
-              // composer, Jobs tab = the run's settlement home). The
-              // mobile sheet keeps its own tabs and contents.
+              // Activity feed lives in the Code box's run section and
+              // the Files surface in the Code box's Files view (rail
+              // consolidation, 2026-11-25 — both were in the retired
+              // right rail), so this panel carries Chat + Jobs only,
+              // matching the mockup's Regular layout (chat column =
+              // conversation + composer, Jobs tab = the run's
+              // settlement home). The mobile sheet keeps its own tabs
+              // and contents.
               expandedWidth={littResize.width}
             />
           )}
+
+          {/* Browser side dock, docked on the LEFT (rail
+              consolidation, 2026-11-25): the left slot of the
+              on-demand Browser dock — it renders only while open and
+              only when flipped to this side. The right/free slot is
+              after </main>, where the retired right rail sat. */}
+          {viewportTier !== null && !isMobileLitt && !browserDockFree && browserDockSide === "left" && browserSideDockElement}
 
           <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
             {/* F1 Worktabs — directly above the workspace. Each tab binds
@@ -4493,6 +4598,57 @@ function CommandStudioContent() {
                       writeAccess={capabilities.writeAccess ?? true}
                       previewContent={previewContent}
                       canvasContent={renderCanvasDesignStage()}
+                      // Rail consolidation (2026-11-25): in Regular,
+                      // Files' only home is this box's Files view, and
+                      // the run section (Plan · Checks · Approvals ·
+                      // Changes · Activity · Deploy) lives in this
+                      // box's Run view. The contents are the same
+                      // surfaces the retired right rail carried.
+                      filesContent={projectFilesContent}
+                      viewRequest={codeViewRequest}
+                      runContent={{
+                        checks: (
+                          <StudioHealthPanel
+                            mode="checks"
+                            projectId={capabilities.projectId}
+                            refreshKey={workspaceRevision}
+                            runTrigger={healthRunTrigger}
+                          />
+                        ),
+                        approvals: (
+                          <StudioHealthPanel
+                            mode="approvals"
+                            projectId={capabilities.projectId}
+                            conversationId={conversation.selectedConversationId ?? null}
+                            refreshKey={workspaceRevision}
+                          />
+                        ),
+                        changes: capabilities.projectId ? (
+                          <RunChangesPanel
+                            projectId={capabilities.projectId}
+                            busy={executionRunning || conversation.busy}
+                            refreshKey={workspaceRevision}
+                          />
+                        ) : (
+                          <div
+                            className="flex h-full items-center justify-center px-4 text-center text-[12px] font-medium"
+                            style={{ color: "var(--text-muted)" }}
+                          >
+                            Select a project to see its run changes.
+                          </div>
+                        ),
+                        activity: littLiveContent,
+                        deploy: (
+                          <StudioDeploySurface
+                            projectId={capabilities.projectId}
+                            onDeployRequest={(target) => {
+                              window.dispatchEvent(
+                                new CustomEvent(STUDIO_EVENT_REQUEST_DEPLOY, { detail: { target } }),
+                              );
+                            }}
+                          />
+                        ),
+                      }}
                       planCapabilities={capabilities}
                       planModelLabel={modelLabel}
                       onPreviewRefreshRequest={handlePreviewRefreshRequest}
@@ -4650,45 +4806,64 @@ function CommandStudioContent() {
                 />
               }
               mediaContent={<MediaUtilityDock />}
+              // Rail consolidation (2026-11-25), desktop Regular only:
+              // the bottom drawer by Developer tools carries the
+              // retired rail's Checks and Approvals panels for real,
+              // a Files JUMP panel (Files' one home is the Code box —
+              // the dock never mounts a second file tree), and the
+              // Browser as a launcher for the side dock. Mobile passes
+              // none of these and keeps its current dock exactly.
+              filesContent={
+                isMobileLitt
+                  ? undefined
+                  : dockJumpPanel(
+                      "Files",
+                      "Project files live in the Code box — their one home — so the tree you edit is the tree you see.",
+                      "Open files in Code",
+                      () => { setDockOpen(false); requestCodeView("files"); },
+                      "dock-files-jump",
+                    )
+              }
+              checksContent={
+                isMobileLitt ? undefined : (
+                  <StudioHealthPanel
+                    mode="checks"
+                    projectId={capabilities.projectId}
+                    refreshKey={workspaceRevision}
+                    runTrigger={healthRunTrigger}
+                  />
+                )
+              }
+              approvalsContent={
+                isMobileLitt ? undefined : (
+                  <StudioHealthPanel
+                    mode="approvals"
+                    projectId={capabilities.projectId}
+                    conversationId={conversation.selectedConversationId ?? null}
+                    refreshKey={workspaceRevision}
+                  />
+                )
+              }
+              onBrowserLaunch={
+                isMobileLitt ? undefined : () => setBrowserDockOpen(true)
+              }
+              browserActive={!isMobileLitt && browserDockOpen}
               browserContent={<BoardBrowserPanel />}
             />
             </div>
           </main>
 
-          {/* Right rail — the Regular layout's third column (mockup
-              port, 2026-11-18): Files · Activity · Checks · Approvals
-              at 300px, from Larry's locked Studio mockup. It takes
-              over the Files and Activity contents the desktop LiTT
-              panel used to carry as tabs, so each of those surfaces
-              still exists exactly once in this body; Checks and
-              Approvals are the same StudioHealthPanel read models the
-              board and the inspector frame mount. Desktop-only (the
-              component hides below lg) and non-shell only — the board
-              has its own panels for all four. */}
-          {viewportTier !== null && !isMobileLitt && (
-            <StudioRightRail
-              activeTab={railTab}
-              onTabChange={setRailTab}
-              filesContent={projectFilesContent}
-              activityContent={littLiveContent}
-              checksContent={
-                <StudioHealthPanel
-                  mode="checks"
-                  projectId={capabilities.projectId}
-                  refreshKey={workspaceRevision}
-                  runTrigger={healthRunTrigger}
-                />
-              }
-              approvalsContent={
-                <StudioHealthPanel
-                  mode="approvals"
-                  projectId={capabilities.projectId}
-                  conversationId={conversation.selectedConversationId ?? null}
-                  refreshKey={workspaceRevision}
-                />
-              }
-            />
-          )}
+          {/* Browser side dock, docked on the RIGHT or popped out
+              free (rail consolidation, 2026-11-25) — this slot
+              replaces the retired permanent right rail (Files ·
+              Activity · Checks · Approvals at 300px, mockup port
+              2026-11-18). Those surfaces now live in the Code box
+              (Files view + Run section) and the bottom dock; the
+              right side is free unless the user opens the Browser,
+              which docks here on demand — side-by-side with the
+              workspace — and closes away again. Desktop-only and
+              non-shell only; the board has its own Browser panel. */}
+          {viewportTier !== null && !isMobileLitt && (browserDockFree || browserDockSide === "right") && browserSideDockElement}
 
           {/* Mobile Context Drawer — right-side fixed overlay (unchanged).
               On mobile, the ContextDrawer is NOT repositioned to the left;

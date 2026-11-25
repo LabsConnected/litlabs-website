@@ -895,26 +895,24 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(codeBtn.className).toContain("glass-active");
     });
 
-    it("opening and closing Files (right rail tab) does not leave Builder", async () => {
+    it("opening Files routes to the Code workspace (Files' one home)", async () => {
       setUrl("tool=build");
-      const view = await renderCommandStudio();
+      await renderCommandStudio();
       expectBuilderSurfaceActive();
       const user = userEvent.setup();
-      // Files lives in the right rail now (mockup port, 2026-11-18;
-      // the dock's Files tab is retired and the LiTT panel is
-      // Chat-only in the Regular layout) — opening it must not change
-      // the active Builder surface or the canonical URL.
-      await user.click(screen.getByTestId("studio-rail-tab-files"));
-      expect(screen.getByTestId("studio-rail-pane-files")).toHaveAttribute("data-active", "true");
-      act(() => view.rerender(<CommandStudio />));
-      expectBuilderSurfaceActive();
-      expect(currentTool()).toBe("build");
-      // Switch the rail away to Activity — still on Builder.
-      await user.click(screen.getByTestId("studio-rail-tab-activity"));
-      expect(screen.getByTestId("studio-rail-pane-files")).toHaveAttribute("data-active", "false");
-      act(() => view.rerender(<CommandStudio />));
-      expectBuilderSurfaceActive();
-      expect(currentTool()).toBe("build");
+      // Rail consolidation (2026-11-25): the right rail is gone, so
+      // Files no longer opens beside the workspace — its ONLY home is
+      // the Code box, and the dock's Files jump routes there. (The
+      // pre-consolidation contract — "opening Files does not leave
+      // Builder" — was a property of the rail Larry removed. The
+      // CodeWorkspace-internal landing is asserted in the
+      // preview-singleton suite, whose harness renders the real
+      // CodeWorkspace; this harness stubs dynamic chunks.)
+      await user.click(screen.getByTestId("studio-dock-toggle"));
+      await user.click(screen.getByTestId("dock-tab-files"));
+      expect(screen.getByTestId("dock-files-jump")).toBeTruthy();
+      await user.click(screen.getByRole("button", { name: "Open files in Code" }));
+      await waitFor(() => expect(currentTool()).toBe("code"));
     });
 
     it("project metadata refresh does not eject the Builder surface", async () => {
@@ -1253,7 +1251,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       await renderCommandStudio();
       // The old desktop Context Drawer is gone from the desktop topology;
       // Activity/Terminal/Inspector/Media live in the bottom dock;
-      // Files lives in the right rail (mockup port, 2026-11-18).
+      // Files lives in the Code box (rail consolidation, 2026-11-25).
       expect(screen.queryByTestId("context-drawer")).toBeNull();
     });
 
@@ -1265,19 +1263,23 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(screen.getByTestId("dock-content-activity")).toBeTruthy();
     });
 
-    it("the right rail Files tab activates the Files pane; the dock has no Files tab", async () => {
+    it("no right rail; the dock Files tab is a jump panel into the Code box", async () => {
       const { user } = await renderCommandStudio();
+      // Rail consolidation (2026-11-25): the permanent right rail is
+      // removed — the right side of Regular stays free.
+      expect(screen.queryByTestId("studio-right-rail")).toBeNull();
+      expect(screen.queryByTestId("studio-rail-tab-files")).toBeNull();
+      // The bottom dock (by Developer tools) carries a Files tab that
+      // JUMPS to the Code box — Files itself is never mounted twice.
       await user.click(screen.getByTestId("studio-dock-toggle"));
-      expect(screen.queryByTestId("dock-tab-files")).toBeNull();
-      // Mockup port (2026-11-18): Files is the right rail's default
-      // tab in the Regular layout.
-      expect(screen.getByTestId("studio-rail-tab-files")).toHaveAttribute("aria-selected", "true");
-      expect(screen.getByTestId("studio-rail-pane-files")).toHaveAttribute("data-active", "true");
-      await user.click(screen.getByTestId("studio-rail-tab-activity"));
-      expect(screen.getByTestId("studio-rail-pane-files")).toHaveAttribute("data-active", "false");
-      await user.click(screen.getByTestId("studio-rail-tab-files"));
-      expect(screen.getByTestId("studio-rail-tab-files")).toHaveAttribute("aria-selected", "true");
-      expect(screen.getByTestId("studio-rail-pane-files")).toHaveAttribute("data-active", "true");
+      expect(screen.getByTestId("dock-tab-files")).toBeTruthy();
+      // Checks and Approvals ride in the same dock, by the dev tools.
+      expect(screen.getByTestId("dock-tab-checks")).toBeTruthy();
+      expect(screen.getByTestId("dock-tab-approvals")).toBeTruthy();
+      await user.click(screen.getByTestId("dock-tab-files"));
+      expect(screen.getByTestId("dock-files-jump")).toBeTruthy();
+      await user.click(screen.getByRole("button", { name: "Open files in Code" }));
+      await waitFor(() => expect(currentTool()).toBe("code"));
     });
 
     it("Ctrl+Shift+A opens the dock on the Activity tab", async () => {
@@ -1555,15 +1557,11 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       expect(localStorage.getItem("littree:studio:litt-collapsed")).toBe("false");
     });
 
-    it("exactly one LiTTLiveActivity instance is rendered", async () => {
-      await renderCommandStudio();
-      // The Live activity component is always mounted in the LiTT panel
-      // (preserved across collapse); there must be exactly one instance.
-      // The Work tab in the ContextDrawer shows a lightweight summary
-      // (LiTTWorkSummary), NOT a second LiTTLiveActivity instance.
-      const liveActivities = screen.getAllByTestId("litt-live-activity");
-      expect(liveActivities.length).toBe(1);
-    });
+    // "exactly one LiTTLiveActivity instance is rendered" moved to
+    // CommandStudio.preview-singleton.test.tsx (rail consolidation,
+    // 2026-11-25): the feed's home is now the Code box's Run section,
+    // and this harness's dynamic-chunk stub never renders the real
+    // CodeWorkspace — the singleton suite's harness does.
 
     it("no obsolete side-panel localStorage keys are written on mount", async () => {
       localStorage.removeItem("littree:studio:side-panel");
@@ -1617,3 +1615,4 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     });
   });
 });
+

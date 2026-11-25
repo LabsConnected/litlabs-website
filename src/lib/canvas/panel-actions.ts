@@ -24,6 +24,14 @@ export const STUDIO_EVENT_OPEN_DOCK = "studio:open-dock";
 export const STUDIO_EVENT_REQUEST_DEPLOY = "studio:request-deploy";
 /** Fired when a studio.open_file action executes; the files surface selects the file. */
 export const STUDIO_EVENT_OPEN_FILE = "studio:open-file";
+/**
+ * Rail consolidation (2026-11-25): ask the mounted Code box to show one
+ * of its views — detail: { view: "files" | "run" | "plan", section? }.
+ * Dispatched by CommandStudio when a chat-side or dock-side entry point
+ * targets a surface whose home is now inside Code (Files, Checks…).
+ * CodeWorkspace ignores views it was not given content for.
+ */
+export const STUDIO_EVENT_OPEN_CODE_VIEW = "studio:open-code-view";
 
 /* ── Types ──────────────────────────────────────────────────── */
 
