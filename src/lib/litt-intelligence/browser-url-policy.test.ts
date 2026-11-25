@@ -411,6 +411,72 @@ describe("checkBrowserUrlPolicy", () => {
     }
   });
 
+  it("allows regional trusted domains that begin with a shorter trusted name", () => {
+    // Greptile review (PR #1115): "google.com.au" legitimately starts
+    // with "google.com." — it is itself a verified domain and must not
+    // be flagged as impersonation. Same for other enumerated regional
+    // variants and their subdomains.
+    for (const url of [
+      "https://google.com.au/",
+      "https://www.google.com.au/",
+      "https://amazon.com.br/",
+      "https://microsoft.com.au/",
+      "https://google.co.uk/",
+    ]) {
+      const r = checkBrowserUrlPolicy(url);
+      expect(r.allowed, `${url} → ${r.reason ?? ""}`).toBe(true);
+    }
+    // The same prefix on a NON-trusted host is still impersonation.
+    for (const url of [
+      "https://google.com.evil.com/",
+      "https://google.com.io/", // "com.io" is not a public suffix — google.com. is a prefix, not the domain
+      "https://amazon.com.phish.net/",
+    ]) {
+      const r = checkBrowserUrlPolicy(url);
+      expect(r.allowed, `${url} unexpectedly allowed`).toBe(false);
+    }
+  });
+
+  it("allows legitimate .gov.uk / .edu.au style second-level suffixes", () => {
+    // Greptile review (PR #1115): a bare ccTLD after the restricted
+    // label is a real public suffix, not mid-host deception.
+    for (const url of [
+      "https://www.gov.uk/",
+      "https://service.gov.uk/",
+      "https://unimelb.edu.au/",
+      "https://cam.ac.uk/",
+    ]) {
+      const r = checkBrowserUrlPolicy(url);
+      expect(r.allowed, `${url} → ${r.reason ?? ""}`).toBe(true);
+    }
+    // Restricted TLD followed by anything more than a bare ccTLD is
+    // still deceptive — including ccTLD + extra labels.
+    for (const url of [
+      "https://state.gov.evil.com/",
+      "https://service.gov.uk.evil.com/",
+      "https://gov.uk.evil.com/",
+      "https://unimelb.edu.au.evil.com/",
+      "https://mit.edu.phish.io/",
+    ]) {
+      const r = checkBrowserUrlPolicy(url);
+      expect(r.allowed, `${url} unexpectedly allowed`).toBe(false);
+    }
+  });
+
+  it("does not mistake DNS names for IPv6 literals", () => {
+    // Greptile review (PR #1115): "fe80.example.com" starts with a
+    // link-local hextet but is a DNS name — only strings containing
+    // ":" are parsed as IPv6.
+    for (const url of [
+      "https://fe80.example.com/",
+      "https://febf.example.com/",
+      "https://dead.example.com/",
+    ]) {
+      const r = checkBrowserUrlPolicy(url);
+      expect(r.allowed, `${url} → ${r.reason ?? ""}`).toBe(true);
+    }
+  });
+
   it("rejects garbage input", () => {
     const r = checkBrowserUrlPolicy("not a url!!!");
     expect(r.allowed).toBe(false);

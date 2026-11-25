@@ -214,9 +214,6 @@ function isSharedPlatformHost(host: string): boolean {
   return false;
 }
 
-/** Restricted public suffixes — legitimate only as the FINAL labels. */
-const RESTRICTED_PUBLIC_TLDS = [".gov.", ".mil.", ".edu."];
-
 /**
  * Brands protected from impersonation. Compared against leet-
  * normalized domain tokens; keep entries lowercase ASCII words.
@@ -466,11 +463,22 @@ function matchJoinedBrand(token: HostToken): BrandHit | null {
   return null;
 }
 
-/** Trusted-domain check on a DNS label boundary. */
-function isTrustedHost(host: string): boolean {
+/**
+ * Explicit TRUSTED_DOMAINS match only — no .gov/.mil/.edu suffix
+ * tier. Used for the early structural exemption: a verified domain
+ * like "google.com.au" legitimately starts with the shorter trusted
+ * name "google.com.", and must not be flagged as impersonation.
+ */
+function isExplicitTrustedHost(host: string): boolean {
   for (const domain of TRUSTED_DOMAINS) {
     if (host === domain || host.endsWith(`.${domain}`)) return true;
   }
+  return false;
+}
+
+/** Trusted-domain check on a DNS label boundary. */
+function isTrustedHost(host: string): boolean {
+  if (isExplicitTrustedHost(host)) return true;
   // Restricted public suffixes are legitimate only as the final
   // label(s): "whitehouse.gov" and "cam.ac.uk" pass, "state.gov.
   // evil.com" does not (it does not END with the suffix).
@@ -494,9 +502,23 @@ function impersonatedDomain(host: string): string | null {
   return null;
 }
 
-/** Restricted TLD appearing before the final label: "state.gov.evil.com". */
+/**
+ * Restricted TLD (.gov/.mil/.edu) appearing before the final label:
+ * "state.gov.evil.com". Legitimate second-level suffixes put a bare
+ * ccTLD after the restricted label — "service.gov.uk",
+ * "unimelb.edu.au" — so a match only counts when MORE than a single
+ * 2-letter label follows the TLD. (Greptile review, PR #1115.)
+ */
 function deceptiveRestrictedTld(host: string): boolean {
-  return RESTRICTED_PUBLIC_TLDS.some((tld) => host.includes(tld));
+  for (const tld of ["gov", "mil", "edu"]) {
+    const re = new RegExp(`(?:^|\\.)${tld}\\.`, "g");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(host)) !== null) {
+      const rest = host.slice(m.index + m[0].length);
+      if (!/^[a-z]{2}$/.test(rest)) return true;
+    }
+  }
+  return false;
 }
 
 // Credential-bait hostname patterns that stay simple substring checks:
@@ -567,6 +589,16 @@ export function checkBrowserUrlPolicy(raw: string): BrowserUrlPolicyResult {
   const ipReason = ipBlockReason(host);
   if (ipReason) {
     return { allowed: false, reason: ipReason, host };
+  }
+
+  // Verified explicit domains are exempt from the structural
+  // impersonation heuristics: "google.com.au" legitimately begins
+  // with the shorter trusted name "google.com.". Shared platforms
+  // (github.io, blogspot.com, …) stay fully checked — their tenants
+  // are attacker-controlled. The .gov/.mil/.edu suffix tier is NOT
+  // exempt here; those hosts still face the structural checks below.
+  if (isExplicitTrustedHost(host) && !isSharedPlatformHost(host)) {
+    return { allowed: true, host };
   }
 
   // Deceptive structure is checked BEFORE the trusted-domain
