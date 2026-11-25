@@ -250,7 +250,11 @@ export default function BoardBrowserPanel() {
       if (!frame || event.source !== frame.contentWindow) return;
       const data = event.data as { source?: unknown; type?: unknown; url?: unknown } | null;
       if (!data || data.source !== BROWSER_PROXY_MESSAGE_SOURCE) return;
-      if (typeof data.url !== "string" || !data.url) return;
+      // The framed document is attacker-controlled: it can postMessage
+      // anything, including "javascript:…" URLs. Only plain http(s)
+      // targets may drive navigation, history, or window.open —
+      // anything else is dropped before it can reach the panel.
+      if (typeof data.url !== "string" || !/^https?:\/\//i.test(data.url)) return;
       const tabId = activeTabIdRef.current;
       const tab = tabsRef.current.find((t) => t.id === tabId);
       if (!tab) return;

@@ -18,11 +18,16 @@
  *     brand typosquats / impersonation, credential-bait phrasing, and
  *     the IDN homograph (punycode) prefix
  *
- * Known limitation (documented, not silent): hostnames that resolve via
- * DNS to a blocked IP are not caught — this layer inspects the literal
- * hostname. Browserbase's own network egress isolation is the deeper
- * layer. The blocklist is a first line, not a guarantee.
+ * Known limitation (documented, not silent): this layer inspects the
+ * literal hostname only. The Studio browser proxy route additionally
+ * resolves every hostname and validates/pins each resolved address
+ * (see src/lib/studio/proxy-destination.ts); other consumers (the
+ * Stagehand-driven agent browser) rely on the remote browser's own
+ * egress isolation for the DNS layer. The blocklist is a first line,
+ * not a guarantee.
  */
+
+import { ipBlockReason } from "./ip-address-safety";
 
 export interface BrowserUrlPolicyResult {
   allowed: boolean;
@@ -67,21 +72,14 @@ export function normalizeBrowserUrl(raw: string): string | null {
 
 // ─── Policy ──────────────────────────────────────────────────────
 
-// Cloud metadata endpoints: well-known IPs + hostnames. The IPs live in
-// link-local ranges, which are blocked by the range check below; the
-// hostnames are listed explicitly.
+// Cloud metadata hostnames (the metadata IPs are covered by the
+// ip-address-safety classifier below).
 const METADATA_HOSTNAMES = new Set([
   "metadata.google.internal",
   "metadata.google",
   "metadata.goog",
   "instance-data",
   "instance-data-compute",
-]);
-
-const METADATA_IPS = new Set([
-  "169.254.169.254", // AWS / GCP / Azure
-  "100.100.100.200", // Alibaba Cloud
-  "192.0.0.192", // Oracle Cloud
 ]);
 
 // ─── Credential-phishing hostname analysis ─────────────────────
@@ -519,71 +517,10 @@ const PHISHING_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /(^|\.)xn--/i, label: "IDN homograph (punycode) domain" },
 ];
 
-function isIPv4(host: string): boolean {
-  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
-}
-
-function ipv4Octets(host: string): number[] | null {
-  const parts = host.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) {
-    return null;
-  }
-  return parts;
-}
-
-function blockedIpv4Reason(host: string): string | null {
-  const octets = ipv4Octets(host);
-  if (!octets) return null;
-  const [a, b] = octets;
-  if (a === 127) return "loopback address";
-  if (a === 0) return "unspecified address (0.0.0.0)";
-  if (a === 169 && b === 254) {
-    return METADATA_IPS.has(host)
-      ? "cloud metadata endpoint"
-      : "link-local address";
-  }
-  return null;
-}
-
-function blockedIpv6Reason(host: string): string | null {
-  // Node's URL.hostname keeps the brackets on IPv6 literals ("[::1]");
-  // strip them before range checks. The URL parser canonicalizes to
-  // compressed lowercase form.
-  const h = host.toLowerCase().replace(/^\[|\]$/g, "");
-  if (h === "::1" || h === "0:0:0:0:0:0:0:1") return "loopback address";
-  if (h === "::" || h === "0:0:0:0:0:0:0:0") return "unspecified address";
-
-  // IPv4-mapped IPv6 (::ffff:a.b.c.d) — the URL parser renders these
-  // in hex form ("::ffff:7f00:1"), but accept the dotted spelling too.
-  // Without this an attacker reaches loopback/link-local/metadata
-  // targets that the IPv4 rules already block.
-  const mappedDotted = h.match(/::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
-  const mappedHex = h.match(/::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-  if (mappedDotted || mappedHex) {
-    let ipv4: string | null = null;
-    if (mappedDotted) {
-      ipv4 = mappedDotted[1];
-    } else if (mappedHex) {
-      const hi = parseInt(mappedHex[1], 16);
-      const lo = parseInt(mappedHex[2], 16);
-      ipv4 = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
-    }
-    if (ipv4) {
-      const reason = blockedIpv4Reason(ipv4);
-      if (reason) return `IPv4-mapped IPv6 address → ${reason}`;
-    }
-  }
-
-  // fe80::/10 link-local: first hextet in 0xfe80–0xfebf (the old
-  // startsWith("fe80:") check missed febf:: and every compressed
-  // variant).
-  const firstHextet = h.split(":")[0];
-  const first = parseInt(firstHextet || "0", 16);
-  if (Number.isFinite(first) && first >= 0xfe80 && first <= 0xfebf) {
-    return "link-local address";
-  }
-  return null;
-}
+// Literal-IP classification lives in ip-address-safety.ts — the same
+// classifier the proxy's DNS-resolution layer applies to resolved
+// addresses, so literal and resolved destinations get identical
+// treatment (private, CGNAT, ULA, NAT64, transition mechanisms, …).
 
 /**
  * Apply the navigate-time URL policy.
@@ -624,8 +561,10 @@ export function checkBrowserUrlPolicy(raw: string): BrowserUrlPolicyResult {
     return { allowed: false, reason: "cloud metadata endpoint", host };
   }
 
-  // Literal IP checks (no DNS resolution at this layer — documented above)
-  const ipReason = isIPv4(host) ? blockedIpv4Reason(host) : blockedIpv6Reason(host);
+  // Literal IP checks (no DNS resolution at this layer — documented
+  // above; the proxy route separately resolves and validates every
+  // address a hostname maps to before connecting).
+  const ipReason = ipBlockReason(host);
   if (ipReason) {
     return { allowed: false, reason: ipReason, host };
   }
