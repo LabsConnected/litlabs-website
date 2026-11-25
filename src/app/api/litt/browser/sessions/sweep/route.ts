@@ -34,9 +34,9 @@ export const dynamic = "force-dynamic";
  * manual/other schedulers. The platform owner may also trigger it
  * manually (Clerk session).
  *
- * With no CRON_SECRET configured the route refuses (unlike the music
- * worker's dev-open default — an idle sweeper must never run
- * unauthenticated in production).
+ * With neither CRON_SECRET nor INTERNAL_API_KEY configured the route
+ * refuses (unlike the music worker's dev-open default — an idle
+ * sweeper must never run unauthenticated in production).
  */
 function secretsEqual(candidate: string, expected: string): boolean {
   const a = Buffer.from(candidate);
@@ -52,12 +52,21 @@ function secretsEqual(candidate: string, expected: string): boolean {
 
 function isAuthorized(req: NextRequest): boolean {
   const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret) return false;
-  const headerSecret = req.headers.get("x-cron-secret");
-  if (headerSecret && secretsEqual(headerSecret, cronSecret)) return true;
-  const authHeader = req.headers.get("authorization") ?? "";
-  if (authHeader.toLowerCase().startsWith("bearer ")) {
-    return secretsEqual(authHeader.slice(7).trim(), cronSecret);
+  if (cronSecret) {
+    const headerSecret = req.headers.get("x-cron-secret");
+    if (headerSecret && secretsEqual(headerSecret, cronSecret)) return true;
+    const authHeader = req.headers.get("authorization") ?? "";
+    if (authHeader.toLowerCase().startsWith("bearer ")) {
+      if (secretsEqual(authHeader.slice(7).trim(), cronSecret)) return true;
+    }
+  }
+  // Internal scheduler auth: X-Internal-Api-Key matching INTERNAL_API_KEY —
+  // the same credential GitHub Actions crons already use (deploy digest).
+  // Lets the sweep run without requiring a separate CRON_SECRET to exist.
+  const internalKey = process.env.INTERNAL_API_KEY;
+  if (internalKey) {
+    const provided = req.headers.get("x-internal-api-key");
+    if (provided && secretsEqual(provided, internalKey)) return true;
   }
   return false;
 }

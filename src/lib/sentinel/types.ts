@@ -13,7 +13,8 @@ export type SentinelServiceId =
   | "ai-openrouter"
   | "terminal-server"
   | "stripe"
-  | "deployment";
+  | "deployment"
+  | "backup";
 
 export type SentinelLevel = "operational" | "degraded" | "down" | "unknown";
 

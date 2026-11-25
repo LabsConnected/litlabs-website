@@ -58,6 +58,7 @@ const SLOW_SERVICES = new Set<SentinelServiceId>([
   "ai-openrouter",
   "terminal-server",
   "stripe",
+  "backup",
 ]);
 
 function slowProbeEvery(): number {

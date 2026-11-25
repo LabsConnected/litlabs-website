@@ -149,6 +149,90 @@ export function probeDeployment(): ProbeResult {
   return { ok: true, latencyMs: null, detail: `running on ${platform}` };
 }
 
+/**
+ * Backup probe — honest by design.
+ *
+ * Sentinel must never report backups as healthy until a real,
+ * verified backup exists. The probe therefore reports "unknown"
+ * (applicable:false) unless BACKUP_STATUS_URL points at a status
+ * document published by the backup workstream, e.g.:
+ *
+ *   BACKUP_STATUS_URL=https://…/backup-status.json
+ *   {
+ *     "lastSuccessAt": "2026-11-25T04:00:00Z",
+ *     "sha256Verified": true,
+ *     "destination": "E:\\LiTT-Backups",
+ *     "lastRestoreTestAt": "2026-11-20T00:00:00Z"
+ *   }
+ *
+ * Freshness window: 36h (daily backups + slack). A stale or
+ * unverified backup degrades; a missing/corrupt status document
+ * fails. No status source → "unknown", never green.
+ */
+const BACKUP_MAX_AGE_MS = 36 * 60 * 60_000;
+
+export async function probeBackup(): Promise<ProbeResult> {
+  const t0 = Date.now();
+  const url = process.env.BACKUP_STATUS_URL;
+  if (!url) {
+    return {
+      ok: true,
+      latencyMs: null,
+      detail: "no backup telemetry configured (BACKUP_STATUS_URL unset)",
+      applicable: false,
+    };
+  }
+  try {
+    const res = await withTimeout(
+      fetch(url, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS), cache: "no-store" }),
+      PROBE_TIMEOUT_MS + 1_000,
+    );
+    const latencyMs = Date.now() - t0;
+    if (!res.ok) {
+      return { ok: false, latencyMs, detail: `status endpoint returned ${res.status}` };
+    }
+    const body = (await res.json()) as {
+      lastSuccessAt?: string;
+      sha256Verified?: boolean;
+      destination?: string;
+      lastRestoreTestAt?: string;
+    };
+    if (!body.lastSuccessAt) {
+      return { ok: false, latencyMs, detail: "status document missing lastSuccessAt" };
+    }
+    const ageMs = Date.now() - Date.parse(body.lastSuccessAt);
+    if (!Number.isFinite(ageMs)) {
+      return { ok: false, latencyMs, detail: "lastSuccessAt is not a valid timestamp" };
+    }
+    const dest = body.destination ? ` → ${body.destination}` : "";
+    if (body.sha256Verified !== true) {
+      return {
+        ok: false,
+        latencyMs,
+        detail: `backup integrity unverified${dest}`,
+        severity: "warning",
+      };
+    }
+    if (ageMs > BACKUP_MAX_AGE_MS) {
+      return {
+        ok: false,
+        latencyMs,
+        detail: `last verified backup is ${Math.floor(ageMs / 3600_000)}h old${dest}`,
+      };
+    }
+    const restore = body.lastRestoreTestAt
+      ? `, restore test ${Math.floor((Date.now() - Date.parse(body.lastRestoreTestAt)) / 86_400_000)}d ago`
+      : ", no restore test recorded";
+    return {
+      ok: true,
+      latencyMs,
+      detail: `verified backup ${Math.floor(ageMs / 3600_000)}h old${dest}${restore}`,
+    };
+  } catch (err) {
+    return timedOut(err instanceof Error ? err.message : "backup status unreachable", Date.now() - t0);
+  }
+}
+
 export type ProbeFn = () => Promise<ProbeResult>;
 
 /** All Sentinel probes keyed by service id. Injectable for tests. */
@@ -160,5 +244,6 @@ export function defaultProbes(client: SupabaseClient | null): Record<SentinelSer
     "terminal-server": () => probeTerminalServer(),
     stripe: () => probeStripe(),
     deployment: async () => probeDeployment(),
+    backup: () => probeBackup(),
   };
 }
