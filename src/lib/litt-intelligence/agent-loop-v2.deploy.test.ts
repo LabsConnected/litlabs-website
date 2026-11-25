@@ -81,6 +81,7 @@ import type { WorkspaceTransport } from "./workspace-transport";
 
 const NEWLINE = String.fromCharCode(10);
 const LIVE_URL = "https://litlabs.example/sites/dep_abc123/";
+const STABLE_URL = "https://litlabs.example/sites/project/proj_ember/";
 
 function transport(): WorkspaceTransport {
   return {
@@ -116,6 +117,7 @@ const deploySuccess = {
     reused: false,
   },
   liveUrl: LIVE_URL,
+  stablePublicUrl: STABLE_URL,
 };
 
 beforeEach(() => {
@@ -206,6 +208,39 @@ describe("H. the model's next turn receives the deployment result and URL", () =
     expect(result.finalText).toContain(LIVE_URL);
   });
 
+  it("ACC-05: the settled reply always carries the stable URL, even when the model cites only the deployment URL", async () => {
+    // Acceptance Run 1 on 8935b2a9: the transport-only chat deploy
+    // succeeded, but the reply reported ONLY the /sites/<deploymentId>/
+    // URL — the stable /sites/project/<id>/ address existed in the tool
+    // result and the model simply didn't cite it. The loop guarantees
+    // the stable URL in the settled text, the same way it guarantees
+    // generated images render (appendChatImagesToFinalText).
+    execute.mockResolvedValue({ ok: true, result: deploySuccess });
+    callLLMWithTools.mockResolvedValueOnce({
+      text: `The project is deployed and live at ${LIVE_URL}.`,
+      toolCalls: [],
+      model: "test-model",
+    });
+
+    const result = await resumeAgentLoopV2(approvedDeploy(), transport());
+
+    expect(result.finalText).toContain(LIVE_URL);
+    expect(result.finalText).toContain(STABLE_URL);
+  });
+
+  it("ACC-05: the stable URL is not duplicated when the model's reply already cites it", async () => {
+    execute.mockResolvedValue({ ok: true, result: deploySuccess });
+    callLLMWithTools.mockResolvedValueOnce({
+      text: `Live at ${LIVE_URL} — stable address: ${STABLE_URL}`,
+      toolCalls: [],
+      model: "test-model",
+    });
+
+    const result = await resumeAgentLoopV2(approvedDeploy(), transport());
+
+    expect(result.finalText.split(STABLE_URL).length - 1).toBe(1);
+  });
+
   it("records the deploy call as a successful mutating step", async () => {
     execute.mockResolvedValue({ ok: true, result: deploySuccess });
     callLLMWithTools.mockResolvedValueOnce({ text: `Live: ${LIVE_URL}`, toolCalls: [], model: "test-model" });
@@ -273,8 +308,11 @@ describe("I. a provider failure after deployment neither repeats nor loses it", 
     const result = await resumeAgentLoopV2(approvedDeploy(), transport());
 
     // The user's site IS live — losing the URL to a provider error would
-    // hide completed work.
-    expect(result.finalText).toContain(LIVE_URL);
+    // hide completed work. The URL reported is the deployment's STABLE
+    // public URL (ACC-03 item 1: readDeploymentOutcome prefers it over
+    // the per-deployment snapshot URL, which this fixture's deploy
+    // result now carries like the real handler's).
+    expect(result.finalText).toContain(STABLE_URL);
     expect(result.finalText).toMatch(/live/i);
   });
 

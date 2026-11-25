@@ -578,8 +578,12 @@ describe("StudioPreviewPanel", () => {
       const button = await screen.findByRole("button", { name: "Publish site" });
       fireEvent.click(button);
       // The SAME action the Deploy panel uses — one publish path, no
-      // second implementation hidden in the toolbar.
-      expect(seen).toEqual([{ target: "litt" }]);
+      // second implementation hidden in the toolbar. ACC-05 item 4:
+      // Publish is an explicit publish ACTION, so it carries
+      // autoSend — the canonical path must SEND the deploy request,
+      // not only draft it in the composer (Run 1 on 8935b2a9: the
+      // draft-only dispatch left the click reading as a no-op).
+      expect(seen).toEqual([{ target: "litt", autoSend: true }]);
     } finally {
       window.removeEventListener("studio:request-deploy", handler);
     }

@@ -47,6 +47,8 @@ import { getActiveExecution, registerExecution, unregisterExecution } from "@/li
 import { getOwnerAwareEntitlements } from "@/lib/entitlements";
 import type { SimulatedPlan } from "@/lib/owner";
 import { resolveTurn } from "@/lib/litt-intelligence/turn-resolver";
+import { isDeployOnlyInstruction } from "@/lib/litt-intelligence/deploy-intent";
+import { primaryFailureReason } from "@/lib/litt-intelligence/run-settlement";
 import {
   buildCanonicalRuntimeContext,
   buildRuntimeContextBlock,
@@ -835,6 +837,16 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
   // media either.
   const mediaTurn =
     built.kernelResult.decision.routing.taskKind === "media" && !detcodegenPinned;
+  // Deploy-only turn (ACC-05 item 3): the deterministic deploy-intent
+  // classifier — the same system signal that withholds the mutation
+  // tools in the agent loop — says this turn only publishes the
+  // workspace as it stands. The quality session scopes to the stages
+  // a transport publish can evidence ("deploy"); without the signal
+  // the session defaulted to the "standard" build scope and a
+  // completed deploy logged a quality-gate failure demanding
+  // build/test evidence (Acceptance Run 1 on 8935b2a9). A codegen pin
+  // is an explicit file-generating act, so it is never deploy-only.
+  const deployTurn = !detcodegenPinned && isDeployOnlyInstruction(resolvedMessage);
 
   const useV2 = canonicalCtx.workspaceExecutionAvailable
     && !!runProjectId
@@ -934,9 +946,11 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
           // evidence is the generated media result, never a build.
           taskScope: mediaTurn
             ? ("media" as const)
-            : inspectionTurn || execTurn
-              ? ("inspection" as const)
-              : undefined,
+            : deployTurn
+              ? ("deploy" as const)
+              : inspectionTurn || execTurn
+                ? ("inspection" as const)
+                : undefined,
         }
       : undefined,
     evalMetadata: {
@@ -1883,6 +1897,13 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 })),
                 deployment: deploymentEvidenceFrom(v2Result.toolCalls),
                 workspaceChange: v2Result.workspaceChange ?? null,
+                // ACC-05 item 1: a failed run's primary reason rides
+                // the evidence so the work log can name the cause —
+                // the loop recorded it (contributors / modelFailed /
+                // failedHonestly) and only the status used to survive.
+                failureReason: finalMessageStatus === "failed"
+                  ? primaryFailureReason(v2Result)
+                  : null,
               },
             } : {}),
           },

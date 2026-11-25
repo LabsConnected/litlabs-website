@@ -104,6 +104,46 @@ export function collectFailureContributors(
   return contributors;
 }
 
+/**
+ * ACC-05 item 1 — the ONE primary failure reason a failed run reports
+ * in its work log. The loop records every failure it observes
+ * (failureContributors in observation order, plus the loop-ending
+ * modelFailed / failedHonestly strings), but until now none of it
+ * reached the persisted message: the route kept only the failed
+ * STATUS, so the transcript could only print "Failed — no work
+ * completed" even when the loop knew exactly what died (Acceptance
+ * Run 1 on 8935b2a9 — a first build failed after its approval with no
+ * detail anywhere). Contributors are already sanitized at their
+ * sources; the result is still bounded to one short line here.
+ */
+export function primaryFailureReason(
+  result:
+    | {
+        failureContributors?: readonly RunFailureContributor[];
+        modelFailed?: string;
+        failedHonestly?: string;
+      }
+    | null
+    | undefined,
+): string | null {
+  if (!result) return null;
+  const first = result.failureContributors?.[0];
+  let raw: string | null = null;
+  if (first) {
+    raw = first.kind === "tool_failure" && first.toolId
+      ? `${first.toolId}: ${first.detail}`
+      : first.detail;
+  } else if (result.modelFailed) {
+    raw = result.modelFailed;
+  } else if (result.failedHonestly) {
+    raw = result.failedHonestly;
+  }
+  if (!raw) return null;
+  const oneLine = raw.replace(/\s+/g, " ").trim();
+  if (!oneLine) return null;
+  return oneLine.length > 200 ? `${oneLine.slice(0, 197)}...` : oneLine;
+}
+
 /** The run's requested work is done: a mutation landed and the gate passed. */
 export function deliverableSucceeded(input: RunSettlementInput): boolean {
   const mutationLanded = input.toolCalls.some((c) => c.success && c.mutating);

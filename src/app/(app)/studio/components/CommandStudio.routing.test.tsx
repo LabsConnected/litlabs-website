@@ -249,13 +249,21 @@ let capturedConversationOptions: {
   onRouteToolAction?: (tool: "image" | "video" | "audio" | "music", command?: string) => void;
 } | null = null;
 
+// ACC-05 item 4: every value the mocked conversation controller's send
+// is called with — used to prove the Static View Publish auto-send
+// chain actually starts a run instead of only drafting.
+const capturedSendValues: string[] = [];
+
 vi.mock("../hooks/useCanonicalConversation", () => ({
   useCanonicalConversation: (options: { serverProjectId?: string | null }) => {
     capturedConversationOptions = options;
     return {
     messages: [],
     busy: false,
-    send: vi.fn().mockResolvedValue({ accepted: true }),
+    send: vi.fn().mockImplementation(async (value: string) => {
+      capturedSendValues.push(value);
+      return { accepted: true };
+    }),
     regenerate: vi.fn(),
     clear: vi.fn(),
     activeAgentId: "litt",
@@ -393,6 +401,7 @@ vi.mock("../tools/BuilderTool", () => ({ default: () => <div data-testid="builde
 vi.mock("../tools/CanvasTool", () => ({ default: () => <div data-testid="canvas-tool" /> }));
 vi.mock("../tools/AgentTool", () => ({ default: () => <div data-testid="agent-tool" /> }));
 vi.mock("../tools/GalleryTool", () => ({ default: () => <div data-testid="gallery-tool" /> }));
+vi.mock("../tools/AgentsTerminalTool", () => ({ default: () => <div data-testid="terminal-tool" /> }));
 vi.mock("../tools/MissionForge", () => ({ default: () => <div data-testid="mission-forge" /> }));
 vi.mock("../tools/CLIBridgeTool", () => ({ default: () => <div data-testid="cli-bridge" /> }));
 vi.mock("../tools/SpaceTool", () => ({ default: () => <div data-testid="space-tool" /> }));
@@ -468,6 +477,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     mockCapabilities = defaultCapabilities();
     mockRuntime = undefined;
     capturedConversationOptions = null;
+    capturedSendValues.length = 0;
     toolMounts.image = 0;
     toolMounts.video = 0;
     // The dock persists open/tab/height in sessionStorage (intentional
@@ -1554,6 +1564,29 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       await renderCommandStudio();
       expect(localStorage.getItem("littree:studio:side-panel")).toBeNull();
       expect(localStorage.getItem("littree:studio:activity-rail-open")).toBeNull();
+    });
+  });
+
+  describe("Static View Publish auto-send (ACC-05 item 4)", () => {
+    it("a deploy request carrying autoSend SENDS the deploy prompt — a run starts, not a draft", async () => {
+      await renderCommandStudio();
+      // Exactly what StudioPreviewPanel's Publish button dispatches.
+      window.dispatchEvent(
+        new CustomEvent("studio:request-deploy", { detail: { target: "litt", autoSend: true } }),
+      );
+      await waitFor(() => {
+        expect(capturedSendValues).toContain("Deploy this project to production");
+      });
+    });
+
+    it("a deploy request WITHOUT autoSend still only drafts (ActionPanel semantics unchanged)", async () => {
+      await renderCommandStudio();
+      window.dispatchEvent(
+        new CustomEvent("studio:request-deploy", { detail: { target: "litt" } }),
+      );
+      // Give the event chain a beat to (not) send.
+      await new Promise((r) => setTimeout(r, 50));
+      expect(capturedSendValues).not.toContain("Deploy this project to production");
     });
   });
 });

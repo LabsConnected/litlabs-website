@@ -137,6 +137,27 @@ describe("isDeployOnlyInstruction", () => {
     }
   });
 
+  it("ACC-05: resolver-appended context never reclassifies a deploy-only instruction", () => {
+    // Acceptance Run 1 on 8935b2a9: the Code Deploy… draft "Deploy this
+    // project to a live public URL" reached the loop as the turn
+    // resolver's expansion "… — referring to: Rename the menu item
+    // 'Chocolate Chip Cookie' to …" — the appended EDIT topic tripped
+    // the content-verb net, the run kept the full tool set, and it
+    // rewrote index.html (with stale content) before deploying. The
+    // classifier judges the user's own words: machine-appended resolver
+    // context (the " — referring to:" / " — in the context of:"
+    // suffixes and the "[Context: …]" prefix) is stripped first.
+    const topic = "Rename the menu item 'Chocolate Chip Cookie' to 'Midnight Chocolate Croissant', keep the price and description the same";
+    expect(isDeployOnlyInstruction(`Deploy this project to a live public URL — referring to: ${topic}`)).toBe(true);
+    expect(isDeployOnlyInstruction(`Deploy this project — referring to: ${topic}`)).toBe(true);
+    expect(isDeployOnlyInstruction(`Deploy this project to production — in the context of: ${topic}`)).toBe(true);
+    expect(isDeployOnlyInstruction(`[Context: ${topic}] Deploy this project to a live public URL`)).toBe(true);
+    // The user's OWN content verbs still disqualify — stripping only
+    // removes the machine-appended segment, never the instruction.
+    expect(isDeployOnlyInstruction(`Rename the cookie and deploy it — referring to: ${topic}`)).toBe(false);
+    expect(isDeployOnlyInstruction("Make the header blue and deploy")).toBe(false);
+  });
+
   it("the refusal names the tool and points at project.deploy", () => {
     const err = deployOnlyRefusalError("files.write");
     expect(err).toContain("files.write");

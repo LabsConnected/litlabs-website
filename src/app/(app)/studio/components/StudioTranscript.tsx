@@ -107,10 +107,18 @@ function deriveWorkLog(
     // recorded as "0 of N steps complete" (Greptile PR #1109). The
     // transcript's own convention (workLogLabel) counts successes.
     const completed = (execution?.toolCalls ?? []).filter((call) => call.success).length;
+    // ACC-05 item 1: when the run recorded WHY it failed, the label
+    // carries that reason — a bare "no work completed" sent the user
+    // (and the operator) hunting a cause the loop already knew
+    // (Acceptance Run 1 on 8935b2a9). The evidence-specific labels
+    // above (changed / could-not-verify) already name their cause and
+    // are not suffixed.
+    const reason = execution?.failureReason?.trim();
+    const base = attempted > 0
+      ? `${completed} of ${attempted} steps complete — failed`
+      : "Failed — no work completed";
     return {
-      label: attempted > 0
-        ? `${completed} of ${attempted} steps complete — failed`
-        : "Failed — no work completed",
+      label: reason ? `${base} · ${reason}` : base,
       color: "#ef4444",
     };
   }
@@ -831,10 +839,20 @@ export default function StudioTranscript({
             !typedMessageIds.has(message.id);
           // Collapsible only for settled assistant messages — never while
           // streaming or mid-typewriter, so live output is never clipped.
+          // ACC-05 item 5a: a FAILED message is never collapsible. Its
+          // displayed text is already the short failure summary, but
+          // the clip was judged on the RAW content length — a failed
+          // run that streamed a long narration before dying got a
+          // 320px-clipped bubble whose fade edge sat exactly where the
+          // persistent Retry and the work-log bar begin, partly
+          // covering the Retry (Acceptance Run 1 on 8935b2a9; the
+          // owner's rule is that controls stay fully in view at any
+          // scale).
           const isCollapsible =
             !isUser &&
             !isStreaming &&
             !isTypingTarget &&
+            !isFailed &&
             (message.content ?? "").length > 600;
           const longExpanded = expandedLongIds.has(key);
           const displayContent = isTypingTarget
@@ -1026,7 +1044,7 @@ export default function StudioTranscript({
                   <button
                     type="button"
                     onClick={() => onRegenerateAction(message.id)}
-                    className="inline-flex min-h-11 items-center gap-1.5 self-start rounded-lg border px-4 text-[12px] font-bold transition hover:opacity-80"
+                    className="mt-2 inline-flex min-h-11 shrink-0 items-center gap-1.5 self-start rounded-lg border px-4 text-[12px] font-bold transition hover:opacity-80"
                     style={{
                       borderColor: "color-mix(in srgb, var(--litt-primary) 45%, transparent)",
                       backgroundColor: "color-mix(in srgb, var(--litt-primary) 10%, transparent)",

@@ -538,6 +538,28 @@ export function useCanonicalConversation({
       // flight) would otherwise leave busy/streaming stuck true forever.
       getStore().setStreaming(false);
       setBusy(false);
+      // ACC-05 item 5b: a terminal canonical state must also END the
+      // execution-store run. This reconcile path is the only finisher
+      // for runs whose send already returned still-active
+      // (approval-resumed runs observed via the repoll) — without
+      // endRun the store kept isRunning=true forever and the worktab
+      // showed "Run in progress" after the run had finished
+      // (Acceptance Run 1 on 8935b2a9). "awaiting_approval" is a pause,
+      // not an end: the execution run (and its preserved approval
+      // gate) must survive until the resumed run settles.
+      if (
+        result.state === "completed" ||
+        result.state === "failed" ||
+        result.state === "cancelled"
+      ) {
+        useExecutionStore.getState().endRun(
+          result.state === "cancelled"
+            ? "cancelled"
+            : result.state === "failed"
+              ? "failed"
+              : undefined,
+        );
+      }
     }
 
     // Non-terminal canonical states get a slow re-poll so a long-running
