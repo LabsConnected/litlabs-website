@@ -36,6 +36,16 @@ export async function register() {
     } catch (e) {
       console.error("[instrumentation] Stale-run sweeper failed to start:", e);
     }
+
+    // Sentinel — periodic platform health probes, incident detection,
+    // bounded safe remediation, and owner escalation. Idempotent per
+    // process; unref'd interval; disable with SENTINEL_DISABLED=1.
+    try {
+      const { startSentinel } = await import("./lib/sentinel");
+      startSentinel();
+    } catch (e) {
+      console.error("[instrumentation] Sentinel failed to start:", e);
+    }
   }
 
   if (process.env.NEXT_RUNTIME === "edge") {
