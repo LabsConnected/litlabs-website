@@ -8,10 +8,13 @@
 import { buildSkeletonPlan } from "./pack-brief";
 import type { TopicPack } from "./types";
 
+// Raw plans are untyped JSON by design; the pack validators, not static
+// types, are what check these shapes.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type RawSection = Record<string, any>;
 
-function fillItem(kind: string, item: Record<string, any>): Record<string, any> {
-  const out: Record<string, any> = { ...item };
+function fillItem(kind: string, item: RawSection): RawSection {
+  const out: RawSection = { ...item };
   for (const k of Object.keys(out)) {
     if (typeof out[k] === "string" && !out[k].trim()) out[k] = `Sample ${k}`;
   }
@@ -42,9 +45,9 @@ function fillItem(kind: string, item: Record<string, any>): Record<string, any> 
   return out;
 }
 
-export function buildCompletePlan(pack: TopicPack): Record<string, any> {
-  const skel = buildSkeletonPlan(pack) as unknown as Record<string, any>;
-  const plan: Record<string, any> = {
+export function buildCompletePlan(pack: TopicPack): RawSection {
+  const skel = buildSkeletonPlan(pack) as unknown as RawSection;
+  const plan: RawSection = {
     ...skel,
     title: "Test Business",
     description: pack.seo.descriptionPattern
@@ -66,7 +69,7 @@ export function buildCompletePlan(pack: TopicPack): Record<string, any> {
     const out: RawSection = { ...sec };
     const kind = String(out.kind);
     if (Array.isArray(out.items)) {
-      out.items = out.items.map((it: Record<string, any>) => fillItem(kind, it));
+      out.items = out.items.map((it: RawSection) => fillItem(kind, it));
     }
     if (kind === "areas" && (!Array.isArray(out.items) || out.items.length === 0)) {
       out.items = [{ town: "Grand Haven" }, { town: "Spring Lake" }];
@@ -82,16 +85,16 @@ export function buildCompletePlan(pack: TopicPack): Record<string, any> {
     }
     if (kind === "pricing") {
       out.plans = (Array.isArray(out.plans) && out.plans.length ? out.plans : [{ name: "", price: "", features: [] }]).map(
-        (p: Record<string, any>) => ({ name: p.name || "Standard", price: p.price || "$49", features: p.features?.length ? p.features : ["Included item"] }),
+        (p: RawSection) => ({ name: p.name || "Standard", price: p.price || "$49", features: p.features?.length ? p.features : ["Included item"] }),
       );
     }
     if (kind === "about" || kind === "text" || kind === "prose") {
       out.text = `${pack.copy.mustMention.join(". ")}. ${pack.summary} ${out.text ?? ""}`.trim();
     }
     if (kind === "form" || kind === "booking") {
-      out.fields = ((out.fields ?? []) as Array<Record<string, any>>).map((f) => {
+      out.fields = ((out.fields ?? []) as Array<RawSection>).map((f) => {
         const name = String(f.name);
-        const filled: Record<string, any> = { ...f, label: f.label || name };
+        const filled: RawSection = { ...f, label: f.label || name };
         if (/email/i.test(name)) filled.type = "email";
         else if (/phone|tel/i.test(name)) filled.type = "tel";
         else if (/message|notes|details/i.test(name)) filled.type = "textarea";
