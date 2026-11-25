@@ -984,20 +984,25 @@ describe("StudioTranscript — failed-run work log truthfulness (ACC-03 item 5)"
     );
   }
 
-  it("ACC-05: a failed run's work log carries the run's real failure reason", () => {
+  it("ACC-05 + ACC-06a item 3: a failed run's work log carries the reason without claiming no work completed", () => {
     // Acceptance Run 1 on 8935b2a9: the first build failed after its
     // approval and the work log said only "Failed — no work
     // completed" — the loop knew why it died and the reason never
-    // reached the message. When the execution evidence carries the
-    // reason, the label reports it.
+    // reached the message. ACC-05 attached the reason; ACC-06a item 3
+    // removes the false half of the label: when the paired record
+    // carries no tool-call evidence (the resumed-run record persists
+    // only the reason), the label must not assert "no work
+    // completed" — the reason itself may state that work landed
+    // (Acceptance Run 1 on 8cd7728c, where the page WAS written).
+    // With no reason at all, the ACC-03 label below still applies.
     renderFailed({
       mode: "build",
       toolCalls: [],
       workspaceChange: null,
       failureReason: "files.write: workspace transport unavailable",
     });
-    expect(screen.getByText(/Failed — no work completed/)).toBeTruthy();
-    expect(screen.getByText(/workspace transport unavailable/)).toBeTruthy();
+    expect(screen.queryByText(/no work completed/)).toBeNull();
+    expect(screen.getByText(/Failed · files\.write: workspace transport unavailable/)).toBeTruthy();
   });
 
   it("does NOT blame file verification when the failed run attempted no work at all", () => {

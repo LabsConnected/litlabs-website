@@ -558,6 +558,10 @@ export function useCanonicalConversation({
             : result.state === "failed"
               ? "failed"
               : undefined,
+          // ACC-06a item 2: settle the run's OWNING worktab too —
+          // the reconciled conversation is not necessarily the
+          // active tab (production "Run in progress" wart).
+          run.conversationId,
         );
       }
     }
@@ -2193,7 +2197,7 @@ export function useCanonicalConversation({
           }
           getStore().setStreaming(false);
           setBusy(false);
-          useExecutionStore.getState().endRun(state === "cancelled" ? "cancelled" : undefined);
+          useExecutionStore.getState().endRun(state === "cancelled" ? "cancelled" : undefined, run.conversationId);
         }
         // "running": the server hasn't confirmed the stop yet — keep the
         // run tracked and the composer in Stop mode ("Stopping…").

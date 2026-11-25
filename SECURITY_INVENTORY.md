@@ -50,7 +50,7 @@ Direct user-initiated file operations are intentionally approval-free.
 
 ## P0-6: No cross-user isolation tests — ❌ OPEN
 
-**Fix needed:** `tests/integration/cross-user-isolation.test.ts`
+**Corrected (2026-11-25):** Cross-user isolation tests EXIST — `tests/cross-user-isolation.test.ts`, `tests/security-isolation.test.ts`, `tests/agent-instance-isolation.test.ts`, `tests/global-litt-count-isolation.test.ts`, `tests/playwright/isolation.spec.ts`, `tests/playwright/studio-html-isolation.spec.ts`. The earlier claim and the `tests/integration/` path were wrong.
 
 ---
 

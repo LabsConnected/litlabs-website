@@ -79,6 +79,18 @@ const TRUTH_RULES = `TRUTH RULES:
 // the kernel/runtime execution context, not the product identity.
 import { LITT } from "@/lib/agent-registry";
 
+/**
+ * Closing-reply discipline, shared by the modes that write files.
+ * The model's closing message is what lands in chat; without this
+ * rule a build reply can paste the entire file it just wrote (the
+ * files themselves live in the workspace). A deterministic guard in
+ * the agent loop enforces the same rule — this instruction is the
+ * first line, not the only one.
+ */
+const CLOSING_REPLY_RULE = `CLOSING REPLY RULE:
+- Your final message summarizes, in plain language, what you built or changed and what the user can do next.
+- Never paste file contents or large code blocks into chat — the files live in the workspace and the Code view. Refer to files by name instead of reproducing them.`;
+
 const STANDARD_PROMPT = `${LITT.systemPrompt}
 
 GROUNDING RULES:
@@ -104,14 +116,16 @@ ACT-FIRST-WHEN-SAFE RULES:
 
 ${TOOL_ORCHESTRATION_POLICY}
 
-Adapt to verified project context. For engineering requests, provide production-ready implementation. For research requests, cite sources and verify claims. For creative or strategy requests, stay concise unless depth is requested. You are the only agent — do not recommend switching to another agent for any task. For creative direction, design, images, branding, or ideation, handle it yourself with your own tools.`;
+Adapt to verified project context. For engineering requests, provide production-ready implementation. For research requests, cite sources and verify claims. For creative or strategy requests, stay concise unless depth is requested. You are the only agent — do not recommend switching to another agent for any task. For creative direction, design, images, branding, or ideation, handle it yourself with your own tools.
+
+${CLOSING_REPLY_RULE}`;
 
 // ─── LiTT Builder Mode ────────────────────────────────────────────
 const BUILDER_PROMPT = `You are LiTT in Builder Mode — focused on code construction, refactoring, and technical implementation inside LiTTree Lab Studios.
 
 PERSONALITY:
 - Direct, technical, and implementation-focused.
-- Lead with the code change, then explain why.
+- Lead with what changed, in plain language, then explain why.
 - Prefer working code over lengthy discussion.
 - Surface risks and edge cases concisely.
 
@@ -142,7 +156,9 @@ CONSTRAINTS:
 - For creative direction, handle it yourself; for video/music file generation, say plainly you can't generate those files.
 - For research tasks, suggest switching to Research Mode.
 
-${TRUTH_RULES}`;
+${TRUTH_RULES}
+
+${CLOSING_REPLY_RULE}`;
 
 // ─── LiTT Research Mode ───────────────────────────────────────────
 const RESEARCH_PROMPT = `You are LiTT in Research Mode — focused on deep research, source-backed synthesis, and analysis inside LiTTree Lab Studios.
@@ -212,7 +228,7 @@ export const AGENT_PROFILES: Record<AgentMode, AgentProfile> = {
     color: "#67e8f9",
     avatar: "🧠",
     systemPrompt: STANDARD_PROMPT,
-    promptVersion: "2.3.1",
+    promptVersion: "2.3.2",
     allowedToolLevels: ["read", "draft", "workspace-write", "external-write", "production", "financial", "destructive"],
     allowedToolIds: ["*"],
     blockedToolIds: [],
@@ -232,7 +248,7 @@ export const AGENT_PROFILES: Record<AgentMode, AgentProfile> = {
     color: "#67e8f9",
     avatar: "🔨",
     systemPrompt: BUILDER_PROMPT,
-    promptVersion: "2.1.1",
+    promptVersion: "2.1.2",
     allowedToolLevels: ["read", "draft", "workspace-write", "external-write", "production", "financial", "destructive"],
     allowedToolIds: ["*"],
     blockedToolIds: [],

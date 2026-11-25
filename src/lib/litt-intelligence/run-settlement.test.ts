@@ -35,10 +35,13 @@ describe("primaryFailureReason (ACC-05)", () => {
     expect(primaryFailureReason(undefined)).toBeNull();
   });
 
-  it("bounds the reason to a single short line", () => {
-    const long = `first line\n${"x".repeat(400)}`;
+  it("keeps the reason complete on a single line — no mid-sentence truncation (ACC-06a item 3)", () => {
+    // Acceptance Run 1 on 8cd7728c: the failure reason shown to the
+    // user was cut mid-sentence at 200 chars. Reasons render
+    // completely now; only whitespace is normalized to one line.
+    const long = `first line\n${"x".repeat(400)} and the final word matters.`;
     const reason = primaryFailureReason({ modelFailed: long });
     expect(reason).not.toContain("\n");
-    expect(reason!.length).toBeLessThanOrEqual(200);
+    expect(reason).toBe(`first line ${"x".repeat(400)} and the final word matters.`);
   });
 });

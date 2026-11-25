@@ -23,6 +23,17 @@ interface CheckResult {
   error?: string | null;
 }
 
+/**
+ * ACC-06a item 2: a not_run check must carry its reason. Project
+ * checks run on demand from the Checks panel — a completed build
+ * does not run them automatically — so after a build the honest
+ * record is "not run, because on-demand", never a bare "Not run"
+ * (production proof on 8cd7728c showed all seven checks reasonless).
+ * StudioHealthPanel uses the same sentence for its fallback shape.
+ */
+const NOT_RUN_REASON =
+  "Not run yet — project checks run on demand from the Checks panel; a completed build does not run them automatically.";
+
 function emptyChecks(reason: string): CheckResult[] {
   return CHECK_IDS.map((id) => ({
     id,
@@ -52,16 +63,40 @@ function parseChangedFiles(output: string): string[] {
     .filter(Boolean);
 }
 
+function workspaceCommandTimeoutMs(): number {
+  const fromEnv = Number(process.env.CHECKS_COMMAND_TIMEOUT_MS);
+  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 120_000;
+}
+
 async function runWorkspaceCommand(workspaceId: string, userId: string, command: string) {
   const terminalBase = requireTerminalBaseUrl();
-  const response = await fetch(`${terminalBase}/internal/workspace/${workspaceId}/exec`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Internal-Service-Key": process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "",
-    },
-    body: JSON.stringify({ command, userId }),
-  });
+  // ACC-06a item 2: bound every workspace command (the run-all route
+  // already had this discipline; this route had none, so a hung
+  // terminal left a check — and the panel — "running" forever). A
+  // timeout surfaces as a failed/unavailable result with the reason
+  // named, never as an endless wait.
+  const timeoutMs = workspaceCommandTimeoutMs();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(`${terminalBase}/internal/workspace/${workspaceId}/exec`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Internal-Service-Key": process.env.TERMINAL_INTERNAL_SERVICE_KEY ?? "",
+      },
+      body: JSON.stringify({ command, userId }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`Workspace command timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
   const payload = await response.json().catch(() => null) as { exitCode?: number; stdout?: string; stderr?: string; durationMs?: number; error?: string } | null;
   if (!response.ok) throw new Error(payload?.error ?? `Workspace command failed (${response.status})`);
   return payload ?? {};
@@ -104,7 +139,7 @@ async function baseResponse(projectId: string, userId: string) {
           source: "Active project workspace",
           timestamp: null,
           output: null,
-          error: null,
+          error: NOT_RUN_REASON,
         }))
       : emptyChecks(project.workspaceError ?? "Project workspace is not ready"),
     changedFiles,

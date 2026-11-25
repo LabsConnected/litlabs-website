@@ -216,3 +216,111 @@ describe("applySectionEdit", () => {
     expect(r.error).toMatch(/nothing to change/);
   });
 });
+
+describe("new section kinds (topic packs §4.4)", () => {
+  const planWith = (sections: unknown[]) =>
+    validateSitePlan({ title: "Test Biz", description: "A test business site", sections }).plan as SitePlan;
+
+  it("renders a form on the platform form plumbing", () => {
+    const plan = planWith([
+      { kind: "form", formKind: "quote", heading: "Get a quote", button: "Request quote", fields: [
+        { name: "name", label: "Your name", type: "text", required: true },
+        { name: "phone", label: "Phone", type: "tel" },
+        { name: "service needed", label: "Service needed", type: "select", options: ["Repair", "Replacement"] },
+        { name: "message", label: "Message", type: "textarea" },
+      ] },
+      { kind: "footer", text: "Test Biz" },
+    ]);
+    const html = composeSiteHtml(plan);
+    expect(html).toContain('action="/api/forms/submit"');
+    expect(html).toContain('data-litt-form="1"');
+    expect(html).toContain('data-litt-form-name="quote"');
+    expect(html).toContain('name="deploymentId" value=""');
+    expect(html).toContain('name="website"');
+    expect(html).toContain('name="service needed"');
+    expect(html).toContain("Request quote");
+    // The inline upgrade script ships exactly once.
+    expect(html.match(/querySelectorAll\("form\[data-litt-form\]"\)/g)?.length).toBe(1);
+  });
+
+  it("renders booking on the same plumbing with a date field", () => {
+    const plan = planWith([
+      { kind: "booking", heading: "Book a visit", fields: [
+        { name: "name", label: "Name", type: "text" },
+        { name: "preferred date", label: "Preferred date", type: "date" },
+        { name: "preferred time", label: "Preferred time", type: "select", options: ["Morning", "Afternoon"] },
+      ] },
+    ]);
+    const html = composeSiteHtml(plan);
+    expect(html).toContain('data-litt-form-name="contact"'.replace("contact", "booking"));
+    expect(html).toContain('type="date"');
+  });
+
+  it("renders process steps numbered, faq as disclosures, areas as towns, hours as rows", () => {
+    const plan = planWith([
+      { kind: "process", heading: "How it works", items: [
+        { title: "Inspect", text: "We look and photograph" },
+        { title: "Install", text: "Crew installs in a day" },
+      ] },
+      { kind: "faq", heading: "FAQ", items: [{ question: "How long?", answer: "One to two days." }] },
+      { kind: "areas", heading: "Service area", items: [{ town: "Grand Haven" }, { town: "Spring Lake" }], href: "https://maps.example.com/dir" },
+      { kind: "hours", heading: "Hours", items: [{ day: "Monday", hours: "8 AM – 5 PM" }] },
+    ]);
+    const html = composeSiteHtml(plan);
+    expect(html).toContain("step-num");
+    expect(html).toContain("<details");
+    expect(html).toContain("How long?");
+    expect(html).toContain("Grand Haven");
+    expect(html).toContain("Get directions");
+    expect(html).toContain("Monday");
+    expect(html).toContain("8 AM – 5 PM");
+  });
+
+  it("upgrades menu to price rows when items carry prices, cards when they do not", () => {
+    const priced = planWith([
+      { kind: "menu", heading: "Menu", items: [
+        { title: "Tomato soup", text: "With basil", price: "$9", group: "Starters" },
+        { title: "Ribeye", text: "28-day aged", price: "$34", group: "Mains" },
+      ] },
+    ]);
+    const pricedHtml = composeSiteHtml(priced);
+    expect(pricedHtml).toContain('class="menu-row"');
+    expect(pricedHtml).toContain("$34");
+    expect(pricedHtml).toContain("Starters");
+
+    const plain = planWith([
+      { kind: "menu", heading: "Services menu", items: [{ title: "Cut", text: "Consultation included" }] },
+    ]);
+    const plainHtml = composeSiteHtml(plain);
+    expect(plainHtml).toContain('class="card"');
+    expect(plainHtml).not.toContain('class="menu-row"');
+  });
+
+  it("uses seoTitle for the document title when present", () => {
+    const plan = planWith([{ kind: "about", text: "About us copy that is real and specific." }]);
+    plan.seoTitle = "Test Biz — Roofing Contractor in Grand Haven, MI";
+    const html = composeSiteHtml(plan);
+    expect(html).toContain("<title>Test Biz — Roofing Contractor in Grand Haven, MI</title>");
+  });
+
+  it("validates the new kinds' shapes", () => {
+    expect(validateSitePlan({ title: "T", sections: [{ kind: "form", heading: "F" }] }).errors.join(" ")).toMatch(/fields array/);
+    expect(validateSitePlan({ title: "T", sections: [{ kind: "faq", items: [{ question: "Q?" }] }] }).errors.join(" ")).toMatch(/question and an answer/);
+    expect(validateSitePlan({ title: "T", sections: [{ kind: "form", fields: [{ name: "s", type: "select" }] }] }).errors.join(" ")).toMatch(/options array/);
+    expect(validateSitePlan({ title: "T", sections: [{ kind: "form", fields: [{ name: "s", type: "smoke-signal" }] }] }).errors.join(" ")).toMatch(/not one of/);
+    expect(validateSitePlan({ title: "T", sections: [{ kind: "areas" }] }).errors.join(" ")).toMatch(/towns array/);
+    expect(validateSitePlan({ title: "T", sections: [{ kind: "hours", items: [{ day: "Mon" }] }] }).errors.join(" ")).toMatch(/day and its hours/);
+  });
+
+  it("re-renders a form section through applySectionEdit fields", () => {
+    const plan = planWith([
+      { kind: "form", heading: "Contact", fields: [{ name: "name", label: "Name", type: "text" }] },
+      { kind: "footer", text: "Test Biz" },
+    ]);
+    const html = composeSiteHtml(plan);
+    const r = applySectionEdit(html, "form", { fields: [{ name: "email", label: "Email", type: "email" }] });
+    expect(r.ok).toBe(true);
+    expect(r.html).toContain('name="email"');
+    expect(r.html).not.toContain('name="name"');
+  });
+});

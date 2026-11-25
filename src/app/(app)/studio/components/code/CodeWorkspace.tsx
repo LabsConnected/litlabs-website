@@ -20,7 +20,7 @@ import {
   Monitor,
 } from "lucide-react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { STUDIO_EVENT_OPEN_FILE } from "@/lib/canvas/panel-actions";
+import { STUDIO_EVENT_OPEN_CODE_VIEW, STUDIO_EVENT_OPEN_FILE } from "@/lib/canvas/panel-actions";
 import type { ConnectionCapabilities } from "../../hooks/useConnectionSummary";
 import { StudioFilePreview } from "../StudioFilePreview";
 
@@ -67,14 +67,56 @@ export const CODE_VIEW_MODES: { id: ViewMode; icon: typeof Columns2; label: stri
  * (CommandStudio's canvasContent carries its own Build/Design toggle
  * over the same builder), so they are presented as a single
  * "Canvas / Design" view rather than two fake views.
+ *
+ * Rail consolidation (Larry, 2026-11-25): two more views exist when
+ * the parent threads their content in — "files" (the single
+ * StudioProjectFiles composition; Files' only home is inside Code)
+ * and "run" (the run section: Plan · Checks · Approvals · Changes ·
+ * Activity · Deploy). When the run section is threaded in, Plan folds
+ * into it as its first section and the standalone Plan view is not
+ * offered. Mounts that thread neither (the board Code panel, the
+ * stage) keep exactly the original three views.
  */
-export type CodeBoxView = "code" | "plan" | "canvas-design";
+export type CodeBoxView = "code" | "files" | "plan" | "run" | "canvas-design";
 
 export const CODE_BOX_VIEWS: { id: CodeBoxView; label: string }[] = [
   { id: "code", label: "Code" },
   { id: "plan", label: "Plan" },
   { id: "canvas-design", label: "Canvas / Design" },
 ];
+
+/** The run section's tabs, in Larry's order (2026-11-20 ruling). */
+export type CodeRunSection =
+  | "plan"
+  | "checks"
+  | "approvals"
+  | "changes"
+  | "activity"
+  | "deploy";
+
+export const CODE_RUN_SECTIONS: { id: CodeRunSection; label: string }[] = [
+  { id: "plan", label: "Plan" },
+  { id: "checks", label: "Checks" },
+  { id: "approvals", label: "Approvals" },
+  { id: "changes", label: "Changes" },
+  { id: "activity", label: "Activity" },
+  { id: "deploy", label: "Deploy" },
+];
+
+/**
+ * The run section's threaded contents — one element per section,
+ * composed by CommandStudio from the same surfaces the retired right
+ * rail carried (Checks/Approvals read models, the live Activity feed,
+ * the run's Changes panel, the Deploy surface). Plan is NOT threaded:
+ * it renders from this component's own plan props, like the Plan view.
+ */
+export interface CodeRunContent {
+  checks: ReactNode;
+  approvals: ReactNode;
+  changes: ReactNode;
+  activity: ReactNode;
+  deploy: ReactNode;
+}
 
 type DialogState =
   | { kind: "file" | "folder"; directory: string; value: string }
@@ -167,6 +209,9 @@ export function CodeWorkspace({
   previewContent,
   previewPlaceholder,
   canvasContent,
+  filesContent,
+  runContent,
+  viewRequest,
   planCapabilities,
   planModelLabel,
   onPreviewRefreshRequest,
@@ -194,6 +239,30 @@ export function CodeWorkspace({
   previewPlaceholder?: ReactNode;
   /** The Canvas & Design stage element, built by CommandStudio. */
   canvasContent?: ReactNode;
+  /**
+   * Rail consolidation: the ONE project-files composition
+   * (CommandStudio's projectFilesContent), threaded in by the Regular
+   * layout so Files' only home is inside this box. Rendered as the
+   * "Files" Code-box view. Absent on mounts where Files lives
+   * elsewhere (the board has its own Files panel).
+   */
+  filesContent?: ReactNode;
+  /**
+   * Rail consolidation: the run section's contents (Checks, Approvals,
+   * Changes, Activity, Deploy), threaded in by the Regular layout.
+   * When present, the box offers a "Run" view whose first section is
+   * Plan (rendered from planCapabilities/planModelLabel), and the
+   * standalone Plan view folds into it.
+   */
+  runContent?: CodeRunContent;
+  /**
+   * Rail consolidation: an external request to show the Files view or
+   * a run section, issued by CommandStudio when a chat/dock entry
+   * point targets a surface whose home is inside this box. Applied on
+   * mount and whenever `nonce` changes. Requests for views this mount
+   * was not given content for are ignored.
+   */
+  viewRequest?: { view: "files" | "run"; section?: string; nonce: number } | null;
   /** Plan view data — StudioPlanSurface renders inside the Code box. */
   planCapabilities?: ConnectionCapabilities;
   planModelLabel?: string;
@@ -240,6 +309,8 @@ export function CodeWorkspace({
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [codeBoxView, setCodeBoxView] = useState<CodeBoxView>("code");
+  // Rail consolidation: the run section's active tab (Plan first).
+  const [runSection, setRunSection] = useState<CodeRunSection>("plan");
   const [selectedFileInfo, setSelectedFileInfo] = useState<{ path: string; size: number | null } | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
   const editorRef = useRef<unknown>(null);
@@ -682,8 +753,104 @@ export function CodeWorkspace({
     }
   }, [activeTab, openTabs, tryRevealPendingLine]);
 
+  // Rail consolidation: external entry points (chat Jobs' Checks
+  // summon, the Files panel open actions, the bottom drawer's Files
+  // jump) ask this box to show the Files view or a run section —
+  // either through the viewRequest prop (CommandStudio's route: no
+  // timing race with a freshly mounted box) or the
+  // STUDIO_EVENT_OPEN_CODE_VIEW window event. Views this mount was
+  // not given content for are ignored — the board Code panel never
+  // receives these, and if one arrives it stays on its own views.
+  const applyCodeViewRequest = useCallback(
+    (view?: string, section?: string) => {
+      if (view === "files" && filesContent) {
+        setCodeBoxView("files");
+      } else if (view === "run" && runContent) {
+        setCodeBoxView("run");
+        if (section && CODE_RUN_SECTIONS.some((s) => s.id === section)) {
+          setRunSection(section as CodeRunSection);
+        }
+      } else if (view === "plan") {
+        if (runContent) {
+          setCodeBoxView("run");
+          setRunSection("plan");
+        } else {
+          setCodeBoxView("plan");
+        }
+      }
+    },
+    [filesContent, runContent],
+  );
+
+  const appliedViewNonceRef = useRef(0);
+  useEffect(() => {
+    if (!viewRequest || viewRequest.nonce === appliedViewNonceRef.current) return;
+    appliedViewNonceRef.current = viewRequest.nonce;
+    applyCodeViewRequest(viewRequest.view, viewRequest.section);
+  }, [viewRequest, applyCodeViewRequest]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as
+        | { view?: string; section?: string }
+        | undefined;
+      if (!detail) return;
+      applyCodeViewRequest(detail.view, detail.section);
+    };
+    window.addEventListener(STUDIO_EVENT_OPEN_CODE_VIEW, handler);
+    return () => window.removeEventListener(STUDIO_EVENT_OPEN_CODE_VIEW, handler);
+  }, [applyCodeViewRequest]);
+
   const activeTabData = openTabs.find((t) => t.path === activeTab);
   const isDirty = activeTabData && activeTabData.content !== activeTabData.original;
+
+  // Rail consolidation: the views this mount actually offers. Files
+  // appears only when its content was threaded in; when the run
+  // section was threaded in, the standalone Plan view folds into Run
+  // (Plan is the run section's first tab). The effective view guards
+  // against state naming a view this mount does not offer.
+  const visibleViews: { id: CodeBoxView; label: string }[] = [];
+  for (const view of CODE_BOX_VIEWS) {
+    if (view.id === "plan" && runContent) {
+      visibleViews.push({ id: "run", label: "Run" });
+      continue;
+    }
+    visibleViews.push(view);
+    if (view.id === "code" && filesContent) {
+      visibleViews.push({ id: "files", label: "Files" });
+    }
+  }
+  const effectiveCodeBoxView: CodeBoxView =
+    codeBoxView === "plan" && runContent
+      ? "run"
+      : codeBoxView === "run" && !runContent
+        ? "code"
+        : codeBoxView === "files" && !filesContent
+          ? "code"
+          : codeBoxView;
+
+  // The Plan surface element — shared by the standalone Plan view and
+  // the run section's Plan tab. Only one Code-box view renders at a
+  // time, so the element is never mounted twice at once.
+  const planElement = planCapabilities ? (
+    <StudioPlanSurface
+      capabilities={planCapabilities}
+      modelLabel={planModelLabel ?? ""}
+      onOpenCode={() => setCodeBoxView("code")}
+      onOpenCanvas={() => setCodeBoxView("canvas-design")}
+      onOpenPreview={() => setCodeBoxView("code")}
+      onOpenTerminal={() => onSummonPanel?.("terminal")}
+      onOpenActivity={() => onSummonPanel?.("activity")}
+      onOpenFiles={() => setCodeBoxView(filesContent ? "files" : "code")}
+      onRollback={() => onRollback?.()}
+    />
+  ) : (
+    <div className="flex flex-1 items-center justify-center px-4 text-center">
+      <p className="text-[11px] font-medium" style={{ color: "var(--text-muted)" }}>
+        Plan is not available in this Code panel mount.
+      </p>
+    </div>
+  );
 
   // ─── Render ─────────────────────────────────────────────────────
 
@@ -714,8 +881,8 @@ export function CodeWorkspace({
           aria-label="Code panel views"
           data-testid="code-box-view-tabs"
         >
-          {CODE_BOX_VIEWS.map((view) => {
-            const isActive = codeBoxView === view.id;
+          {visibleViews.map((view) => {
+            const isActive = effectiveCodeBoxView === view.id;
             return (
               <button
                 key={view.id}
@@ -738,7 +905,7 @@ export function CodeWorkspace({
         </div>
         <div className="flex-1" />
         {/* Editor-region toggle — only meaningful in the Code view */}
-        {codeBoxView === "code" && (
+        {effectiveCodeBoxView === "code" && (
         <div className="flex items-center gap-0.5 rounded-md p-0.5" style={{ backgroundColor: "rgba(0,0,0,0.04)" }}>
           {CODE_VIEW_MODES.map((mode) => {
             const Icon = mode.icon;
@@ -772,8 +939,10 @@ export function CodeWorkspace({
         </div>
       )}
 
-      {/* No project empty state */}
-      {!projectId && (
+      {/* No project empty state — the Files and Run views carry
+          their own no-project states (their compositions render
+          without a project), so the empty state yields to them. */}
+      {!projectId && effectiveCodeBoxView !== "files" && effectiveCodeBoxView !== "run" && (
         <div className="flex flex-1 items-center justify-center">
           <div className="flex flex-col items-center gap-2">
             <FileText size={32} opacity={0.2} style={{ color: "var(--text-muted)" }} />
@@ -786,7 +955,7 @@ export function CodeWorkspace({
           (Explorer + editor + app preview, simultaneously), shown in
           the Code view only. Plan and Canvas / Design are separate
           Code-box views below. */}
-      {projectId && codeBoxView === "code" && (
+      {projectId && effectiveCodeBoxView === "code" && (
       <div className="flex min-h-0 flex-1" data-testid="code-box-code-view">
         {/* Left: File Explorer */}
         <div
@@ -1121,35 +1290,105 @@ export function CodeWorkspace({
       {/* Plan view — StudioPlanSurface inside the Code box
           (Amendment 4). Its Open-* actions are rewired: targets that
           now live in Code switch this box's view; the rest summon
-          their board panels. */}
-      {projectId && codeBoxView === "plan" && (
+          their board panels. When the run section is threaded in,
+          this standalone view folds into Run (Plan is its first
+          section) and effectiveCodeBoxView never lands here. */}
+      {projectId && effectiveCodeBoxView === "plan" && (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden" data-testid="code-box-plan-view">
-          {planCapabilities ? (
-            <StudioPlanSurface
-              capabilities={planCapabilities}
-              modelLabel={planModelLabel ?? ""}
-              onOpenCode={() => setCodeBoxView("code")}
-              onOpenCanvas={() => setCodeBoxView("canvas-design")}
-              onOpenPreview={() => setCodeBoxView("code")}
-              onOpenTerminal={() => onSummonPanel?.("terminal")}
-              onOpenActivity={() => onSummonPanel?.("activity")}
-              onOpenFiles={() => setCodeBoxView("code")}
-              onRollback={() => onRollback?.()}
-            />
-          ) : (
-            <div className="flex flex-1 items-center justify-center px-4 text-center">
-              <p className="text-[11px] font-medium" style={{ color: "var(--text-muted)" }}>
-                Plan is not available in this Code panel mount.
-              </p>
-            </div>
-          )}
+          {planElement}
+        </div>
+      )}
+
+      {/* Files view — rail consolidation (2026-11-25): the ONE
+          project-files composition lives inside the Code box in the
+          Regular layout. The element is threaded in by CommandStudio;
+          this view is its only mount in that layout. Like the rail
+          panes it replaces, the view stays MOUNTED and toggles
+          visibility, so the file tree keeps its scroll and loaded
+          state across view switches. */}
+      {filesContent && (
+        <div
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+          style={{ display: effectiveCodeBoxView === "files" ? undefined : "none" }}
+          data-active={effectiveCodeBoxView === "files"}
+          data-testid="code-box-files-view"
+        >
+          {filesContent}
+        </div>
+      )}
+
+      {/* Run view — rail consolidation (2026-11-25): the run section
+          inside Code — Plan · Checks · Approvals · Changes · Activity
+          · Deploy in one place (Larry's 2026-11-20 ruling). The view
+          stays mounted (visibility toggled) once the box is open, and
+          its section panes do the same, so the Activity feed and the
+          health panels keep their state across switches. */}
+      {runContent && (
+        <div
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+          style={{ display: effectiveCodeBoxView === "run" ? undefined : "none" }}
+          data-active={effectiveCodeBoxView === "run"}
+          data-testid="code-box-run-view"
+        >
+          <div
+            className="no-scrollbar flex shrink-0 items-center gap-0.5 overflow-x-auto border-b px-2 py-1"
+            style={{ borderColor: "var(--studio-border)" }}
+            role="tablist"
+            aria-label="Run section"
+            data-testid="code-run-section-tabs"
+          >
+            {CODE_RUN_SECTIONS.map((section) => {
+              const selected = runSection === section.id;
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  data-testid={`code-run-section-${section.id}`}
+                  onClick={() => setRunSection(section.id)}
+                  className="shrink-0 whitespace-nowrap rounded px-2 py-1 text-[11px] font-bold transition"
+                  style={{
+                    color: selected ? "var(--text-main)" : "var(--text-dim)",
+                    backgroundColor: selected
+                      ? "color-mix(in srgb, var(--color-accent) 12%, transparent)"
+                      : "transparent",
+                  }}
+                >
+                  {section.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="relative min-h-0 flex-1 overflow-hidden">
+            {CODE_RUN_SECTIONS.map((section) => {
+              const content =
+                section.id === "plan"
+                  ? planElement
+                  : runContent[section.id as keyof CodeRunContent];
+              return (
+                <div
+                  key={section.id}
+                  className="absolute inset-0 flex flex-col overflow-hidden"
+                  style={{
+                    visibility: runSection === section.id ? "visible" : "hidden",
+                    pointerEvents: runSection === section.id ? "auto" : "none",
+                  }}
+                  data-active={runSection === section.id}
+                  data-testid={`code-run-pane-${section.id}`}
+                >
+                  {content}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
       {/* Canvas / Design view — the single inseparable Canvas &
           Design surface (its own Build/Design toggle), threaded in
           from CommandStudio like the preview element. */}
-      {projectId && codeBoxView === "canvas-design" && (
+      {projectId && effectiveCodeBoxView === "canvas-design" && (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden" data-testid="code-box-canvas-design-view">
           {canvasContent ?? (
             <div className="flex flex-1 items-center justify-center px-4 text-center">

@@ -1988,6 +1988,26 @@ export function textContrastRepairPrompt(violations: ContrastViolation[]): strin
  *  not be verified at all (ACC-03) — distinct from a proven
  *  violation: nothing was proven invisible, but nothing was proven
  *  readable either, and an unverifiable page is not a finished page. */
+/**
+ * ACC-06a item 1 — the pass-with-note text for runtime-decided
+ * colors. Larry's rule (Acceptance Run 1 on 8cd7728c, where this
+ * shape FAILED a correctly rendered build): the verifier may only
+ * fail a build on contrast evidence it can statically decide.
+ * Colors the Tailwind browser compiler decides at runtime are
+ * outside that evidence, so the run completes and this note rides
+ * its closing text — the unverifiable scope is stated plainly,
+ * never hidden and never dressed as a failure.
+ */
+export function textContrastUnverifiableNote(files: string[]): string {
+  const list = files.slice(0, 3).join(", ");
+  return (
+    `Note: I couldn't statically verify the text contrast in ${list} — the colors there are decided ` +
+    `at runtime by the Tailwind browser compiler instead of being declared in the document itself. ` +
+    `The page was delivered exactly as written; if any text is hard to read, I can rewrite those ` +
+    `colors in plain CSS so they can be checked.`
+  );
+}
+
 export function textContrastUnverifiableMessage(files: string[]): string {
   const list = files.slice(0, 3).join(", ");
   return (

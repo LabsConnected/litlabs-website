@@ -113,10 +113,20 @@ function deriveWorkLog(
     // (Acceptance Run 1 on 8935b2a9). The evidence-specific labels
     // above (changed / could-not-verify) already name their cause and
     // are not suffixed.
+    // ACC-06a item 3: with a reason present but NO tool-call evidence
+    // on this record, the label must not assert "no work completed" —
+    // the resumed-run record persists only the reason, and the reason
+    // itself may state that work landed (Acceptance Run 1 on
+    // 8cd7728c: the page WAS written while the label claimed no work
+    // completed, contradicting its own suffix). "Failed — no work
+    // completed" survives only when there is no reason and no
+    // attempted step: a run that died before any tool call.
     const reason = execution?.failureReason?.trim();
     const base = attempted > 0
       ? `${completed} of ${attempted} steps complete — failed`
-      : "Failed — no work completed";
+      : reason
+        ? "Failed"
+        : "Failed — no work completed";
     return {
       label: reason ? `${base} · ${reason}` : base,
       color: "#ef4444",

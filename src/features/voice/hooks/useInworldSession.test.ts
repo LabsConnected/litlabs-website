@@ -572,6 +572,72 @@ describe("useInworldSession — TTS state machine", () => {
     expect(useVoiceStore.getState().error).toContain("Microphone permission denied");
   });
 
+  it("maps a busy microphone (NotReadableError) to the close-the-other-app message, not raw DOMException text", async () => {
+    const getUserMedia = navigator.mediaDevices.getUserMedia as unknown as {
+      mockRejectedValueOnce: (error: unknown) => void;
+    };
+    getUserMedia.mockRejectedValueOnce(
+      new DOMException("Could not start audio source", "NotReadableError"),
+    );
+
+    const { result } = renderHook(() => useInworldSession({}));
+    await connectAndWait(result);
+
+    await expect(
+      act(async () => {
+        await result.current.startMicrophone();
+      }),
+    ).rejects.toThrow(/busy/i);
+
+    expect(useVoiceStore.getState().error).toMatch(/busy/i);
+    expect(useVoiceStore.getState().error).not.toMatch(/NotReadableError/);
+  });
+
+  it("recovers from a stale stored device: OverconstrainedError retries once with the default device and forgets the stale id", async () => {
+    localStorage.setItem("litt:voice:deviceId", "gone-headset");
+    const getUserMedia = navigator.mediaDevices.getUserMedia as unknown as ReturnType<
+      typeof vi.fn
+    >;
+    getUserMedia.mockRejectedValueOnce(
+      new DOMException("Constraint not satisfied", "OverconstrainedError"),
+    );
+
+    const { result } = renderHook(() => useInworldSession({}));
+    await connectAndWait(result);
+
+    await act(async () => {
+      await result.current.startMicrophone();
+    });
+
+    expect(result.current.isListening).toBe(true);
+    expect(getUserMedia.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const retryConstraints = JSON.stringify(
+      getUserMedia.mock.calls[getUserMedia.mock.calls.length - 1]?.[0] ?? {},
+    );
+    expect(retryConstraints).not.toContain("gone-headset");
+    expect(localStorage.getItem("litt:voice:deviceId")).toBeNull();
+  });
+
+  it("an OverconstrainedError with no stored device reports the mic-unavailable message", async () => {
+    localStorage.removeItem("litt:voice:deviceId");
+    const getUserMedia = navigator.mediaDevices.getUserMedia as unknown as {
+      mockRejectedValueOnce: (error: unknown) => void;
+    };
+    getUserMedia.mockRejectedValueOnce(
+      new DOMException("Constraint not satisfied", "OverconstrainedError"),
+    );
+
+    const { result } = renderHook(() => useInworldSession({}));
+    await connectAndWait(result);
+
+    await expect(
+      act(async () => {
+        await result.current.startMicrophone();
+      }),
+    ).rejects.toThrow(/isn't available anymore/i);
+    expect(useVoiceStore.getState().state).toBe("error");
+  });
+
   it("connect() retries exactly once with a force-refreshed credential on a 4001 close", async () => {
     vi.mocked(getVoiceConnection).mockClear();
     const { result } = renderHook(() => useInworldSession({}));

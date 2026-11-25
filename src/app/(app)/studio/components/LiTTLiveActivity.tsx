@@ -20,6 +20,7 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  approvalForConversation,
   useExecutionStore,
   type ExecutionEvent,
   type ExecutionPhase,
@@ -57,6 +58,13 @@ interface LiTTLiveActivityProps {
   onOpenTerminal?: () => void;
   /** Called when an approval should be resolved. */
   onResolveApproval?: (decision: "approved" | "rejected") => void;
+  /**
+   * ACC-06a item 4: the conversation this panel is showing. The
+   * store's approval gate renders here ONLY when it belongs to this
+   * conversation — another project's gate never mounts in this
+   * session. Absent (legacy mounts) keeps unbound-gate behavior.
+   */
+  conversationId?: string | null;
   /** Called when the user clicks Stop while LiTT is running. */
   onStop?: () => void;
   /** Called when the user clicks Rollback to the last checkpoint. */
@@ -101,6 +109,7 @@ export default function LiTTLiveActivity({
   onOpenCheck,
   onOpenTerminal,
   onResolveApproval,
+  conversationId,
   onStop,
   onRollback,
   lastRun,
@@ -108,7 +117,12 @@ export default function LiTTLiveActivity({
   const events = useExecutionStore((s) => s.events);
   const phase = useExecutionStore((s) => s.phase);
   const isRunning = useExecutionStore((s) => s.isRunning);
-  const pendingApproval = useExecutionStore((s) => s.pendingApproval);
+  // ACC-06a item 4: scope the store gate to this panel's
+  // conversation — another project's gate never renders here.
+  const pendingApproval = approvalForConversation(
+    useExecutionStore((s) => s.pendingApproval),
+    conversationId,
+  );
   const approvalPhase = useExecutionStore((s) => s.approvalPhase);
   const approvalError = useExecutionStore((s) => s.approvalError);
   const checkpoint = useExecutionStore((s) => s.checkpoint);

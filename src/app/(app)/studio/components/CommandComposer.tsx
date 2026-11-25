@@ -893,20 +893,33 @@ export default function CommandComposer({
         </div>
       )}
 
-      {/* Error / permission denied status */}
+      {/* Error / permission denied status. For permission_denied and
+          unsupported the errorMessage IS the full plain-language text
+          (the canonical messages already open with the label's words),
+          so render it alone instead of "label — label repeated…". The
+          generic error state keeps label + message. */}
       {(voiceState === "permission_denied" || voiceState === "unsupported" || voiceState === "error") && (
-        <div className="px-1 text-[10px] font-bold" style={{ color: "#ef4444" }} role="alert">
-          {STATUS_LABELS[voiceState]}
-          {errorMessage && <span className="ml-1">— {errorMessage}</span>}
+        <div className="px-1 text-[11px] font-bold leading-snug" style={{ color: "#ef4444" }} role="alert">
+          {voiceState === "error" ? (
+            <>
+              {STATUS_LABELS[voiceState]}
+              {errorMessage && <span className="ml-1">— {errorMessage}</span>}
+            </>
+          ) : (
+            (errorMessage ?? STATUS_LABELS[voiceState])
+          )}
         </div>
       )}
 
       {/* Notice set while idle (B-11): #882's "didn't hear anything"
           message is written to errorMessage at the moment the state
           returns to idle — rendering errors only in error states made
-          it invisible. It clears on the next mic start. */}
-      {voiceState === "idle" && errorMessage && (
-        <div className="px-1 text-[10px] font-bold" style={{ color: "#ef4444" }} role="alert">
+          it invisible. It clears on the next mic start. The same
+          applies in transcript_ready, where a mic tap that cannot
+          restart recording explains itself here instead of looking
+          like a dead button. */}
+      {(voiceState === "idle" || voiceState === "transcript_ready") && errorMessage && (
+        <div className="px-1 text-[11px] font-bold leading-snug" style={{ color: "#ef4444" }} role="alert">
           {errorMessage}
         </div>
       )}

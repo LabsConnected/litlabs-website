@@ -330,7 +330,7 @@ vi.mock("../stores/useExecutionStore", () => {
     (selector: (s: Record<string, unknown>) => unknown) => selector(execState.state),
     { getState: () => execState.state },
   );
-  return { useExecutionStore };
+  return { useExecutionStore, approvalForConversation: (approval: { conversationId?: string } | null, conversationId?: string | null) => (approval && approval.conversationId && approval.conversationId !== conversationId ? null : approval) };
 });
 
 vi.mock("../stores/useConversationStore", () => ({

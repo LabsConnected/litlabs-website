@@ -1,5 +1,7 @@
 import "server-only";
 
+import { validatePlanAgainstPack } from "./topic-packs/pack-validation";
+
 /**
  * Deterministic site composer — the JSON-first generation path for the
  * local small lane.
@@ -40,11 +42,19 @@ export interface SitePlanSection {
   links?: Array<Record<string, unknown>>;
   plans?: Array<Record<string, unknown>>;
   images?: unknown[];
+  /** form/booking sections: the field list the visitor fills in. */
+  fields?: Array<Record<string, unknown>>;
+  /** form/booking flavour: quote | contact | reservation | intake. */
+  formKind?: string;
+  /** areas sections: town names (alternative to items). */
+  towns?: string[];
 }
 
 export interface SitePlan {
   title: string;
   description?: string;
+  /** Full <title> text when it differs from the brand title (SEO shape). */
+  seoTitle?: string;
   theme?: string;
   accentHue?: number;
   nav?: Array<{ label: string; target?: string }>;
@@ -275,6 +285,47 @@ a:hover{text-decoration:underline}
   padding:22px;text-align:center}
 .contact-item strong{display:block;margin-bottom:6px;font-family:var(--font-display)}
 .contact-item span{color:var(--muted);font-size:.95rem}
+.steps{list-style:none;margin:0;padding:0;display:grid;gap:20px;max-width:820px;margin-inline:auto}
+.steps li{display:flex;gap:20px;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:24px 28px;box-shadow:var(--shadow)}
+.step-num{flex:0 0 auto;width:44px;height:44px;border-radius:50%;background:var(--accent);
+  color:var(--on-accent);font-family:var(--font-display);font-weight:700;font-size:1.15rem;
+  display:flex;align-items:center;justify-content:center}
+.steps h3{margin-bottom:.3em}
+.steps p{color:var(--muted);margin:0;font-size:.96rem}
+.faq-list{max-width:820px;margin:0 auto;display:grid;gap:12px}
+.faq-item{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:18px 22px;box-shadow:var(--shadow)}
+.faq-item summary{font-family:var(--font-display);font-weight:600;font-size:1.05rem;cursor:pointer}
+.faq-item p{color:var(--muted);margin:.7em 0 0}
+.litt-form{max-width:680px;margin:0 auto;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:32px;box-shadow:var(--shadow);display:grid;gap:16px}
+.litt-form .form-intro{color:var(--muted);margin:0}
+.litt-form label{display:grid;gap:6px;font-weight:600;font-size:.93rem;text-align:left}
+.litt-form input,.litt-form select,.litt-form textarea{font:inherit;font-weight:400;color:var(--text);
+  background:var(--bg);border:1.5px solid var(--border);border-radius:var(--radius-sm);
+  padding:11px 13px;width:100%}
+.litt-form input:focus,.litt-form select:focus,.litt-form textarea:focus{outline:2px solid var(--accent);outline-offset:1px}
+.litt-form .btn{justify-self:start}
+.litt-form [data-litt-form-status]{font-size:.9rem;color:var(--muted);margin:0}
+.areas-list{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;list-style:none;margin:0 0 24px;padding:0}
+.areas-list li{background:var(--surface);border:1px solid var(--border);border-radius:99px;
+  padding:8px 18px;font-weight:500;box-shadow:var(--shadow)}
+.areas-note{text-align:center;color:var(--muted);max-width:40em;margin:0 auto 20px}
+.areas-cta{text-align:center}
+.hours-table{max-width:560px;margin:0 auto;width:100%;border-collapse:collapse;background:var(--surface);
+  border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
+.hours-table td{padding:13px 22px;border-bottom:1px solid var(--border);font-size:.97rem}
+.hours-table tr:last-child td{border-bottom:none}
+.hours-table td:last-child{text-align:right;color:var(--muted)}
+.menu-group{max-width:760px;margin:0 auto 36px}
+.menu-group>h3{text-align:center;margin-bottom:18px}
+.menu-row{display:flex;align-items:baseline;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)}
+.menu-row:last-child{border-bottom:none}
+.menu-row .m-name{font-weight:600}
+.menu-row .m-desc{color:var(--muted);font-size:.93rem;display:block;font-weight:400}
+.menu-row .m-dots{flex:1;border-bottom:2px dotted var(--border);transform:translateY(-4px)}
+.menu-row .m-price{font-family:var(--font-display);font-weight:700;color:var(--accent);white-space:nowrap}
 .site-footer{background:var(--surface-alt);border-top:1px solid var(--border);padding:48px 0 28px;margin-top:0}
 .site-footer .cols{display:flex;justify-content:space-between;gap:32px;flex-wrap:wrap;margin-bottom:28px}
 .site-footer .foot-brand{font-family:var(--font-display);font-weight:700;font-size:1.1rem}
@@ -416,6 +467,150 @@ function renderContact(sec: SitePlanSection): string {
   return `<div class="contact-grid">${html}</div>`;
 }
 
+function renderProcess(sec: SitePlanSection): string {
+  const items = (sec.items ?? []).slice(0, 8);
+  const html = items.map((it, i) =>
+    `<li><span class="step-num">${i + 1}</span><div><h3>${esc(it.title ?? it.name ?? `Step ${i + 1}`, 80)}</h3>` +
+    `<p>${esc(it.text ?? it.description ?? "", 320)}</p></div></li>`,
+  ).join("\n");
+  return `<ol class="steps">${html}</ol>`;
+}
+
+function renderFaq(sec: SitePlanSection): string {
+  const items = (sec.items ?? []).slice(0, 10);
+  const html = items.map((it) => {
+    const q = esc(it.question ?? it.q ?? it.title ?? "", 200);
+    const a = esc(it.answer ?? it.a ?? it.text ?? "", 600);
+    return `<details class="faq-item"><summary>${q}</summary><p>${a}</p></details>`;
+  }).join("\n");
+  return `<div class="faq-list">${html}</div>`;
+}
+
+const FORM_FIELD_TYPES = new Set(["text", "tel", "email", "select", "textarea", "date", "time", "number"]);
+
+/**
+ * The platform form, exactly as Studio's own forms render it: POSTs to
+ * /api/forms/submit with a hidden deploymentId the published-site
+ * server fills in at serve time, plus the standard honeypot. The same
+ * inline upgrade script as the canvas export is injected once per page
+ * (see FORM_UPGRADE_SCRIPT) so submissions land in the site owner's
+ * lead inbox with an inline thank-you instead of a raw JSON page.
+ */
+function renderForm(sec: SitePlanSection, booking: boolean): string {
+  const formName = esc(sec.formKind ?? (booking ? "booking" : "contact"), 40);
+  const fields = (sec.fields ?? []).slice(0, 12);
+  const controls = fields.map((f) => {
+    const name = String(f.name ?? "").replace(/[^A-Za-z0-9_ -]/g, "").slice(0, 40);
+    if (!name) return "";
+    const label = esc(f.label ?? name, 80);
+    const type = FORM_FIELD_TYPES.has(String(f.type ?? "text")) ? String(f.type) : "text";
+    const required = f.required === true ? " required" : "";
+    const placeholder = f.placeholder ? ` placeholder="${esc(f.placeholder, 80)}"` : "";
+    let control: string;
+    if (type === "textarea") {
+      control = `<textarea name="${esc(name, 40)}" rows="4"${placeholder}${required}></textarea>`;
+    } else if (type === "select") {
+      const options = (Array.isArray(f.options) ? f.options : [])
+        .slice(0, 12)
+        .map((o) => `<option value="${esc(o, 60)}">${esc(o, 60)}</option>`)
+        .join("");
+      control = `<select name="${esc(name, 40)}"${required}><option value="">Choose…</option>${options}</select>`;
+    } else {
+      control = `<input type="${type}" name="${esc(name, 40)}"${placeholder}${required}>`;
+    }
+    return `<label>${label}${control}</label>`;
+  }).join("\n");
+  const intro = sec.text ? `<p class="form-intro">${esc(sec.text, 400)}</p>` : "";
+  const submit = esc(sec.button ?? sec.cta ?? (booking ? "Request this time" : "Send request"), 40);
+  const honeypot = `<input type="text" name="website" value="" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px;opacity:0;height:0" aria-hidden="true">`;
+  return `<form class="litt-form" action="/api/forms/submit" method="post" data-litt-form="1" data-litt-form-name="${formName}">` +
+    `<input type="hidden" name="deploymentId" value="">${honeypot}${intro}${controls}` +
+    `<button class="btn" type="submit">${submit}</button></form>`;
+}
+
+function renderAreas(sec: SitePlanSection): string {
+  const fromItems = (sec.items ?? []).map((it) => String(it.town ?? it.name ?? it.title ?? "")).filter(Boolean);
+  const towns = (fromItems.length ? fromItems : (sec.towns ?? [])).slice(0, 24);
+  const chips = towns.map((t) => `<li>${esc(t, 60)}</li>`).join("");
+  const note = sec.text ?? sec.subheading ?? "";
+  const href = typeof sec.href === "string" && /^https?:\/\//i.test(sec.href) ? sec.href : "";
+  return `<ul class="areas-list">${chips}</ul>` +
+    (note ? `<p class="areas-note">${esc(note, 300)}</p>` : "") +
+    (href ? `<div class="areas-cta"><a class="btn btn-outline" href="${esc(href, 300)}" target="_blank" rel="noopener">Get directions</a></div>` : "");
+}
+
+function renderHours(sec: SitePlanSection): string {
+  const items = (sec.items ?? []).slice(0, 8);
+  const rows = items.map((it) =>
+    `<tr><td>${esc(it.day ?? it.label ?? it.title ?? "", 40)}</td><td>${esc(it.hours ?? it.value ?? it.text ?? "", 60)}</td></tr>`,
+  ).join("\n");
+  const note = sec.text ? `<p class="areas-note">${esc(sec.text, 300)}</p>` : "";
+  return `<table class="hours-table">${rows}</table>${note}`;
+}
+
+function renderMenu(sec: SitePlanSection): string {
+  const items = (sec.items ?? []).slice(0, 24);
+  const hasPrice = items.some((it) => String(it.price ?? "").trim());
+  if (!hasPrice) return renderFeatures(sec);
+  const groups = new Map<string, Array<Record<string, unknown>>>();
+  for (const it of items) {
+    const g = String(it.group ?? "");
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g)!.push(it);
+  }
+  const html = [...groups.entries()].map(([group, rows]) => {
+    const rowsHtml = rows.map((it) =>
+      `<div class="menu-row"><div><span class="m-name">${esc(it.title ?? it.name ?? "Item", 80)}</span>` +
+      (it.text || it.description ? `<span class="m-desc">${esc(it.text ?? it.description, 200)}</span>` : "") +
+      `</div><span class="m-dots"></span><span class="m-price">${esc(it.price ?? "", 20)}</span></div>`,
+    ).join("\n");
+    return `<div class="menu-group">${group ? `<h3>${esc(group, 60)}</h3>` : ""}${rowsHtml}</div>`;
+  }).join("\n");
+  return html;
+}
+
+/**
+ * Inline submit upgrade for pages carrying a platform form — mirrors
+ * the canvas export's script: intercept the submit, POST JSON to
+ * /api/forms/submit, show an inline status. Without a deploymentId
+ * (unpublished preview) it says so instead of pretending to send.
+ * Self-contained, no outer references; serialized into the page.
+ */
+const FORM_UPGRADE_SCRIPT = `<script>
+(function(){
+  function showStatus(form,msg){var el=form.querySelector("[data-litt-form-status]");
+    if(!el){el=document.createElement("p");el.setAttribute("data-litt-form-status","1");form.appendChild(el);}
+    el.textContent=msg;}
+  var forms=document.querySelectorAll("form[data-litt-form]");
+  for(var i=0;i<forms.length;i++){(function(form){
+    form.addEventListener("submit",function(e){
+      e.preventDefault();
+      var idInput=form.querySelector('input[name="deploymentId"]');
+      var deploymentId=(idInput&&idInput.value)||"";
+      if(!deploymentId){showStatus(form,"This form connects automatically when the site is published.");return;}
+      var data=new FormData(form);var fields={};
+      data.forEach(function(v,k){if(k!=="deploymentId")fields[k]=String(v);});
+      var payload={deploymentId:deploymentId,formName:form.getAttribute("data-litt-form-name")||null,
+        page:window.location.pathname||null,fields:fields,website:fields["website"]||""};
+      var btn=form.querySelector('[type="submit"]');
+      if(btn)btn.setAttribute("disabled","disabled");
+      showStatus(form,"Sending\\u2026");
+      fetch(form.action,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
+        .then(function(r){return r.json();})
+        .then(function(res){
+          if(btn)btn.removeAttribute("disabled");
+          if(res&&res.ok){showStatus(form,"Thanks \\u2014 your request was sent. We\\u2019ll be in touch soon.");form.reset();}
+          else{showStatus(form,"Something went wrong sending your request \\u2014 please call us instead.");}
+        })
+        .catch(function(){
+          if(btn)btn.removeAttribute("disabled");
+          showStatus(form,"Something went wrong sending your request \\u2014 please call us instead.");
+        });
+    });
+  })(forms[i]);}
+})();
+</script>`;
+
 function renderFooter(sec: SitePlanSection, title: string): string {
   const links = (sec.links ?? sec.items ?? []).slice(0, 8);
   const linkHtml = links.length
@@ -428,9 +623,10 @@ function renderFooter(sec: SitePlanSection, title: string): string {
     `<div class="legal"><span>&copy; ${new Date().getFullYear()} ${esc(title, 60)}</span><span>Built with LiTT</span></div>`;
 }
 
-const KNOWN_KINDS = new Set([
+export const KNOWN_KINDS = new Set([
   "features", "services", "cards", "gallery", "testimonials", "pricing",
   "stats", "about", "cta", "contact", "footer", "text", "prose", "menu",
+  "process", "faq", "form", "booking", "areas", "hours",
 ]);
 
 function renderSection(sec: SitePlanSection, index: number): { id: string; html: string; label: string } {
@@ -440,8 +636,22 @@ function renderSection(sec: SitePlanSection, index: number): { id: string; html:
   let inner: string;
   let alt = index % 2 === 1;
   switch (kind) {
-    case "features": case "services": case "cards": case "menu":
+    case "features": case "services": case "cards":
       inner = sectionHead(sec, "Features") + renderFeatures(sec); break;
+    case "menu":
+      inner = sectionHead(sec, "Menu") + renderMenu(sec); break;
+    case "process":
+      inner = sectionHead(sec, "How it works") + renderProcess(sec); break;
+    case "faq":
+      inner = sectionHead(sec, "Questions") + renderFaq(sec); break;
+    case "form":
+      inner = sectionHead(sec, "Contact us") + renderForm(sec, false); break;
+    case "booking":
+      inner = sectionHead(sec, "Book") + renderForm(sec, true); break;
+    case "areas":
+      inner = sectionHead(sec, "Service area") + renderAreas(sec); break;
+    case "hours":
+      inner = sectionHead(sec, "Hours") + renderHours(sec); break;
     case "gallery":
       inner = sectionHead(sec, "Gallery") + renderGallery(sec); break;
     case "testimonials":
@@ -504,6 +714,18 @@ function renderHero(hero: SitePlanSection | undefined, title: string, descriptio
 
 const MAX_SECTIONS = 12;
 const MAX_PLAN_BYTES = 8000;
+/** §4.5 option A: pack-attached plans get headroom for completeness. */
+const PACK_MAX_SECTIONS = 16;
+const PACK_MAX_PLAN_BYTES = 12000;
+
+export interface ValidateSitePlanOptions {
+  /**
+   * The topic pack this plan must satisfy, when one is attached.
+   * Pack rules (required sections/blocks, image subjects, copy rules)
+   * run on top of structural validation; caps rise per §4.5A.
+   */
+  pack?: import("./topic-packs/types").TopicPack;
+}
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
@@ -531,19 +753,22 @@ function objArr(v: unknown, maxItems: number): Array<Record<string, unknown>> | 
  * a retry — never a silent default that produces a page the user did not
  * ask for.
  */
-export function validateSitePlan(raw: unknown): SitePlanValidation {
+export function validateSitePlan(raw: unknown, opts?: ValidateSitePlanOptions): SitePlanValidation {
   const errors: string[] = [];
+  const pack = opts?.pack;
+  const maxSections = pack ? PACK_MAX_SECTIONS : MAX_SECTIONS;
+  const maxBytes = pack ? PACK_MAX_PLAN_BYTES : MAX_PLAN_BYTES;
   if (!isObj(raw)) {
     return { ok: false, errors: ["plan must be a JSON object"] };
   }
-  if (JSON.stringify(raw).length > MAX_PLAN_BYTES) {
-    return { ok: false, errors: [`plan exceeds ${MAX_PLAN_BYTES} bytes — simplify it`] };
+  if (JSON.stringify(raw).length > maxBytes) {
+    return { ok: false, errors: [`plan exceeds ${maxBytes} bytes — simplify it`] };
   }
   const title = str(raw.title, 80);
   if (!title) errors.push('title is required (the site name, e.g. "Ember Roast")');
   const sections = Array.isArray(raw.sections) ? raw.sections.filter(isObj) : [];
   if (sections.length === 0) errors.push("sections must be a non-empty array — pick at least 2-3 section kinds");
-  if (sections.length > MAX_SECTIONS) errors.push(`too many sections (${sections.length} > ${MAX_SECTIONS})`);
+  if (sections.length > maxSections) errors.push(`too many sections (${sections.length} > ${maxSections})`);
   for (const [i, s] of sections.entries()) {
     const kind = str(s.kind, 24)?.toLowerCase();
     if (!kind) {
@@ -551,7 +776,7 @@ export function validateSitePlan(raw: unknown): SitePlanValidation {
     } else if (!KNOWN_KINDS.has(kind)) {
       errors.push(`sections[${i}].kind "${kind}" is not one of: ${[...KNOWN_KINDS].join(", ")}`);
     }
-    const needsItems = ["features", "services", "cards", "menu", "testimonials", "stats", "contact"].includes(kind ?? "");
+    const needsItems = ["features", "services", "cards", "menu", "testimonials", "stats", "contact", "process"].includes(kind ?? "");
     if (needsItems && !objArr(s.items, 9)) {
       errors.push(`sections[${i}] (${kind}) needs an items array of {title,text} objects`);
     }
@@ -563,6 +788,46 @@ export function validateSitePlan(raw: unknown): SitePlanValidation {
     }
     if ((kind === "about" || kind === "text" || kind === "prose") && !str(s.text, 1200) && !str(s.subheading, 1200)) {
       errors.push(`sections[${i}] (${kind}) needs a text field with the section's real copy`);
+    }
+    if (kind === "faq") {
+      const items = objArr(s.items, 10);
+      if (!items) {
+        errors.push(`sections[${i}] (faq) needs an items array of {question,answer} objects`);
+      } else if (items.some((it) => !str(it.question ?? it.q ?? it.title, 200) || !str(it.answer ?? it.a ?? it.text, 600))) {
+        errors.push(`sections[${i}] (faq) every item needs a question and an answer`);
+      }
+    }
+    if (kind === "hours") {
+      const items = objArr(s.items, 8);
+      if (!items) {
+        errors.push(`sections[${i}] (hours) needs an items array of {day,hours} objects`);
+      } else if (items.some((it) => !str(it.day ?? it.label ?? it.title, 40) || !str(it.hours ?? it.value ?? it.text, 60))) {
+        errors.push(`sections[${i}] (hours) every item needs a day and its hours`);
+      }
+    }
+    if (kind === "areas" && !objArr(s.items, 24) && !strArr(s.towns, 24, 60)) {
+      errors.push(`sections[${i}] (areas) needs an items array of {town} objects or a towns array of names`);
+    }
+    if (kind === "form" || kind === "booking") {
+      const fields = objArr(s.fields, 12);
+      if (!fields) {
+        errors.push(`sections[${i}] (${kind}) needs a fields array of {name,label,type} objects`);
+      } else {
+        for (const [j, f] of fields.entries()) {
+          if (!str(f.name, 40)) errors.push(`sections[${i}] (${kind}) fields[${j}] needs a name`);
+          const t = str(f.type, 16)?.toLowerCase();
+          if (t && !FORM_FIELD_TYPES.has(t)) {
+            errors.push(`sections[${i}] (${kind}) fields[${j}].type "${t}" is not one of: ${[...FORM_FIELD_TYPES].join(", ")}`);
+          }
+          if (t === "select" && !strArr(f.options, 12, 60)) {
+            errors.push(`sections[${i}] (${kind}) fields[${j}] is a select and needs an options array`);
+          }
+        }
+      }
+      const fk = str(s.formKind, 16)?.toLowerCase();
+      if (fk && !["quote", "contact", "reservation", "intake"].includes(fk)) {
+        errors.push(`sections[${i}] (${kind}) formKind "${fk}" is not one of: quote, contact, reservation, intake`);
+      }
     }
   }
   const theme = str(raw.theme, 16)?.toLowerCase();
@@ -584,19 +849,24 @@ export function validateSitePlan(raw: unknown): SitePlanValidation {
   }
   if (errors.length) return { ok: false, errors };
   const nav = objArr(raw.nav, 8)?.map((l) => ({ label: String(l.label ?? l.text ?? "").slice(0, 30), target: str(l.target ?? l.href, 120) }));
-  return {
-    ok: true,
-    errors: [],
-    plan: {
-      title: title!,
-      description: str(raw.description, 200),
-      theme,
-      accentHue,
-      nav,
-      hero,
-      sections: sections.slice(0, MAX_SECTIONS) as unknown as SitePlanSection[],
-    },
+  const plan: SitePlan = {
+    title: title!,
+    description: str(raw.description, 200),
+    seoTitle: str(raw.seoTitle, 140),
+    theme,
+    accentHue,
+    nav,
+    hero,
+    sections: sections.slice(0, maxSections) as unknown as SitePlanSection[],
   };
+  // Topic packs (§4.3.3): pack completeness runs on the normalized plan
+  // and reports in the same actionable format — the model repairs from
+  // these strings exactly like structural errors.
+  if (pack) {
+    const packErrors = validatePlanAgainstPack(plan, pack);
+    if (packErrors.length) return { ok: false, errors: packErrors };
+  }
+  return { ok: true, errors: [], plan };
 }
 
 // ─── Assembly ────────────────────────────────────────────────────────
@@ -625,12 +895,18 @@ export function composeSiteHtml(plan: SitePlan): string {
     footerSec ? renderFooter(footerSec, plan.title) : renderFooter({ kind: "footer" }, plan.title)
   }</div></footer>`;
 
+  const hasForm = plan.sections.some((s) => {
+    const k = String(s.kind ?? "").toLowerCase();
+    return k === "form" || k === "booking";
+  });
+
   const body = [
     renderHero(plan.hero, plan.title, plan.description).html,
     `<main id="main">`,
     ...rendered.map((r) => r.html),
     `</main>`,
     footerHtml,
+    ...(hasForm ? [FORM_UPGRADE_SCRIPT] : []),
   ].join("\n");
 
   return `<!doctype html>
@@ -638,7 +914,7 @@ export function composeSiteHtml(plan: SitePlan): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(plan.title, 80)}</title>
+<title>${esc(plan.seoTitle ?? plan.title, 140)}</title>
 <meta name="description" content="${esc(plan.description ?? `${plan.title}`, 160)}">
 <style>${css}</style>
 </head>
@@ -732,7 +1008,7 @@ function replaceTagText(region: string, re: RegExp, value: string): string | nul
   return region.slice(0, openEnd) + esc(value, 400) + region.slice(openEnd + close.index);
 }
 
-const LIST_FIELDS = new Set(["items", "plans", "images", "links"]);
+const LIST_FIELDS = new Set(["items", "plans", "images", "links", "fields"]);
 
 export function applySectionEdit(
   html: string,

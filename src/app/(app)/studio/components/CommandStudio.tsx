@@ -53,7 +53,11 @@ import {
 import CommandStudioHeader from "./CommandStudioHeader";
 import StudioDock, { type StudioDockTab } from "./StudioDock";
 import StudioHealthPanel from "./StudioHealthPanel";
-import StudioRightRail, { type StudioRailTab } from "./StudioRightRail";
+import StudioBrowserSideDock, {
+  clampBrowserDockWidth,
+  BROWSER_DOCK_DEFAULT_WIDTH,
+  type BrowserDockSide,
+} from "./StudioBrowserSideDock";
 import { ApprovalCard } from "./ApprovalCard";
 import MissionCards from "./MissionCards";
 import PersistentMusicPlayer from "./PersistentMusicPlayer";
@@ -87,7 +91,7 @@ import { useStudioTasks } from "../hooks/useStudioTasks";
 import { useProjectIsolation } from "../hooks/useProjectIsolation";
 import type { StudioTask } from "@/lib/studio/task-types";
 import { useResizableWidth } from "../hooks/useResizableWidth";
-import { useExecutionStore, type MutationSummary } from "../stores/useExecutionStore";
+import { approvalForConversation, useExecutionStore, type MutationSummary } from "../stores/useExecutionStore";
 import { submitApprovalAndPoll, watchApprovalResolution, type ApprovalRunResult } from "../lib/approval-polling";
 import { createApprovalOutcomeGuard } from "../lib/approval-outcome-guard";
 import { StudioActivityPanel, StudioInspector, type StudioInspectorData } from "./StudioWorkspaceFrame";
@@ -620,6 +624,44 @@ function CommandStudioContent() {
     },
     [userId, boardProjectId, boardProjectType],
   );
+  // Rail consolidation (Larry, 2026-11-25): the Regular layout's
+  // permanent right rail is retired. Its surfaces moved — Files into
+  // the Code box, Checks/Approvals/Changes/Activity/Deploy into the
+  // Code box's run section, and Checks/Approvals plus a Files jump
+  // into the bottom dock by Developer tools. What remains here is the
+  // Browser side dock's state: on-demand (never a permanent rail),
+  // right side by default, side + width persisted across sessions.
+  const [browserDockOpen, setBrowserDockOpen] = useState(false);
+  const [browserDockSide, setBrowserDockSide] = useState<BrowserDockSide>(() => {
+    if (typeof window === "undefined") return "right";
+    try {
+      return window.localStorage.getItem("studio-browser-dock-side") === "left"
+        ? "left"
+        : "right";
+    } catch {
+      return "right";
+    }
+  });
+  const [browserDockWidth, setBrowserDockWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return BROWSER_DOCK_DEFAULT_WIDTH;
+    try {
+      const stored = Number(window.localStorage.getItem("studio-browser-dock-width"));
+      if (Number.isFinite(stored) && stored > 0) return clampBrowserDockWidth(stored);
+    } catch { /* noop */ }
+    return BROWSER_DOCK_DEFAULT_WIDTH;
+  });
+  const [browserDockFree, setBrowserDockFree] = useState(false);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("studio-browser-dock-side", browserDockSide);
+    } catch { /* noop */ }
+  }, [browserDockSide]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("studio-browser-dock-width", String(browserDockWidth));
+    } catch { /* noop */ }
+  }, [browserDockWidth]);
+
   // Inspector-tab opens, with the retired "browser" tab re-driven:
   // a "browser" inspector intent no longer lands in inspector-tab
   // state (that InspectorTab member is being removed). It activates
@@ -632,12 +674,17 @@ function CommandStudioContent() {
       if ((tab as string) === "browser") {
         setBrowserJobsSurfaceActive(true);
         if (studioShellActive) summonBoardPanel("browser");
+        // Rail consolidation: in desktop Regular the browser intent
+        // opens the Browser side dock (the stage browser surface is
+        // not rendered by the classic body, so the intent used to
+        // land nowhere visible). Mobile keeps its existing routing.
+        else if (!isMobileLitt) setBrowserDockOpen(true);
         else openStageSurface("browser");
         return;
       }
       setInspectorTab(tab);
     },
-    [studioShellActive, summonBoardPanel, openStageSurface],
+    [studioShellActive, summonBoardPanel, openStageSurface, isMobileLitt],
   );
   // The browser-jobs surface flag follows the stage surface: leaving
   // the browser surface deactivates it, so the plain local state never
@@ -750,9 +797,15 @@ function CommandStudioContent() {
       summonBoardPanel(panelByTab[tab]);
       return;
     }
+    // Rail consolidation: in Regular the Browser is the side dock,
+    // not a bottom-dock pane — open it directly.
+    if (tab === "browser" && !isMobileLitt) {
+      setBrowserDockOpen(true);
+      return;
+    }
     setDockTab(tab);
     setDockOpen(true);
-  }, [studioShellActive, summonBoardPanel]);
+  }, [studioShellActive, summonBoardPanel, isMobileLitt]);
 
   // Media routing for the Files panel (Kimi wiring item 7): opening an
   // image/video/audio file brings the Media surface forward (board:
@@ -997,11 +1050,23 @@ function CommandStudioContent() {
   // desktop rail, the mobile sheet, and header/activity actions.
   const [littActiveTab, setLittActiveTab] = useState<LiTTTab>("chat");
 
-  // Mockup port (2026-11-18): the Regular layout's right rail
-  // (Files · Activity · Checks · Approvals, from Larry's locked
-  // mockup) — its active tab. Desktop Regular only; the board has its
-  // own panels and mobile its sheet/drawer for the same surfaces.
-  const [railTab, setRailTab] = useState<StudioRailTab>("files");
+  // Code-view requests (rail consolidation): entry points that target
+  // a surface whose home is now inside the Code box record a request
+  // here; the classic CodeWorkspace receives it as a prop and applies
+  // it on mount and on every new nonce — no event/timing race with a
+  // freshly mounted Code box.
+  const [codeViewRequest, setCodeViewRequest] = useState<{
+    view: "files" | "run";
+    section?: string;
+    nonce: number;
+  } | null>(null);
+  const requestCodeView = useCallback((view: "files" | "run", section?: string) => {
+    setDestination("studio");
+    setStudioMode("code");
+    // Any explicit stage selection exits the Builder surface.
+    setWorkSurface("conversation");
+    setCodeViewRequest((prev) => ({ view, section, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
 
   // Board mode (B3): the single Files instance relocates onto the board,
   // so the LiTT panel's Files/Components tab has no content while the
@@ -1267,7 +1332,7 @@ function CommandStudioContent() {
   const mobileSurfaceLabel = (() => {
     if (dockOpen) {
       return (
-        { activity: "Activity", terminal: "Terminal", inspector: "Inspector", media: "Media", browser: "Browser" }[dockTab] ??
+        { activity: "Activity", files: "Files", checks: "Checks", approvals: "Approvals", terminal: "Terminal", inspector: "Inspector", media: "Media", browser: "Browser" }[dockTab] ??
         "Tools"
       );
     }
@@ -1307,13 +1372,13 @@ function CommandStudioContent() {
       setMobileLittOpen(true);
       setLittActiveTab("files");
     } else if (!studioShellActive) {
-      // The right rail is mounted in this same non-shell desktop body.
-      setRailTab("files");
+      // Rail consolidation: Files' home is the Code box's Files view.
+      requestCodeView("files");
     } else {
       setLittCollapsed(false);
       setLittActiveTab("files");
     }
-  }, [isMobileLitt, studioShellActive]);
+  }, [isMobileLitt, studioShellActive, requestCodeView]);
 
   // Listen for "Ask LiTT" events from Canvas and other surfaces.
   // Opens LiTT, switches to Chat, and optionally pre-fills the composer
@@ -1420,9 +1485,11 @@ function CommandStudioContent() {
         handleOpenFilesPanel();
         return;
       }
-      if (tab === "activity" || tab === "terminal" || tab === "inspector" || tab === "media") {
+      if (tab === "activity" || tab === "terminal" || tab === "inspector" || tab === "media" || tab === "browser") {
         // Agent intents preselect only — they never open the dock
-        // (Phase 0). The dock opens only by the user's hand.
+        // (Phase 0). The dock opens only by the user's hand. For
+        // "browser" the preselection highlights the dock's Browser
+        // launcher tab; the side dock itself opens only by hand too.
         handlePreselectDockTab(tab);
       }
     };
@@ -1714,6 +1781,15 @@ function CommandStudioContent() {
   // current conversation's run. The existing studio_tasks mapping carries it
   // (activeActionRunId while working, latestActionRunId after settle); no
   // parallel mapping is introduced.
+  // ACC-06a item 4: the approval gate this session may SEE and ACT
+  // on. The store's pendingApproval is global, but a gate belongs to
+  // the conversation (project) whose run requested it — every
+  // approval surface below renders this scoped value, never the raw
+  // store gate, so another project's gate cannot render or be
+  // actioned here (not even for the frames before the
+  // project-isolation reset effect runs).
+  const visiblePendingApproval = approvalForConversation(pendingApproval, conversation.selectedConversationId);
+
   const activityTask = studioTasks.tasks.find((task) => task.conversationId === conversation.selectedConversationId);
   const activityRunId = activityTask?.activeActionRunId ?? activityTask?.latestActionRunId ?? null;
 
@@ -2136,7 +2212,9 @@ function CommandStudioContent() {
       // A rejection is terminal: nothing resumes. End the execution
       // phase, or the run keeps showing as working (PR #1114 Greptile
       // thread 1 — resolveApproval alone leaves phase "editing").
-      exec.settleResumedRun("rejected");
+      // ACC-06a item 2: attribute the settle to the run's own
+      // conversation so its worktab clears even if another is active.
+      exec.settleResumedRun("rejected", opts.conversationId);
       setLittActiveTab("chat");
       return;
     }
@@ -2200,7 +2278,9 @@ function CommandStudioContent() {
     // resumed run is over. End the execution phase — resolveApproval
     // leaves it at "editing", so without this the completed run shows
     // as working forever (PR #1114 Greptile thread 1).
-    exec.settleResumedRun("completed");
+    // ACC-06a item 2: attribute the settle to the run's own
+    // conversation so its worktab clears even if another is active.
+    exec.settleResumedRun("completed", opts.conversationId);
     setLittActiveTab("chat");
   }, [conversation, capabilities.projectId]);
 
@@ -2215,6 +2295,16 @@ function CommandStudioContent() {
   const handleResolveApproval = useCallback((decision: "approved" | "rejected") => {
     const exec = useExecutionStore.getState();
     const pending = exec.pendingApproval;
+    // ACC-06a item 4: a gate bound to a DIFFERENT conversation must
+    // never be actioned from this session, even if a stale surface
+    // still invokes this handler. The gate stays pending in its own
+    // conversation, where it can be decided; nothing is posted.
+    if (pending?.conversationId && pending.conversationId !== conversation.selectedConversationId) {
+      conversation.reportSendError?.(
+        "This approval belongs to a different conversation — open that conversation to approve or reject it.",
+      );
+      return;
+    }
     // The gate's OWN conversation wins: a pausedRunId posted to a different
     // conversation deterministic-403s ("Conversation mismatch") and used to
     // dead-end the card as unretryable. Falls back to the current selection
@@ -2278,6 +2368,12 @@ function CommandStudioContent() {
   const handleReRequestApproval = useCallback(async () => {
     const exec = useExecutionStore.getState();
     const pending = exec.pendingApproval;
+    // ACC-06a item 4: same scope rule as handleResolveApproval — a
+    // gate from another conversation is never re-requested from
+    // this session; it stays pending in its own conversation.
+    if (pending?.conversationId && pending.conversationId !== conversation.selectedConversationId) {
+      return;
+    }
     // Same gate-bound conversation rule as handleResolveApproval — the
     // re-request must recreate the gate in its own conversation.
     const resolved = pending?.conversationId ?? conversation.selectedConversationId;
@@ -2922,10 +3018,12 @@ function CommandStudioContent() {
 
   // An approval gate must never strand hidden: a paused run expands the
   // left LiTT panel so the approve/reject decision stays reachable.
+  // ACC-06a item 4: only THIS conversation's gate expands the panel —
+  // another project's gate must not reach into this session at all.
   useEffect(() => {
-    if (!studioShellActive || !pendingApproval) return;
+    if (!studioShellActive || !visiblePendingApproval) return;
     setLittCollapsed(false);
-  }, [studioShellActive, pendingApproval]);
+  }, [studioShellActive, visiblePendingApproval]);
 
   // ── LiTT Live session context (must be after contextLine) ──
   const liveContext = useMemo<LiTTLiveSessionContext>(() => ({
@@ -3217,12 +3315,15 @@ function CommandStudioContent() {
     </div>
   ) : null;
 
-  const chatApprovalCard = pendingApproval ? (
+  // ACC-06a item 4: the card renders ONLY for this conversation's
+  // own gate (visiblePendingApproval) — another project's gate
+  // derives to null and never mounts here.
+  const chatApprovalCard = visiblePendingApproval ? (
     <div className="shrink-0 px-3 pt-2">
       <ApprovalCard
-        approval={pendingApproval}
+        approval={visiblePendingApproval}
         onResolve={handleResolveApproval}
-        isDeploy={pendingApproval.toolId === "project.deploy"}
+        isDeploy={visiblePendingApproval.toolId === "project.deploy"}
         phase={approvalPhase}
         error={approvalError}
         retryable={approvalRetryable}
@@ -3453,6 +3554,9 @@ function CommandStudioContent() {
       }}
       onRollback={handleRollback}
       onResolveApproval={handleResolveApproval}
+      // ACC-06a item 4: the Activity card scopes its gate to this
+      // conversation — another project's gate never renders there.
+      conversationId={conversation.selectedConversationId}
     />
   );
 
@@ -3472,7 +3576,10 @@ function CommandStudioContent() {
         conversation.cancel();
         useExecutionStore.getState().endRun("cancelled");
       }}
-      onResolveApproval={handleResolveApproval}
+      // ACC-06a item 4: the operator bar reads the store gate itself;
+      // withholding the resolve handler for another conversation's
+      // gate keeps its Approve/Reject actions from mounting here.
+      onResolveApproval={visiblePendingApproval ? handleResolveApproval : undefined}
       terminalStatus={terminalHealthOf(capabilities).label}
       modelLabel={modelLabel}
       lastRunFailed={lastRunFailed}
@@ -3505,15 +3612,16 @@ function CommandStudioContent() {
   // The Regular layout's Jobs tab body: the SAME shared ChatJobsView
   // the board chat panel's Jobs tab renders (Larry's decided chat
   // structure, 2026-11-18 — Chat | Jobs in both layouts, the run-status
-  // strip mounted only inside Jobs). Its Checks summon opens the right
-  // rail's Checks tab, the Regular layout's one Checks home.
+  // strip mounted only inside Jobs). Its Checks summon opens the Code
+  // box's run section on its Checks tab — the Regular layout's one
+  // Checks home after the rail consolidation (2026-11-25).
   const littJobsContent = (
     <ChatJobsView
       projectId={capabilities.projectId}
       conversationId={conversation.selectedConversationId}
       jobsBusy={conversation.busy}
       jobsRefreshKey={workspaceRevision}
-      onOpenChecks={() => setRailTab("checks")}
+      onOpenChecks={() => requestCodeView("run", "checks")}
     />
   );
 
@@ -3624,10 +3732,11 @@ function CommandStudioContent() {
 
   // The project-files composition (header + StudioProjectFiles) —
   // ONE element definition mounted in exactly one home per layout:
-  // the Regular layout's right rail Files tab (desktop, mockup port
-  // 2026-11-18 — it previously lived in the LiTT panel's top-row
-  // Files tab), the board's own Files panel (shell), the mobile
-  // LiTT sheet's Files tab, and the mobile ContextDrawer's Files tab.
+  // the Regular layout's Code box Files view (rail consolidation,
+  // 2026-11-25 — it previously lived in the right rail's Files tab,
+  // and before that in the LiTT panel's top-row Files tab), the
+  // board's own Files panel (shell), the mobile LiTT sheet's Files
+  // tab, and the mobile ContextDrawer's Files tab.
   // The shell's standalone Files sidebar slot was retired 2026-11-14
   // (Larry: Files already lives in the chat tab) — it mounted this
   // same element a second time beside the chat, running two live
@@ -4046,6 +4155,30 @@ function CommandStudioContent() {
   const studioSessionId = conversation.selectedConversationId
     ?? (capabilities.projectId ? `project:${capabilities.projectId}` : "studio:default");
 
+  // Rail consolidation: the Regular layout's Browser side dock
+  // element — rendered by the classic body only, in one of two
+  // mutually exclusive slots: docked-left (before <main>) or
+  // docked-right / free (after </main>, where the retired rail sat).
+  // It mounts only while open, and the browser panel inside it is
+  // the ONE BoardBrowserPanel (its tabs live in the browser store,
+  // so a flip that remounts it loses nothing).
+  const browserSideDockElement = browserDockOpen ? (
+    <StudioBrowserSideDock
+      side={browserDockSide}
+      onSideChange={setBrowserDockSide}
+      width={browserDockWidth}
+      onWidthChange={setBrowserDockWidth}
+      free={browserDockFree}
+      onFreeChange={setBrowserDockFree}
+      onClose={() => {
+        setBrowserDockOpen(false);
+        setBrowserDockFree(false);
+      }}
+    >
+      <BoardBrowserPanel />
+    </StudioBrowserSideDock>
+  ) : null;
+
   return (
     <StudioContextProvider
       projectId={capabilities.projectId ?? null}
@@ -4166,7 +4299,7 @@ function CommandStudioContent() {
           // decision already landed (submitting/executing) is not
           // "Approval needed" anymore, even though pendingApproval
           // stays mounted while the resumed run executes.
-          approvalPending={approvalAwaitingDecision(pendingApproval, approvalPhase)}
+          approvalPending={approvalAwaitingDecision(visiblePendingApproval, approvalPhase)}
           lastRunFailed={lastRunFailed}
           executionMode={executionMode}
           onExecutionModeChange={setExecutionMode}
@@ -4319,15 +4452,24 @@ function CommandStudioContent() {
               jobsContent={littJobsContent}
               // Mockup port (2026-11-18): no liveContent / filesContent
               // here anymore — in this non-shell desktop body the
-              // Activity feed and the Files surface live in the right
-              // rail (StudioRightRail, mounted beside <main> below),
-              // so this panel carries Chat + Jobs only, matching the
-              // mockup's Regular layout (chat column = conversation +
-              // composer, Jobs tab = the run's settlement home). The
-              // mobile sheet keeps its own tabs and contents.
+              // Activity feed lives in the Code box's run section and
+              // the Files surface in the Code box's Files view (rail
+              // consolidation, 2026-11-25 — both were in the retired
+              // right rail), so this panel carries Chat + Jobs only,
+              // matching the mockup's Regular layout (chat column =
+              // conversation + composer, Jobs tab = the run's
+              // settlement home). The mobile sheet keeps its own tabs
+              // and contents.
               expandedWidth={littResize.width}
             />
           )}
+
+          {/* Browser side dock, docked on the LEFT (rail
+              consolidation, 2026-11-25): the left slot of the
+              on-demand Browser dock — it renders only while open and
+              only when flipped to this side. The right/free slot is
+              after </main>, where the retired right rail sat. */}
+          {viewportTier !== null && !isMobileLitt && !browserDockFree && browserDockSide === "left" && browserSideDockElement}
 
           <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden overflow-x-hidden">
             {/* F1 Worktabs — directly above the workspace. Each tab binds
@@ -4493,6 +4635,57 @@ function CommandStudioContent() {
                       writeAccess={capabilities.writeAccess ?? true}
                       previewContent={previewContent}
                       canvasContent={renderCanvasDesignStage()}
+                      // Rail consolidation (2026-11-25): in Regular,
+                      // Files' only home is this box's Files view, and
+                      // the run section (Plan · Checks · Approvals ·
+                      // Changes · Activity · Deploy) lives in this
+                      // box's Run view. The contents are the same
+                      // surfaces the retired right rail carried.
+                      filesContent={projectFilesContent}
+                      viewRequest={codeViewRequest}
+                      runContent={{
+                        checks: (
+                          <StudioHealthPanel
+                            mode="checks"
+                            projectId={capabilities.projectId}
+                            refreshKey={workspaceRevision}
+                            runTrigger={healthRunTrigger}
+                          />
+                        ),
+                        approvals: (
+                          <StudioHealthPanel
+                            mode="approvals"
+                            projectId={capabilities.projectId}
+                            conversationId={conversation.selectedConversationId ?? null}
+                            refreshKey={workspaceRevision}
+                          />
+                        ),
+                        changes: capabilities.projectId ? (
+                          <RunChangesPanel
+                            projectId={capabilities.projectId}
+                            busy={executionRunning || conversation.busy}
+                            refreshKey={workspaceRevision}
+                          />
+                        ) : (
+                          <div
+                            className="flex h-full items-center justify-center px-4 text-center text-[12px] font-medium"
+                            style={{ color: "var(--text-muted)" }}
+                          >
+                            Select a project to see its run changes.
+                          </div>
+                        ),
+                        activity: littLiveContent,
+                        deploy: (
+                          <StudioDeploySurface
+                            projectId={capabilities.projectId}
+                            onDeployRequest={(target) => {
+                              window.dispatchEvent(
+                                new CustomEvent(STUDIO_EVENT_REQUEST_DEPLOY, { detail: { target } }),
+                              );
+                            }}
+                          />
+                        ),
+                      }}
                       planCapabilities={capabilities}
                       planModelLabel={modelLabel}
                       onPreviewRefreshRequest={handlePreviewRefreshRequest}
@@ -4650,45 +4843,52 @@ function CommandStudioContent() {
                 />
               }
               mediaContent={<MediaUtilityDock />}
+              // Rail consolidation (2026-11-25), desktop Regular only:
+              // the bottom drawer by Developer tools offers LAUNCHER
+              // entries for Files / Checks / Approvals — not dock
+              // tabs (Files is not a dock tab, Larry 2026-11-13; the
+              // hardening test pins it). Each launcher closes the
+              // dock and opens the surface in its one home: the Code
+              // box's Files view, or the Run section's Checks /
+              // Approvals panes — the same StudioHealthPanel instances
+              // the Code box already mounts, never a second copy. The
+              // Browser rides as a launcher for the side dock. Mobile
+              // passes none of these and keeps its current dock exactly.
+              onOpenFiles={
+                isMobileLitt
+                  ? undefined
+                  : () => { setDockOpen(false); handleOpenFilesPanel(); }
+              }
+              onOpenChecks={
+                isMobileLitt
+                  ? undefined
+                  : () => { setDockOpen(false); requestCodeView("run", "checks"); }
+              }
+              onOpenApprovals={
+                isMobileLitt
+                  ? undefined
+                  : () => { setDockOpen(false); requestCodeView("run", "approvals"); }
+              }
+              onBrowserLaunch={
+                isMobileLitt ? undefined : () => setBrowserDockOpen(true)
+              }
+              browserActive={!isMobileLitt && browserDockOpen}
               browserContent={<BoardBrowserPanel />}
             />
             </div>
           </main>
 
-          {/* Right rail — the Regular layout's third column (mockup
-              port, 2026-11-18): Files · Activity · Checks · Approvals
-              at 300px, from Larry's locked Studio mockup. It takes
-              over the Files and Activity contents the desktop LiTT
-              panel used to carry as tabs, so each of those surfaces
-              still exists exactly once in this body; Checks and
-              Approvals are the same StudioHealthPanel read models the
-              board and the inspector frame mount. Desktop-only (the
-              component hides below lg) and non-shell only — the board
-              has its own panels for all four. */}
-          {viewportTier !== null && !isMobileLitt && (
-            <StudioRightRail
-              activeTab={railTab}
-              onTabChange={setRailTab}
-              filesContent={projectFilesContent}
-              activityContent={littLiveContent}
-              checksContent={
-                <StudioHealthPanel
-                  mode="checks"
-                  projectId={capabilities.projectId}
-                  refreshKey={workspaceRevision}
-                  runTrigger={healthRunTrigger}
-                />
-              }
-              approvalsContent={
-                <StudioHealthPanel
-                  mode="approvals"
-                  projectId={capabilities.projectId}
-                  conversationId={conversation.selectedConversationId ?? null}
-                  refreshKey={workspaceRevision}
-                />
-              }
-            />
-          )}
+          {/* Browser side dock, docked on the RIGHT or popped out
+              free (rail consolidation, 2026-11-25) — this slot
+              replaces the retired permanent right rail (Files ·
+              Activity · Checks · Approvals at 300px, mockup port
+              2026-11-18). Those surfaces now live in the Code box
+              (Files view + Run section) and the bottom dock; the
+              right side is free unless the user opens the Browser,
+              which docks here on demand — side-by-side with the
+              workspace — and closes away again. Desktop-only and
+              non-shell only; the board has its own Browser panel. */}
+          {viewportTier !== null && !isMobileLitt && (browserDockFree || browserDockSide === "right") && browserSideDockElement}
 
           {/* Mobile Context Drawer — right-side fixed overlay (unchanged).
               On mobile, the ContextDrawer is NOT repositioned to the left;

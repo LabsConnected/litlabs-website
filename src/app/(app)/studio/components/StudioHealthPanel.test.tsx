@@ -141,6 +141,19 @@ describe("StudioHealthPanel approvals — run gates come from the action-run pro
   });
 });
 
+describe("StudioHealthPanel checks — not-run checks carry their reason (ACC-06a item 2)", () => {
+  it("shows WHY a check has not run instead of a bare Not run", async () => {
+    setupFetch(); // checks payload is empty — every check renders from the fallback shape
+
+    render(<StudioHealthPanel mode="checks" projectId="proj-1" />);
+
+    // All seven checks state the on-demand reason, not just "Not run".
+    const reasons = await screen.findAllByText(/run on demand from the Checks panel/);
+    expect(reasons.length).toBeGreaterThanOrEqual(7);
+    expect(screen.getAllByText("Not run").length).toBeGreaterThanOrEqual(7);
+  });
+});
+
 describe("StudioHealthPanel runtime banner — repo gate (B2)", () => {
   it("presents the gate as a product state: gate label, honest message, NO recovery actions", async () => {
     setupFetch();

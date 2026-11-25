@@ -30,7 +30,7 @@ import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { buildPatchRecoveryMessage, existingPageOverwriteError, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange, workspaceChangeFromVolumeListing, workspaceChangeFromDirectReads } from "./workspace-change-producer";
 import { checkRequestedLiteral, requestedLiteralFailureMessage, requestedLiteralRepairPrompt } from "./requested-literal";
-import { checkTextContrast, textContrastFailureMessage, textContrastRepairPrompt, textContrastUnverifiableMessage, textContrastUnverifiableRepairPrompt } from "./text-contrast";
+import { checkTextContrast, textContrastFailureMessage, textContrastRepairPrompt, textContrastUnverifiableNote } from "./text-contrast";
 import { DEPLOY_ONLY_PROMPT_NOTE, deployOnlyRefusalError, isBlockedInDeployOnlyRun, isDeployOnlyInstruction } from "./deploy-intent";
 import { settleRunOutcome, type RunFailureContributor } from "./run-settlement";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
@@ -73,6 +73,9 @@ import {
   type QualityLoopSnapshot,
   formatQualityVerdictBlock,
   stripQualityStageMarkers,
+  stripWrittenFileDumps,
+  userAskedToSeeFileContents,
+  type WrittenFileContent,
 } from "./quality-loop-flow";
 import type { QualityTaskScope } from "./quality-loop";
 // LiTT Tool Orchestrator (fix/litt-tool-orchestrator): goal → capability
@@ -405,6 +408,14 @@ export interface AgentLoopResult {
    * this before treating `modelFailed` as the run's verdict.
    */
   completedWithWarning?: string;
+  /**
+   * ACC-06a item 1: set when a completed run's page colors were
+   * runtime-decided (Tailwind browser compiler), so the contrast
+   * verifier could not statically judge them. The run PASSES; this
+   * note is appended to the closing text so the unverifiable scope
+   * is stated, never hidden. Never set on a failed run.
+   */
+  contrastNote?: string;
   /**
    * Round 11: every failure observed during the run (failed tool calls,
    * unknown workspace verification, honest failure, model/route
@@ -1060,6 +1071,95 @@ const LOCAL_SMALL_LANE_PROMPT =
   "- Emit only tool_call blocks — no prose, no explanations.\n" +
   "- Available: site.compose, site.patch, files.list, files.read, files.write, files.patch, apply_patch, files.delete, files.rename, files.mkdir, preview.start, preview.status.\n\n" +
   LOCAL_SITE_QUALITY_CONTRACT;
+
+// ── Topic packs (TOPIC-PACKS-SPEC-2026-11-19) ─────────────────────
+
+/**
+ * Topic packs are live only behind LITT_TOPIC_PACKS=1 (§4.6.1) — in
+ * production AND in the local lane alike. The flag is the single
+ * rollout/rollback switch for pack selection, briefs, and
+ * enforcement; site.compose tool AVAILABILITY is a separate switch
+ * (the registry's local-lane predicate), so the local lane's
+ * pack-free behavior is unchanged until the flag is set.
+ */
+export function topicPacksEnabled(): boolean {
+  return process.env.LITT_TOPIC_PACKS === "1";
+}
+
+export interface TopicPackRunContext {
+  pack: import("./topic-packs/types").TopicPack;
+  /** Next.js projects: brief + post-run checklist only (§4.6.4). */
+  checklistOnly: boolean;
+}
+
+/**
+ * Production prompt parity (§4.6.2): the local lane's prompt teaches
+ * site.compose inline; cloud models get the equivalent instruction
+ * here, so new-site generation behaves the same in both lanes.
+ */
+const TOPIC_PACK_COMPOSE_PROMPT =
+  "## Building a new site page with site.compose\n" +
+  "For a NEW website page, prefer ONE site.compose call over hand-writing HTML: " +
+  "give it the site title, a theme, a hero (heading, subheading, call to action, image keywords) " +
+  "and the full ordered section list with real copy — never lorem ipsum or placeholder text. " +
+  "Photos are placed from the plan's image keywords automatically; do not call image tools for a composed page. " +
+  "If site.compose returns a validation error, fix the plan and emit it again corrected. " +
+  "site.compose replaces the whole page — use it for new pages or an explicit full redesign only; " +
+  "edits to an existing page go through files.read + apply_patch, or site.patch for a whole-section change.";
+
+/**
+ * Resolve the run's topic pack, inject its brief into the system
+ * prompt, and persist a fresh selection on the project record
+ * (§4.2.4, §4.3.1). Selection order: deterministic scoring of the
+ * user's message; then the pack already stored on the project.
+ * Everything is best-effort — a storage or registry failure degrades
+ * to "no pack" and never blocks a run.
+ */
+async function applyTopicPackContext(
+  cfg: AgentLoopConfig,
+  userMessage: string,
+  transport: WorkspaceTransport,
+): Promise<TopicPackRunContext | null> {
+  if (!topicPacksEnabled()) return null;
+  try {
+    const { selectTopicPack, getPack, buildPackBrief } = await import("./topic-packs");
+    let pack = selectTopicPack(userMessage)?.pack;
+    let project: import("@/lib/projects/types").CanonicalProject | null = null;
+    try {
+      const { getProject } = await import("@/lib/projects/project-repository");
+      project = await getProject(transport.projectId, transport.userId);
+    } catch {
+      project = null;
+    }
+    if (!pack && project?.topicPackId) {
+      pack = getPack(project.topicPackId);
+    }
+    if (!pack) return null;
+
+    const checklistOnly = !!project?.framework && /next/i.test(project.framework);
+    cfg.systemPrompt += "\n\n" + buildPackBrief(pack);
+    if (!isLocalSmallLane()) {
+      cfg.systemPrompt += "\n\n" + TOPIC_PACK_COMPOSE_PROMPT;
+    }
+    if (checklistOnly) {
+      cfg.systemPrompt +=
+        "\n\nThis project is a Next.js app: the pack above is a CONTENT CHECKLIST, not a compose plan. " +
+        "Build with the project's normal tools and cover every required section, block, image rule, and copy rule from the brief in the generated pages.";
+    }
+    if (project && project.topicPackId !== pack.id) {
+      try {
+        const { updateProjectTopicPack } = await import("@/lib/projects/project-repository");
+        await updateProjectTopicPack(transport.projectId, transport.userId, pack.id);
+      } catch {
+        // Best-effort persistence — the run proceeds with the pack
+        // either way; only later runs lose the memory.
+      }
+    }
+    return { pack, checklistOnly };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Narrow the offered tools to LOCAL_BUILD_TOOL_IDS when:
@@ -2080,6 +2180,84 @@ function emitLoopStepMetering(input: LoopStepMetering): void {
   }
 }
 
+/**
+ * Record the exact content of a successful files.write for the
+ * reply-content guard. The guard compares the run's closing text
+ * against what the run itself wrote; the tool-call log deliberately
+ * carries no inputs, so the contents are tracked beside it, per run.
+ */
+function noteWrittenFileContent(
+  written: Map<string, string>,
+  toolId: string,
+  inputs: Record<string, unknown> | undefined,
+): void {
+  if (toolId !== "files.write" || !inputs) return;
+  const path = inputs.path;
+  const content = inputs.content;
+  if (typeof path === "string" && path && typeof content === "string") {
+    written.set(path, content);
+  }
+}
+
+function writtenFileList(
+  written: Map<string, string>,
+): WrittenFileContent[] {
+  return [...written].map(([path, content]) => ({ path, content }));
+}
+
+/**
+ * The D4 text channel, guarded. callLLMWithTools hands each step's
+ * reply text to onText as the step completes; emitting it raw would
+ * stream a file dump to the client before the loop's final-text
+ * guard ever runs. So step text is BUFFERED, never emitted on
+ * arrival:
+ *
+ * - A step that ends in tool calls is interim narration — its text
+ *   is flushed verbatim once the step settles.
+ * - A text-only step is a candidate closing reply — its text is
+ *   WITHHELD. If the loop continues anyway, the withheld text is
+ *   flushed verbatim at the next settlement (it was interim after
+ *   all). If the run finalizes, flushFinal delivers the GUARDED
+ *   closing text as the final streamed segment and the raw text is
+ *   dropped — a dump can never reach the stream.
+ */
+interface GuardedTextStream {
+  onText: (text: string) => void;
+  noteStepSettled: (hasToolCalls: boolean) => void;
+  flushFinal: (guardedText: string) => void;
+}
+
+function createGuardedTextStream(
+  emit: (text: string) => void,
+): GuardedTextStream {
+  let pending: string | null = null;
+  let withheld: string | null = null;
+  return {
+    onText: (text) => {
+      pending = text;
+    },
+    noteStepSettled: (hasToolCalls) => {
+      if (hasToolCalls) {
+        if (withheld) emit(withheld);
+        withheld = null;
+        if (pending) emit(pending);
+        pending = null;
+      } else {
+        if (withheld) emit(withheld);
+        withheld = pending;
+        pending = null;
+      }
+    },
+    flushFinal: (guardedText) => {
+      if (withheld != null) {
+        if (guardedText) emit(guardedText);
+        withheld = null;
+      }
+      pending = null;
+    },
+  };
+}
+
 export async function runAgentLoopV2(
   userMessage: string,
   transport: WorkspaceTransport,
@@ -2149,6 +2327,13 @@ async function runAgentLoopV2Inner(
     cfg.systemPrompt += "\n\n" + LOCAL_SMALL_LANE_PROMPT;
   }
 
+  // ── Topic packs (§4.2/§4.3) ──
+  // Resolve the run's pack (deterministic selection, else the pack
+  // stored on the project), inject its brief, and persist a fresh
+  // selection. Runs before observability so the brief is part of the
+  // prompt every later stage sees. Null = no pack for this run.
+  const topicPackCtx = await applyTopicPackContext(cfg, userMessage, transport);
+
   // ── Run observability (Part J) ──
   const runObs = startRunObservability({
     runId: meteringRunId,
@@ -2181,6 +2366,16 @@ async function runAgentLoopV2Inner(
   });
   // Item 5a — persist loop events to the run's durable action_events log.
   attachEventPersistence(localProgress, cfg.persistEvent);
+
+  // Topic packs (§4.2.3): the run's plan surface names the pack in use.
+  if (topicPackCtx) {
+    localProgress.emit({
+      type: "status",
+      summary: topicPackCtx.checklistOnly
+        ? `Using the ${topicPackCtx.pack.label} topic pack as a checklist for this project`
+        : `Building with the ${topicPackCtx.pack.label} topic pack`,
+    });
+  }
 
   // Station Control Bridge (chunk E): route station action execution events
   // (action_started / action_completed / action_failed / approval_required)
@@ -2319,6 +2514,17 @@ async function runAgentLoopV2Inner(
   // read as "unchanged".
   let baselineCheckpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
   const toolCallLog: AgentToolCallLogEntry[] = [];
+  // Reply-content guard state: the exact contents this run writes
+  // (the closing reply is checked against them at finalize), and the
+  // guarded D4 text stream (the closing reply never streams raw).
+  const writtenFiles = new Map<string, string>();
+  const textStream = createGuardedTextStream((text) =>
+    localProgress.emit({ type: "text", text }),
+  );
+  // Topic packs (§4.3.3): bounded pack-repair attempts per run — after
+  // two failed pack validations the compose call is refused with the
+  // honest pack-incomplete report instead of looping forever.
+  let packRepairAttempts = 0;
   let completedDeployment: CompletedDeployment | null = null;
   // Round 14: images generated during this run, for the inline chat
   // render appended at the tail (readChatImageOutcome).
@@ -2410,14 +2616,16 @@ async function runAgentLoopV2Inner(
           allowLittPaidProviders: cfg.allowLittPaidProviders,
           allowTransientPlanRetry: true,
           onRoutePlan: recordRoutePlan,
-          // D4 text channel: stream each step's reply text to the
-          // client as it is produced, instead of the answer arriving
-          // whole inside the terminal done payload.
+          // D4 text channel (guarded): the step's reply text is
+          // buffered by the guarded text stream, not emitted raw —
+          // a closing reply that dumps a written file must never
+          // reach the client before the final-text guard runs.
           onText: (text) => {
-            localProgress.emit({ type: "text", text });
+            textStream.onText(text);
           },
         },
       );
+      textStream.noteStepSettled((llmResponse.toolCalls?.length ?? 0) > 0);
       const llmDurationMs = Date.now() - llmStartTime;
       if (llmResponse.responseShape && llmResponse.provider) {
         localProgress.emit({ type: "model_response", provider: llmResponse.provider, model: llmResponse.model, ...llmResponse.responseShape, finishReason: llmResponse.finishReason });
@@ -2744,6 +2952,7 @@ async function runAgentLoopV2Inner(
             success: true,
           }));
           toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result.result), persisted: prior.persisted });
+          noteWrittenFileContent(writtenFiles, toolCall.toolId, toolCall.inputs);
           localProgress.emit({
             type: "tool_result",
             toolId: toolCall.toolId,
@@ -2867,10 +3076,37 @@ async function runAgentLoopV2Inner(
             toolCall.inputs.plan !== undefined
               ? toolCall.inputs.plan
               : Object.fromEntries(
-                  Object.entries(toolCall.inputs).filter(([k]) => k !== "path" && k !== "projectId" && k !== "allowOverwrite"),
+                  Object.entries(toolCall.inputs).filter(([k]) => k !== "path" && k !== "projectId" && k !== "allowOverwrite" && k !== "pack"),
                 );
-          const v = validateSitePlan(planInput);
-          if (!v.ok) writeError = `site.compose invalid plan: ${v.errors.join("; ")} — fix the plan and emit it again.`;
+          // Topic packs (§4.3.3): validate against the pack as well.
+          // The explicit tool argument wins; otherwise the run's
+          // selected pack applies. Checklist-only (Next.js) runs skip
+          // compose enforcement entirely (§4.6.4).
+          let composePack: import("./topic-packs/types").TopicPack | undefined;
+          if (topicPacksEnabled()) {
+            const { getPack } = await import("./topic-packs");
+            composePack =
+              getPack(typeof toolCall.inputs.pack === "string" ? toolCall.inputs.pack : undefined) ??
+              (topicPackCtx && !topicPackCtx.checklistOnly ? topicPackCtx.pack : undefined);
+          }
+          const v = validateSitePlan(planInput, composePack ? { pack: composePack } : undefined);
+          if (!v.ok) {
+            const isPackFailure =
+              !!composePack && v.errors.some((e) => e.startsWith(`${composePack.id} pack:`));
+            if (isPackFailure) packRepairAttempts += 1;
+            if (isPackFailure && composePack && packRepairAttempts > 2) {
+              // Bounded repair (§4.3.3): two fix attempts were already
+              // fed back. Refuse the call and require the honest
+              // pack-incomplete report — never a silent thin ship.
+              writeError =
+                `site.compose pack-incomplete: the ${composePack.id} pack repair limit (2 attempts) is exhausted ` +
+                `and the plan is still incomplete — ${v.errors.join("; ")}. ` +
+                `Do NOT present this site as finished. Tell the user plainly that the site is incomplete ` +
+                `and name the missing pieces, or fix ALL of them in one corrected plan.`;
+            } else {
+              writeError = `site.compose invalid plan: ${v.errors.join("; ")} — fix the plan and emit it again.`;
+            }
+          }
         }
         // site.patch dry-run: read the target and run the splice in memory —
         // a missing region or no-op edit must fail here with feedback, not
@@ -3176,6 +3412,9 @@ async function runAgentLoopV2Inner(
         paths: !toolDef.readOnly ? declaredMutationPaths(toolCall.inputs, result.result) : undefined,
         persisted: mutationCheck?.verified ?? undefined,
       });
+      if (result.success) {
+        noteWrittenFileContent(writtenFiles, toolCall.toolId, toolCall.inputs);
+      }
       // Observability (Part J): record the tool call for the run record.
       recordObsToolCall(runObs, {
         toolId: toolCall.toolId,
@@ -3383,20 +3622,11 @@ async function runAgentLoopV2Inner(
           type: "status",
           summary: "Some text in the page would be invisible — asking for a fix before this can be called done.",
         });
-      } else if (contrastCheck.applies && contrastCheck.unverifiableFiles.length > 0) {
-        // ACC-03: colors decided by the Tailwind runtime beyond the
-        // checker's judgment are UNVERIFIABLE, not clean — same one
-        // repair chance, asking for plain-CSS colors.
-        contrastRepairFeedbackGiven = true;
-        llmMessages.push({
-          role: "user",
-          content: textContrastUnverifiableRepairPrompt(contrastCheck.unverifiableFiles),
-        });
-        localProgress.emit({
-          type: "status",
-          summary: "Some page colors couldn't be verified — asking for plain-CSS colors before this can be called done.",
-        });
       }
+      // ACC-06a item 1: runtime-decided colors get NO repair feedback.
+      // The checker cannot judge them, so pressuring the model to
+      // rewrite a page it cannot verify only invites destructive
+      // churn; the tail check records a pass-with-note instead.
     }
 
     // Per-step timing: total step duration + cumulative elapsed, so the work log
@@ -3467,10 +3697,12 @@ async function runAgentLoopV2Inner(
   // the document's own CSS), the page is not readable and the run has
   // NOT produced a finished site — settle it honestly as failed
   // instead of reporting an invisible page as a successful build.
-  // Pages the checker cannot reason about for non-runtime reasons
-  // are untouched by this; a page whose colors are runtime-decided
-  // beyond judgment (ACC-03) settles the same honest way — an
-  // unverifiable page is not a clean page.
+  // ACC-06a item 1 (supersedes the ACC-03 settlement): colors decided
+  // at runtime by the Tailwind compiler are NOT statically decidable
+  // evidence, so they can never fail the build — the run passes and
+  // the unverifiable scope rides the closing text as a note. Only a
+  // statically decidable violation fails the run.
+  let contrastNote: string | undefined;
   if (!cancelled && !modelFailed && !failedHonestly) {
     const contrastCheck = await checkTextContrast({
       candidatePaths: successfulMutationPaths(toolCallLog),
@@ -3480,8 +3712,7 @@ async function runAgentLoopV2Inner(
       failedHonestly = textContrastFailureMessage(contrastCheck.violations);
       finalText = failedHonestly;
     } else if (contrastCheck.applies && contrastCheck.unverifiableFiles.length > 0) {
-      failedHonestly = textContrastUnverifiableMessage(contrastCheck.unverifiableFiles);
-      finalText = failedHonestly;
+      contrastNote = textContrastUnverifiableNote(contrastCheck.unverifiableFiles);
     }
   }
 
@@ -3529,11 +3760,27 @@ async function runAgentLoopV2Inner(
   const visibleFinalText = qualitySession
     ? stripQualityStageMarkers(effectiveFinalText)
     : effectiveFinalText;
-  const userFinalText =
+  const rawUserFinalText =
     visibleFinalText ||
     (qualitySession
       ? describeSilentOutcome(toolCallLog, cancelled, cancelReason)
       : visibleFinalText);
+  // Reply-content guard (2026-11-25): the closing reply must
+  // summarize, never paste a file this run just wrote — strip any
+  // dump against the run's own written contents before the quality
+  // verdict suffix (system text, not model prose) is appended. The
+  // silent-outcome fallback is factual prose with no code spans, so
+  // it passes through untouched.
+  const userFinalText = stripWrittenFileDumps(
+    rawUserFinalText,
+    writtenFileList(writtenFiles),
+    { userAskedForContents: userAskedToSeeFileContents(userMessage) },
+  );
+  // Streaming: the final step's raw text was withheld by the guarded
+  // text stream; deliver the guarded closing text as the last
+  // streamed segment so the live bubble and the persisted message
+  // carry the same guarded copy.
+  textStream.flushFinal(userFinalText);
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok
       ? `${userFinalText}${formatQualityVerdictBlock(qualityFinale)}`
@@ -3594,6 +3841,13 @@ async function runAgentLoopV2Inner(
     settlement.outcome === "completed"
       ? ensureStableUrlInFinalText(appendChatImagesToFinalText(settledFinalText, chatImages), completedDeployment)
       : settledFinalText;
+  // ACC-06a item 1: a completed run whose page colors were
+  // runtime-decided carries the unverifiable note in its closing
+  // text — stated plainly, never hidden, never a failure.
+  const finalTextWithContrastNote =
+    settlement.outcome === "completed" && contrastNote
+      ? `${finalTextWithChatImages}\n\n${contrastNote}`
+      : finalTextWithChatImages;
   // Round 14: "finished" is emitted BEFORE the after-run checkpoint,
   // and the checkpoint is time-bounded — settlement must never wait
   // on a sandbox transport operation (createAfterRunCheckpointBounded).
@@ -3616,8 +3870,38 @@ async function runAgentLoopV2Inner(
   } as ProgressEvent);
   const afterCheckpoint = await createAfterRunCheckpointBounded(transport, workspaceChange, userMessage, localProgress);
 
+  // Topic packs §4.6.4 (Next.js checklist mode): scan the files this
+  // run actually wrote against the pack's requirements and report the
+  // gaps in the run summary — a checklist report, never a hard fail.
+  if (topicPackCtx?.checklistOnly) {
+    try {
+      const { checkPackPresence } = await import("./topic-packs");
+      const files: { path: string; content: string }[] = [];
+      for (const p of successfulMutationPaths(toolCallLog).slice(0, 24)) {
+        try {
+          const { content } = await transport.readFile(p);
+          if (typeof content === "string" && content) files.push({ path: p, content });
+        } catch {
+          // An unreadable file simply contributes no evidence.
+        }
+      }
+      if (files.length > 0) {
+        const presence = checkPackPresence(topicPackCtx.pack, files);
+        localProgress.emit({
+          type: "status",
+          summary:
+            presence.missing.length === 0
+              ? `Topic pack checklist (${topicPackCtx.pack.label}): all required pieces present`
+              : `Topic pack checklist (${topicPackCtx.pack.label}): missing ${presence.missing.join("; ")}`,
+        });
+      }
+    } catch {
+      // Checklist reporting is best-effort and must never fail a run.
+    }
+  }
+
   return {
-    finalText: finalTextWithChatImages,
+    finalText: finalTextWithContrastNote,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -3631,6 +3915,7 @@ async function runAgentLoopV2Inner(
     modelFailed,
     modelFailureText,
     failedHonestly,
+    contrastNote,
     completedWithWarning: settlement.completedWithWarning,
     failureContributors: settlement.failureContributors,
     baselineCheckpoint,
@@ -3936,6 +4221,8 @@ export interface DeferredToolBatchContext {
   transport: WorkspaceTransport;
   llmMessages: LLMMessage[];
   toolCallLog: AgentToolCallLogEntry[];
+  /** Reply-content guard: shared with the owning loop when present. */
+  writtenFiles?: Map<string, string>;
   toolCallRecords: ToolCallRecord[];
   executedMutations: Map<string, ExecutedMutation>;
   localProgress: ProgressEmitter;
@@ -4043,6 +4330,9 @@ export async function executeDeferredToolCalls(
           success: true,
         }));
         ctx.toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result.result), persisted: prior.persisted });
+        if (ctx.writtenFiles) {
+          noteWrittenFileContent(ctx.writtenFiles, toolCall.toolId, toolCall.inputs);
+        }
         ctx.localProgress.emit({
           type: "tool_result",
           toolId: toolCall.toolId,
@@ -4217,6 +4507,9 @@ export async function executeDeferredToolCalls(
       paths: !toolDef.readOnly ? declaredMutationPaths(toolCall.inputs, result.result) : undefined,
       persisted: mutationCheck?.verified ?? undefined,
     });
+    if (result.success && ctx.writtenFiles) {
+      noteWrittenFileContent(ctx.writtenFiles, toolCall.toolId, toolCall.inputs);
+    }
     state.completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? state.completedDeployment;
     const deferredChatImage = readChatImageOutcome(toolCall.toolId, result.result);
     if (deferredChatImage) state.chatImages.push(deferredChatImage);
@@ -4328,6 +4621,12 @@ async function resumeAgentLoopV2Inner(
   if (isLocalSmallLane()) {
     cfg.systemPrompt += "\n\n" + LOCAL_SMALL_LANE_PROMPT;
   }
+
+  // Topic packs: same treatment as the orchestrator prompts above —
+  // the resume rebuilds cfg, so re-resolve the pack deterministically
+  // from the original user message (selection is deterministic, and
+  // the project record carries the stored pack as a fallback).
+  await applyTopicPackContext(cfg, resumeUserMessage, transport);
 
   // ── Run observability on resume (Part J, D) ──
   // The approval pause breaks the original run's observability record
@@ -4463,6 +4762,12 @@ async function resumeAgentLoopV2Inner(
   // persisted/complete verdict must cover the full mutation history, not
   // just what ran after the gate.
   const toolCallLog: AgentToolCallLogEntry[] = [...(resume.priorToolCalls ?? [])];
+  // Reply-content guard state — same contract as the main loop: the
+  // contents this run writes, and the guarded D4 text stream.
+  const writtenFiles = new Map<string, string>();
+  const textStream = createGuardedTextStream((text) =>
+    localProgress.emit({ type: "text", text }),
+  );
   let shellProbeAt = 0;
   let shellMutationVerified = false;
   let completedDeployment: CompletedDeployment | null = null;
@@ -4590,6 +4895,9 @@ async function resumeAgentLoopV2Inner(
       paths: !resumedReadOnly ? declaredMutationPaths(resume.inputs, result.result) : undefined,
       persisted: mutationCheck?.verified ?? undefined,
     });
+    if (result.success) {
+      noteWrittenFileContent(writtenFiles, resume.toolId, resume.inputs);
+    }
     // Observability (Part J): record the approved tool execution.
     recordObsToolCall(resumeRunObs, {
       toolId: resume.toolId,
@@ -4723,6 +5031,7 @@ async function resumeAgentLoopV2Inner(
       transport,
       llmMessages,
       toolCallLog,
+      writtenFiles,
       toolCallRecords,
       executedMutations,
       localProgress,
@@ -4844,19 +5153,10 @@ async function resumeAgentLoopV2Inner(
         type: "status",
         summary: "Some text in the page would be invisible — asking for a fix before this can be called done.",
       });
-    } else if (contrastCheck.applies && contrastCheck.unverifiableFiles.length > 0) {
-      // ACC-03: unverifiable runtime-decided colors get the same
-      // up-front repair offer — never a silent pass.
-      contrastRepairFeedbackGiven = true;
-      llmMessages.push({
-        role: "user",
-        content: textContrastUnverifiableRepairPrompt(contrastCheck.unverifiableFiles),
-      });
-      localProgress.emit({
-        type: "status",
-        summary: "Some page colors couldn't be verified — asking for plain-CSS colors before this can be called done.",
-      });
     }
+    // ACC-06a item 1: runtime-decided colors get NO repair offer —
+    // the checker cannot judge them; the tail check records a
+    // pass-with-note instead of pressuring a rewrite.
   }
 
   // Route honesty: record the resumed run's first route plan too —
@@ -4903,16 +5203,18 @@ async function resumeAgentLoopV2Inner(
           allowLittPaidProviders: cfg.allowLittPaidProviders,
           allowTransientPlanRetry: true,
           onRoutePlan: recordRoutePlan,
-          // D4 text channel: same streaming as the main loop — resumed
-          // runs share the text channel instead of arriving whole.
+          // D4 text channel (guarded): same treatment as the main
+          // loop — resumed runs buffer step text through the guarded
+          // text stream instead of emitting it raw.
           onText: (text) => {
-            localProgress.emit({ type: "text", text });
+            textStream.onText(text);
           },
         },
       );
       if (llmResponse.responseShape && llmResponse.provider) {
         localProgress.emit({ type: "model_response", provider: llmResponse.provider, model: llmResponse.model, ...llmResponse.responseShape, finishReason: llmResponse.finishReason });
       }
+      textStream.noteStepSettled((llmResponse.toolCalls?.length ?? 0) > 0);
       // Canonical metering (P0): one usage+cost event per resumed step's
       // LLM call. provider/model are from the ACTUAL call; token counts
       // are chars/4 estimates — see emitLoopStepMetering.
@@ -5084,6 +5386,7 @@ async function resumeAgentLoopV2Inner(
             success: true,
           }));
           toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result.result), persisted: prior.persisted });
+          noteWrittenFileContent(writtenFiles, toolCall.toolId, toolCall.inputs);
           localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: true, summary: "skipped — already executed", durationMs: 0 });
           continue;
         }
@@ -5294,6 +5597,9 @@ async function resumeAgentLoopV2Inner(
         paths: !toolDef.readOnly ? declaredMutationPaths(toolCall.inputs, result.result) : undefined,
         persisted: mutationCheck?.verified ?? undefined,
       });
+      if (result.success) {
+        noteWrittenFileContent(writtenFiles, toolCall.toolId, toolCall.inputs);
+      }
       completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? completedDeployment;
       const batchChatImage = readChatImageOutcome(toolCall.toolId, result.result);
       if (batchChatImage) chatImages.push(batchChatImage);
@@ -5397,19 +5703,9 @@ async function resumeAgentLoopV2Inner(
           type: "status",
           summary: "Some text in the page would be invisible — asking for a fix before this can be called done.",
         });
-      } else if (contrastCheck.applies && contrastCheck.unverifiableFiles.length > 0) {
-        // ACC-03: unverifiable runtime-decided colors — same one
-        // repair chance as a proven violation.
-        contrastRepairFeedbackGiven = true;
-        llmMessages.push({
-          role: "user",
-          content: textContrastUnverifiableRepairPrompt(contrastCheck.unverifiableFiles),
-        });
-        localProgress.emit({
-          type: "status",
-          summary: "Some page colors couldn't be verified — asking for plain-CSS colors before this can be called done.",
-        });
       }
+      // ACC-06a item 1: runtime-decided colors get NO repair feedback
+      // (see the initial loop) — pass-with-note at the tail check.
     }
     if (!batchHasMutation) mutationBatchPending = false;
   }
@@ -5459,9 +5755,11 @@ async function resumeAgentLoopV2Inner(
   // ACC-02 Defect A — the final word, identical to the initial loop:
   // a page whose text is invisible under its own declared colors is
   // not a finished page, so the run settles honestly as failed —
-  // never report an invisible page as success. ACC-03: a page whose
-  // colors are runtime-decided beyond judgment settles the same
-  // honest way — unverifiable is not clean.
+  // never report an invisible page as success. ACC-06a item 1
+  // (supersedes the ACC-03 settlement): runtime-decided colors are
+  // not statically decidable evidence — the run passes with a note,
+  // never failedHonestly.
+  let contrastNote: string | undefined;
   if (!cancelled && !modelFailed && !failedHonestly) {
     const contrastCheck = await checkTextContrast({
       candidatePaths: successfulMutationPaths(toolCallLog),
@@ -5471,8 +5769,7 @@ async function resumeAgentLoopV2Inner(
       failedHonestly = textContrastFailureMessage(contrastCheck.violations);
       finalText = failedHonestly;
     } else if (contrastCheck.applies && contrastCheck.unverifiableFiles.length > 0) {
-      failedHonestly = textContrastUnverifiableMessage(contrastCheck.unverifiableFiles);
-      finalText = failedHonestly;
+      contrastNote = textContrastUnverifiableNote(contrastCheck.unverifiableFiles);
     }
   }
 
@@ -5553,11 +5850,23 @@ async function resumeAgentLoopV2Inner(
   const visibleFinalText = qualitySession
     ? stripQualityStageMarkers(effectiveFinalText)
     : effectiveFinalText;
-  const userFinalText =
+  const rawUserFinalText =
     visibleFinalText ||
     (qualitySession
       ? describeSilentOutcome(toolCallLog, cancelled, cancelReason)
       : visibleFinalText);
+  // Reply-content guard (2026-11-25): same contract as the initial
+  // loop — a resumed run's closing reply must not paste a file this
+  // run wrote (including the approved call and the deferred batch,
+  // whose writes are recorded in the same map).
+  const userFinalText = stripWrittenFileDumps(
+    rawUserFinalText,
+    writtenFileList(writtenFiles),
+    { userAskedForContents: userAskedToSeeFileContents(resumeUserMessage) },
+  );
+  // Streaming: deliver the guarded closing text as the last streamed
+  // segment (the raw final step text was withheld — see the main loop).
+  textStream.flushFinal(userFinalText);
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok
       ? `${userFinalText}${formatQualityVerdictBlock(qualityFinale)}`
@@ -5617,6 +5926,12 @@ async function resumeAgentLoopV2Inner(
     settlement.outcome === "completed"
       ? ensureStableUrlInFinalText(appendChatImagesToFinalText(settledFinalText, chatImages), completedDeployment)
       : settledFinalText;
+  // ACC-06a item 1: same pass-with-note composition as the initial
+  // loop — a completed resumed run carries the unverifiable note.
+  const finalTextWithContrastNote =
+    settlement.outcome === "completed" && contrastNote
+      ? `${finalTextWithChatImages}\n\n${contrastNote}`
+      : finalTextWithChatImages;
   // Round 14: "finished" before the bounded after-run checkpoint —
   // identical to the initial loop's tail (see there).
   localProgress.emit({
@@ -5643,7 +5958,7 @@ async function resumeAgentLoopV2Inner(
   );
 
   return {
-    finalText: finalTextWithChatImages,
+    finalText: finalTextWithContrastNote,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -5657,6 +5972,7 @@ async function resumeAgentLoopV2Inner(
     modelFailed,
     modelFailureText,
     failedHonestly,
+    contrastNote,
     completedWithWarning: settlement.completedWithWarning,
     failureContributors: settlement.failureContributors,
     baselineCheckpoint,

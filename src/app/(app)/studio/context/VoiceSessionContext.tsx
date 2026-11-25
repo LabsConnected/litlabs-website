@@ -60,6 +60,10 @@ import { useInworldSession, type TranscriptMetadata } from "@/features/voice/hoo
 import { validateTranscript, type RejectionReason, type TranscriptValidationResult } from "@/features/voice/lib/transcript-validation";
 import { VOICE_GATE_CONFIG } from "@/features/voice/lib/voice-gate-config";
 import { readAutoSendEnabled } from "@/features/voice/lib/voice-prefs";
+import {
+  classifyVoiceFailure,
+  VOICE_FAILURE_MESSAGES,
+} from "@/features/voice/lib/voice-failure";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -735,7 +739,22 @@ export function VoiceSessionProvider({
 
       micStartInProgressRef.current = true;
       const current = voiceStateRef.current;
-      if (current !== "idle" && current !== "error") {
+      if (current === "transcript_ready") {
+        // The composer still wires this button to startVoice while a
+        // transcript waits. Swallowing the tap made the mic look dead on
+        // mobile — say why recording did not restart instead.
+        setErrorMessage(
+          "You have a transcript waiting — send it or clear it, then tap the mic to record again.",
+        );
+        micStartInProgressRef.current = false;
+        return;
+      }
+      if (
+        current !== "idle" &&
+        current !== "error" &&
+        current !== "permission_denied" &&
+        current !== "unsupported"
+      ) {
         micStartInProgressRef.current = false;
         return;
       }
@@ -757,9 +776,9 @@ export function VoiceSessionProvider({
       cleanup();
 
       if (!navigator.mediaDevices?.getUserMedia) {
-        const msg = "This browser cannot access microphones. Use a current version of Chrome, Edge, or Firefox.";
-        setVoiceState("error");
-        voiceStateRef.current = "error";
+        const msg = VOICE_FAILURE_MESSAGES.unsupported;
+        setVoiceState("unsupported");
+        voiceStateRef.current = "unsupported";
         setVoiceInputState("error");
         voiceInputStateRef.current = "error";
         setErrorMessage(msg);
@@ -800,13 +819,19 @@ export function VoiceSessionProvider({
         console.warn("[Voice] Inworld failed:", inworldErr);
         inworldConnectedRef.current = false;
         setVoiceTransportConnected(false);
-        const msg = inworldErr instanceof Error ? inworldErr.message : "Voice connection failed.";
-        setVoiceState("error");
-        voiceStateRef.current = "error";
+        const failure = classifyVoiceFailure(inworldErr);
+        const nextState: VoiceState =
+          failure.kind === "permission_denied"
+            ? "permission_denied"
+            : failure.kind === "unsupported"
+              ? "unsupported"
+              : "error";
+        setVoiceState(nextState);
+        voiceStateRef.current = nextState;
         setVoiceInputState("error");
         voiceInputStateRef.current = "error";
-        setErrorMessage(msg);
-        updateDiagnostics({ lastError: msg, voicePhase: "error" });
+        setErrorMessage(failure.message);
+        updateDiagnostics({ lastError: failure.message, voicePhase: nextState });
         cleanup();
       } finally {
         micStartInProgressRef.current = false;
