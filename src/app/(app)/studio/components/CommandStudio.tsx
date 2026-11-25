@@ -1105,14 +1105,42 @@ function CommandStudioContent() {
       return false;
     }
   });
+  // ACC-06b — entry-surface truthfulness. The legacy router's own
+  // resolution decides what this entry IS: entries that canonicalize
+  // to the LiTT chat surface (no ?tool=, ?tool=chat / ?tool=home, and
+  // the creative tools that normalize to chat) report legacyTool
+  // "chat". Every explicitly named surface — ?tool=preview / canvas /
+  // design / build / terminal, a ?creator= deep link, the non-studio
+  // destinations — reports something else (or nothing), and that
+  // surface owns the phone screen on entry: the chat sheet must not
+  // open over it. Before this, the entry default below opened the
+  // sheet on EVERY fresh mobile entry, and the surface-change effect
+  // further down only closes the sheet when the surface changes after
+  // mount — so a ?tool=preview deep link landed with the sheet
+  // covering the Preview station (a blank-looking page holding only
+  // the conversation's cards) while the top bar, seeing chatOpen
+  // true, hid its Back to chat button. The way back vanished exactly
+  // when it was needed (Larry's screenshots, 2026-11-25).
+  //
+  // Captured ONCE at mount (same pattern as mobileLittHadStoredPref):
+  // the state→URL sync canonicalizes a chat entry's URL to
+  // ?tool=preview shortly after mount, so a live read would flip a
+  // chat entry into a "tool entry" mid-flight and the sheet would
+  // never open on plain chat entries.
+  const [entryNamesToolSurface] = useState<boolean>(() => initial.legacyTool !== "chat");
   const mobileLittDefaultAppliedRef = useRef(false);
   useEffect(() => {
     if (mobileLittDefaultAppliedRef.current) return;
     if (viewportTier === null) return;
     mobileLittDefaultAppliedRef.current = true;
     if (!isMobileLitt) return;
-    if (!mobileLittHadStoredPref) setMobileLittOpen(true);
-  }, [viewportTier, isMobileLitt, mobileLittHadStoredPref]);
+    if (mobileLittHadStoredPref) return;
+    // A tool-surface entry keeps the sheet closed — the named surface
+    // is the visible one, and the top bar's Back to chat (rendered
+    // while chatOpen is false) is the labeled way back in.
+    if (entryNamesToolSurface) return;
+    setMobileLittOpen(true);
+  }, [viewportTier, isMobileLitt, mobileLittHadStoredPref, entryNamesToolSurface]);
   useEffect(() => {
     // Only persist once the entry default has been applied — otherwise the
     // mount-time write would immediately masquerade as a stored preference.
@@ -1462,14 +1490,18 @@ function CommandStudioContent() {
     setComposerValue((current) => (current.trim() ? current : prompt));
     markFirstRunPromptConsumed();
     if (isMobileLitt) {
-      setMobileLittOpen(true);
+      // ACC-06b: the prompt still lands in the composer, but on a
+      // tool-surface entry (?tool=preview&prompt=…) the sheet stays
+      // closed — the named surface owns the screen, and Back to chat
+      // in the top bar opens the sheet with the prompt waiting in it.
+      if (!entryNamesToolSurface) setMobileLittOpen(true);
     } else if (studioShellActive) {
       setLittCollapsed(false);
     } else {
       setLittCollapsed(false);
     }
     setLittActiveTab("chat");
-  }, [searchParams, isMobileLitt, studioShellActive]);
+  }, [searchParams, isMobileLitt, studioShellActive, entryNamesToolSurface]);
 
   // Canvas ActionPanel events — the studio.* ArtifactActions execute
   // client-side: executeAction dispatches these DOM events and the owning

@@ -176,6 +176,29 @@ describe("LiTTMobileSheet (real component)", () => {
     expect(screen.queryByTestId("litt-mobile-new-chat")).not.toBeInTheDocument();
   });
 
+  // ACC-06b (Larry, 2026-11-25): chat must carry a labeled way back to
+  // the main Studio — before this, the sheet's only dismissals were
+  // the unlabeled backdrop strip and Escape.
+  it("shows a labeled Back to Studio control that closes the sheet", () => {
+    const { onClose } = renderSheet({ activeTab: "chat" });
+    const back = screen.getByTestId("litt-mobile-back-to-studio");
+    expect(back).toHaveAttribute("aria-label", "Back to Studio");
+    expect(back).toHaveTextContent("Studio");
+    // ≥44px touch target, like the bar's other controls.
+    expect(back).toHaveClass("min-h-11");
+    fireEvent.click(back);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the Back to Studio control on non-chat tabs too", () => {
+    const { onClose } = renderSheet({
+      activeTab: "files",
+      filesContent: <div data-testid="files-slot" />,
+    });
+    fireEvent.click(screen.getByTestId("litt-mobile-back-to-studio"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   describe("mobile density redesign", () => {
     it("renders the menu button and calls onOpenTools when tapped", () => {
       const onOpenTools = vi.fn();
