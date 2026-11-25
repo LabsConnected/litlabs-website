@@ -16,10 +16,15 @@ import "@testing-library/jest-dom";
 // (including the lazily-loaded tool components the nav routes to) is
 // observable.
 
-const stableSearchParams = new URLSearchParams("tool=chat");
+// Hoisted mutable search params: the default entry is the canonical
+// ?tool=chat; the ACC-06b deep-link tests swap in ?tool=preview before
+// rendering (beforeEach resets the holder).
+const searchParamsHolder = vi.hoisted(() => ({
+  value: new URLSearchParams("tool=chat"),
+}));
 
 vi.mock("next/navigation", () => ({
-  useSearchParams: () => stableSearchParams,
+  useSearchParams: () => searchParamsHolder.value,
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
   usePathname: () => "/studio",
 }));
@@ -430,6 +435,7 @@ describe("MobileStudioTopBar — chat-first surfaces", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
+    searchParamsHolder.value = new URLSearchParams("tool=chat");
     sendMock.mockResolvedValue({ accepted: true });
     capState.projectId = "project-1";
     capState.projectName = "Test Project";
@@ -503,6 +509,42 @@ describe("MobileStudioTopBar — chat-first surfaces", () => {
     await waitFor(() => {
       expect(screen.getByTestId("litt-mobile-sheet-mount")).not.toHaveStyle({ display: "none" });
     });
+  });
+
+  // ACC-06b (Larry, 2026-11-25): arriving through a ?tool=preview deep
+  // link used to land with the chat sheet open over the Preview
+  // station — a blank-looking page holding only the conversation's
+  // cards — while the top bar hid Back to chat because chatOpen was
+  // true. The named surface must be the visible one from first paint,
+  // with the labeled way back present.
+  it("ACC-06b: a ?tool=preview deep link lands on the Preview surface — sheet closed, Back to chat visible", async () => {
+    searchParamsHolder.value = new URLSearchParams("tool=preview");
+    const { user } = await renderMobileCommandStudio();
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-preview-panel")).toBeTruthy();
+    });
+    expect(screen.getByTestId("litt-mobile-sheet-mount")).toHaveStyle({ display: "none" });
+    expect(screen.getByTestId("mobile-surface-label")).toHaveTextContent("Static View");
+    const back = screen.getByTestId("mobile-back-to-chat");
+    expect(back).toHaveAttribute("aria-label", "Back to chat");
+    // The labeled return works: Back to chat opens the sheet.
+    await user.click(back);
+    await waitFor(() => {
+      expect(screen.getByTestId("litt-mobile-sheet-mount")).not.toHaveStyle({ display: "none" });
+    });
+  });
+
+  // ACC-06b: the first-run prompt handoff must not force the sheet
+  // over a named tool surface either — the prompt waits in the
+  // composer behind Back to chat.
+  it("ACC-06b: a ?tool=preview&prompt= deep link keeps the sheet closed", async () => {
+    searchParamsHolder.value = new URLSearchParams("tool=preview&prompt=Build%20a%20bakery%20site");
+    await renderMobileCommandStudio();
+    await waitFor(() => {
+      expect(screen.getByTestId("studio-preview-panel")).toBeTruthy();
+    });
+    expect(screen.getByTestId("litt-mobile-sheet-mount")).toHaveStyle({ display: "none" });
+    expect(screen.getByTestId("mobile-back-to-chat")).toBeTruthy();
   });
 });
 

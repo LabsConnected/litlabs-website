@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, FolderOpen, Component, Menu, Plus } from "lucide-react";
+import { Activity, ChevronLeft, FolderOpen, Component, Menu, Plus } from "lucide-react";
 import { useVisualViewport } from "../../hooks/useVisualViewport";
 import { mobileDiag } from "../../lib/mobileDiagnostics";
 import type { LiTTTab } from "../LiTTPanel";
@@ -202,6 +202,23 @@ export default function LiTTMobileSheet({
             </button>
           )}
           <div className="flex-1" />
+          {/* ACC-06b (Larry, 2026-11-25): chat must carry a labeled way
+              back to the main Studio. Before this, the sheet's only
+              dismissals were the unlabeled backdrop strip and Escape —
+              a user inside chat had no visible exit. This button is
+              always present, labeled, and ≥44px, wired to the same
+              onClose the backdrop uses. */}
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex min-h-11 shrink-0 items-center gap-1 rounded-lg px-2 text-[12px] font-bold transition active:scale-95"
+            style={{ color: "var(--text-secondary)" }}
+            aria-label="Back to Studio"
+            data-testid="litt-mobile-back-to-studio"
+          >
+            <ChevronLeft size={16} className="pointer-events-none" aria-hidden />
+            <span className="pointer-events-none">Studio</span>
+          </button>
           {activeTab === "chat" && onNewChat && (
             <button
               type="button"
