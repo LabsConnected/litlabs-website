@@ -68,6 +68,14 @@ export interface ConversationMessage {
   pendingApproval?: { toolId: string; reason: string; pausedRunId?: string; inputs?: Record<string, unknown> } | null;
   /** V2: Tool activity log for progress display */
   toolActivity?: Array<{ toolId: string; success?: boolean; summary: string }> | null;
+  /**
+   * Server-attached at read time (not a stored column): the failed
+   * run's primary failure reason, re-attached by the messages GET from
+   * the action run's durable failureMessage so the work log can show
+   * WHY a run died after a reload (PR #1114 Greptile thread 2).
+   * Sanitized, one line, ≤200 chars; the bubble text is unaffected.
+   */
+  failureReason?: string | null;
 }
 
 export interface ResolvedStudioContext {

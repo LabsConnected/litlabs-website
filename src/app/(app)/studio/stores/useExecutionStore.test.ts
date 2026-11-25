@@ -122,3 +122,43 @@ describe("execution event projections", () => {
     });
   });
 });
+
+describe("settleResumedRun — approval-resumed runs terminate (PR #1114 Greptile thread 1)", () => {
+  beforeEach(() => {
+    useExecutionStore.getState().reset();
+  });
+
+  it("an approved resumed run that finishes settles to done — phase terminates, run no longer active", () => {
+    const store = useExecutionStore.getState();
+    store.setActiveTaskId("task-resume-1");
+    store.startRun();
+    store.setPendingApproval(GATE);
+    // The initial send returned at the gate; approval resumes the run
+    // and it completes. resolveApproval alone leaves phase "editing"
+    // with isRunning still true — the run looks active forever.
+    store.resolveApproval("approved");
+    expect(useExecutionStore.getState().phase).toBe("editing");
+
+    useExecutionStore.getState().settleResumedRun("completed");
+
+    const state = useExecutionStore.getState();
+    expect(state.phase).toBe("done");
+    expect(state.isRunning).toBe(false);
+    expect(state.taskPhases["task-resume-1"]).toBe("done");
+  });
+
+  it("a rejected resumed run settles to cancelled — phase terminates, run no longer active", () => {
+    const store = useExecutionStore.getState();
+    store.setActiveTaskId("task-resume-2");
+    store.startRun();
+    store.setPendingApproval(GATE);
+
+    store.resolveApproval("rejected");
+    useExecutionStore.getState().settleResumedRun("rejected");
+
+    const state = useExecutionStore.getState();
+    expect(state.phase).toBe("cancelled");
+    expect(state.isRunning).toBe(false);
+    expect(state.taskPhases["task-resume-2"]).toBe("cancelled");
+  });
+});

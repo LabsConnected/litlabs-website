@@ -20,6 +20,7 @@ import {
 import { ProgressEmitter, isSubstantiveProgressEvent } from "@/lib/litt-intelligence/progress-events";
 import { createWorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { resumeAgentLoopV2, isFileWritingTool, type AgentLoopConfig } from "@/lib/litt-intelligence/agent-loop-v2";
+import { primaryFailureReason } from "@/lib/litt-intelligence/run-settlement";
 import { resolveAvailableCapabilities } from "@/lib/litt-intelligence/capabilities";
 import { ensureProjectPreviewReady, isRunnableEntryPath } from "@/lib/litt-intelligence/launch-flow";
 import { buildPreviewProxyUrl } from "@/lib/terminal-internal-client";
@@ -1494,7 +1495,15 @@ export async function POST(
               : "Task completed",
           approvalReference: null,
           failureCode: honestFailure ? "TASK_FAILED" : null,
-          failureMessage: honestFailure ? honestFailure.slice(0, 500) : null,
+          // PR #1114 Greptile thread 2: record the PRIMARY failure
+          // reason (contributors first) as the durable failureMessage —
+          // the messages GET re-attaches it to the failed message on
+          // reload, so a resume-path failure keeps its reason. Falls
+          // back to the honest-failure text when no contributor was
+          // recorded.
+          failureMessage: honestFailure
+            ? primaryFailureReason(result) ?? honestFailure.slice(0, 500)
+            : null,
         },
         runResult,
         executionToken,

@@ -60,12 +60,14 @@ import { detectAndExecuteTool } from "@/lib/litt-intelligence/tool-executor";
 import { deploymentEvidenceFrom, evaluateCompletion } from "@/lib/studio/completion-evidence";
 import {
   createActionRun,
+  listActionRuns,
   requestActionRunCancellation,
   transitionActionRun,
   transitionActionRunEventActivity,
   type ActionExecutionContext,
   type ActionRun,
 } from "@/lib/action-runtime";
+import { failureReasonByMessageId } from "@/lib/studio/message-failure-reason";
 // Item 5a — deep import on purpose: the barrel is mocked in route tests,
 // and the persistence hook must stay the real one.
 import { makePersistProgressEvent } from "@/lib/action-runtime/progress-event-persistence";
@@ -1763,6 +1765,14 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 : "failed";
 
         const statusPersisted = await updateMessageStatus(assistantMessage.id, userId, finalMessageStatus, assistantText);
+        // PR #1114 Greptile thread 2: the primary failure reason is the
+        // durable form of the item-1 live reason — record it on the
+        // action run so the messages GET can re-attach it to this
+        // message on every reload. Falls back to the assistant text
+        // (the previous behavior) when the loop recorded no reason.
+        const failureReason = finalMessageStatus === "failed" && v2Result
+          ? primaryFailureReason(v2Result)
+          : null;
         let actionRunPersistenceFailed = false;
         if (actionContext && finalMessageStatus !== "awaiting_approval") {
           try {
@@ -1774,7 +1784,9 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                   : "Task failed",
               approvalReference: null,
               failureCode: finalMessageStatus === "failed" ? "TASK_FAILED" : null,
-              failureMessage: finalMessageStatus === "failed" ? assistantText.slice(0, 500) : null,
+              failureMessage: finalMessageStatus === "failed"
+                ? failureReason ?? assistantText.slice(0, 500)
+                : null,
             });
           } catch (settleErr) {
             actionRunPersistenceFailed = true;
@@ -1901,9 +1913,7 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
                 // the evidence so the work log can name the cause —
                 // the loop recorded it (contributors / modelFailed /
                 // failedHonestly) and only the status used to survive.
-                failureReason: finalMessageStatus === "failed"
-                  ? primaryFailureReason(v2Result)
-                  : null,
+                failureReason,
               },
             } : {}),
           },
@@ -2500,6 +2510,28 @@ async function getHandler(req: NextRequest, routeCtx: RouteParams) {
     } catch {
       // Non-fatal — transcript still loads; the approval card just won't remount.
     }
+  }
+
+  // PR #1114 Greptile thread 2: re-attach failure reasons. The live
+  // send's done event carries the reason once; message storage does
+  // not, so without this a reload loses it — and approval-resume
+  // failures never reach the client as execution data at all. The
+  // durable record is the action run's failureMessage, written at
+  // settle on BOTH paths (initial send + approval resume) with the
+  // run's primary failure reason. Pair runs back onto the failed
+  // messages they produced. Best-effort: a transcript must never fail
+  // to load because reason read-back did.
+  try {
+    if (messages.some((m) => m.role === "assistant" && m.status === "failed" && !m.failureReason)) {
+      const runs = await listActionRuns(userId, { conversationId: conversation.id, limit: 100 });
+      const reasons = failureReasonByMessageId(messages, runs);
+      for (const message of messages) {
+        const reason = reasons.get(message.id);
+        if (reason && !message.failureReason) message.failureReason = reason;
+      }
+    }
+  } catch {
+    // Non-fatal — transcript still loads, just without restored reasons.
   }
 
   return NextResponse.json({ messages, revision: conversation.revision });

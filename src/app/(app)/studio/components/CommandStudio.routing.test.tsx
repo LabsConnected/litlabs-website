@@ -254,6 +254,11 @@ let capturedConversationOptions: {
 // chain actually starts a run instead of only drafting.
 const capturedSendValues: string[] = [];
 
+// Greptile round on PR #1114 (thread 3): whether the mocked send
+// accepts — flipped to false to simulate a busy conversation rejecting
+// the auto-send while another run is in flight.
+let mockSendAccepted = true;
+
 vi.mock("../hooks/useCanonicalConversation", () => ({
   useCanonicalConversation: (options: { serverProjectId?: string | null }) => {
     capturedConversationOptions = options;
@@ -262,7 +267,7 @@ vi.mock("../hooks/useCanonicalConversation", () => ({
     busy: false,
     send: vi.fn().mockImplementation(async (value: string) => {
       capturedSendValues.push(value);
-      return { accepted: true };
+      return { accepted: mockSendAccepted };
     }),
     regenerate: vi.fn(),
     clear: vi.fn(),
@@ -312,6 +317,7 @@ vi.mock("../stores/useExecutionStore", () => {
     setPhase: vi.fn(),
     setPendingApproval: vi.fn(),
     resolveApproval: vi.fn(),
+    settleResumedRun: vi.fn(),
     setCheckpoint: vi.fn(),
     collapseEvent: vi.fn(),
     collapseLowLevel: vi.fn(),
@@ -478,6 +484,7 @@ describe("CommandStudio — mounted Work-surface routing", () => {
     mockRuntime = undefined;
     capturedConversationOptions = null;
     capturedSendValues.length = 0;
+    mockSendAccepted = true;
     toolMounts.image = 0;
     toolMounts.video = 0;
     // The dock persists open/tab/height in sessionStorage (intentional
@@ -1576,6 +1583,26 @@ describe("CommandStudio — mounted Work-surface routing", () => {
       );
       await waitFor(() => {
         expect(capturedSendValues).toContain("Deploy this project to production");
+      });
+    });
+
+    it("a busy-rejected autoSend falls back to drafting the deploy prompt in the composer", async () => {
+      // Another run is busy: conversation.send refuses the auto-send
+      // with { accepted: false }. The Publish click must not vanish —
+      // the deploy request stays drafted in the composer (the same
+      // fallback used when no sender is mounted) so the user can send
+      // it when the current run finishes.
+      mockSendAccepted = false;
+      await renderCommandStudio();
+      window.dispatchEvent(
+        new CustomEvent("studio:request-deploy", { detail: { target: "litt", autoSend: true } }),
+      );
+      await waitFor(() => {
+        expect(capturedSendValues).toContain("Deploy this project to production");
+      });
+      await waitFor(() => {
+        const input = screen.getByTestId("studio-command-input") as HTMLTextAreaElement;
+        expect(input.value).toBe("Deploy this project to production");
       });
     });
 

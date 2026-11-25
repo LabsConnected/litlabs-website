@@ -1353,7 +1353,20 @@ function CommandStudioContent() {
         // drafting rather than dropping the request.
         const sender = detail.autoSend ? composerSendRef.current : null;
         if (sender) {
-          void sender(detail.prompt);
+          const prompt = detail.prompt;
+          void (async () => {
+            const result = await sender(prompt).catch(() => null);
+            // PR #1114 Greptile thread 3: a send the conversation
+            // refuses (busy with another run → { accepted: false })
+            // must not silently vanish — Publish stays enabled during
+            // a build, so the click lands here. Fall back to the same
+            // draft the no-sender path uses, so the deploy request is
+            // retained in the composer for the user to send when the
+            // current run finishes.
+            if (!result || (result as { accepted?: boolean }).accepted !== true) {
+              setComposerValue(prompt);
+            }
+          })();
         } else {
           setComposerValue(detail.prompt);
         }
@@ -2120,6 +2133,10 @@ function CommandStudioContent() {
       // The resumed run's outcome was written back onto the conversation
       // transcript server-side — pull it instead of fabricating anything.
       void conversation.loadMessages(opts.conversationId);
+      // A rejection is terminal: nothing resumes. End the execution
+      // phase, or the run keeps showing as working (PR #1114 Greptile
+      // thread 1 — resolveApproval alone leaves phase "editing").
+      exec.settleResumedRun("rejected");
       setLittActiveTab("chat");
       return;
     }
@@ -2179,6 +2196,11 @@ function CommandStudioContent() {
       setLittActiveTab("chat");
       return;
     }
+    // Approved and finished, with no follow-up gate mounted above: the
+    // resumed run is over. End the execution phase — resolveApproval
+    // leaves it at "editing", so without this the completed run shows
+    // as working forever (PR #1114 Greptile thread 1).
+    exec.settleResumedRun("completed");
     setLittActiveTab("chat");
   }, [conversation, capabilities.projectId]);
 

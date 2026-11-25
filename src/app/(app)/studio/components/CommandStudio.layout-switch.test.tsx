@@ -293,6 +293,7 @@ const execState = vi.hoisted(() => {
     // this, a prior test's "executing" phase leaks into the next gate.
     setPendingApproval: vi.fn((approval: unknown) => { state.pendingApproval = approval; state.approvalPhase = "idle"; }),
     resolveApproval: vi.fn(() => { state.pendingApproval = null; }),
+    settleResumedRun: vi.fn(),
     beginApprovalSubmit: vi.fn(() => { state.approvalPhase = "submitting"; }),
     approvalAccepted: vi.fn(() => { state.approvalPhase = "executing"; }),
     failApproval: vi.fn((error: string, retryable?: boolean, opts?: { expired?: boolean }) => {
@@ -419,6 +420,7 @@ vi.mock("../tools/BuilderTool", () => ({ default: () => <div data-testid="builde
 vi.mock("../tools/CanvasTool", () => ({ default: () => <div data-testid="canvas-tool" /> }));
 vi.mock("../tools/AgentTool", () => ({ default: () => <div data-testid="agent-tool" /> }));
 vi.mock("../tools/GalleryTool", () => ({ default: () => <div data-testid="gallery-tool" /> }));
+vi.mock("../tools/AgentsTerminalTool", () => ({ default: () => <div data-testid="terminal-tool" /> }));
 vi.mock("../tools/MissionForge", () => ({ default: () => <div data-testid="mission-forge" /> }));
 vi.mock("../tools/CLIBridgeTool", () => ({ default: () => <div data-testid="cli-bridge" /> }));
 vi.mock("../tools/SpaceTool", () => ({ default: () => <div data-testid="space-tool" /> }));

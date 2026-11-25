@@ -182,6 +182,15 @@ export function toChatMessage(msg: ConversationMessage): ChatMessage {
     parentMessageId: msg.parentMessageId,
     regenerationOfMessageId: msg.regenerationOfMessageId,
     clientRequestId: msg.clientRequestId ?? null,
+    // PR #1114 Greptile thread 2: the server re-attaches the failed
+    // run's reason on GET — carry it into the execution record the
+    // work log reads, so the reason survives reloads and
+    // approval-resume failures show one too. Mode/toolCalls are not
+    // reconstructed (no durable per-message record exists for them);
+    // the reason is the only field the reload path restores.
+    ...(msg.failureReason
+      ? { execution: { mode: "unknown", toolCalls: [], failureReason: msg.failureReason } }
+      : {}),
   };
 }
 
