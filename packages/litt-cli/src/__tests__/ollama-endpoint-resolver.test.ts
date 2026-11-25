@@ -13,6 +13,10 @@ beforeEach(() => {
   delete process.env.OLLAMA_HOST_PC;
   delete process.env.OLLAMA_HOST;
   delete process.env.OLLAMA_BASE_URL;
+  delete process.env.OLLAMA_LOCAL_URL;
+  delete process.env.OLLAMA_LAN_URL;
+  delete process.env.OLLAMA_TAILSCALE_URL;
+  delete process.env.OLLAMA_ROUTE_ORDER;
   resetLocalLaneCache();
 });
 

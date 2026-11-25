@@ -60,6 +60,48 @@ describe("resolveOllamaRouteCandidates — priority and shape", () => {
     assert.equal(candidates[2].endpoint, "http://pc.tailnet-name.ts.net:11434");
   });
 
+  it("OLLAMA_ROUTE_ORDER re-prioritises tiers (PC-first for phone->PC setups)", () => {
+    const candidates = resolveOllamaRouteCandidates(
+      envFromMap({
+        OLLAMA_LOCAL_URL: "127.0.0.1:11434",
+        OLLAMA_LAN_URL: "192.168.0.77:11434",
+        OLLAMA_TAILSCALE_URL: "pc.tailnet-name.ts.net:11434",
+        OLLAMA_ROUTE_ORDER: "tailscale,lan,local",
+      }),
+    );
+    assert.deepEqual(
+      candidates.map((c) => c.tier),
+      ["tailscale", "lan", "local"],
+    );
+  });
+
+  it("OLLAMA_ROUTE_ORDER appends unlisted tiers in canonical order", () => {
+    const candidates = resolveOllamaRouteCandidates(
+      envFromMap({
+        OLLAMA_LAN_URL: "192.168.0.77:11434",
+        OLLAMA_TAILSCALE_URL: "pc.tailnet-name.ts.net:11434",
+        OLLAMA_ROUTE_ORDER: "tailscale",
+      }),
+    );
+    assert.deepEqual(
+      candidates.map((c) => c.tier),
+      ["tailscale", "local", "lan"],
+    );
+  });
+
+  it("OLLAMA_ROUTE_ORDER ignores invalid tokens and dedupes", () => {
+    const candidates = resolveOllamaRouteCandidates(
+      envFromMap({
+        OLLAMA_LAN_URL: "192.168.0.77:11434",
+        OLLAMA_ROUTE_ORDER: "bogus,lan,lan,nonsense",
+      }),
+    );
+    assert.deepEqual(
+      candidates.map((c) => c.tier),
+      ["lan", "local"],
+    );
+  });
+
   it("falls back to legacy OLLAMA_HOST_PC for the LAN tier", () => {
     const candidates = resolveOllamaRouteCandidates(
       envFromMap({ OLLAMA_HOST_PC: "192.168.0.77:11434" }),
