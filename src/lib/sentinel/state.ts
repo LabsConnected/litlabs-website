@@ -33,6 +33,7 @@ export const SENTINEL_SERVICE_IDS: SentinelServiceId[] = [
   "terminal-server",
   "stripe",
   "deployment",
+  "studio-browser",
 ];
 
 export const SERVICE_LABELS: Record<SentinelServiceId, string> = {
@@ -42,6 +43,7 @@ export const SERVICE_LABELS: Record<SentinelServiceId, string> = {
   "terminal-server": "Terminal Server",
   stripe: "Stripe",
   deployment: "Deployment",
+  "studio-browser": "Studio Browser",
 };
 
 export function initialServiceState(serviceId: SentinelServiceId): ServiceState {

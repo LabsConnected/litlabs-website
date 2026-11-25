@@ -17,6 +17,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { probeGemini, probeOpenRouter } from "@/lib/system-health";
 import { getTerminalServerUrl } from "@/lib/terminal-url";
+import { checkBrowserUrlPolicy } from "@/lib/litt-intelligence/browser-url-policy";
 import { mapAiProviderProbe } from "./state";
 import type { ProbeResult, SentinelServiceId } from "./types";
 
@@ -149,6 +150,57 @@ export function probeDeployment(): ProbeResult {
   return { ok: true, latencyMs: null, detail: `running on ${platform}` };
 }
 
+/**
+ * Studio browser security probe — replays the navigate-time URL policy
+ * battery on every Sentinel pass so a policy regression (false
+ * positive on a legitimate domain, or a phishing/SSRF bypass) opens an
+ * incident instead of silently shipping. Pure function, no network,
+ * no secrets. Complements the authenticated staging acceptance gate
+ * (scripts/final-acceptance/browser-security-check.mjs), which covers
+ * the live route; this probe covers the policy layer continuously.
+ */
+export function probeStudioBrowser(): ProbeResult {
+  const t0 = Date.now();
+  try {
+    const mustAllow = [
+      "https://www.google.com/",
+      "https://github.com/",
+      "https://google.com.au/",
+      "https://service.gov.uk/",
+    ];
+    const mustBlock = [
+      "http://localhost:3000/",
+      "http://169.254.169.254/latest/meta-data",
+      "http://192.168.1.1/",
+      "https://g00gle.com/",
+      "https://google.com.evil.com/",
+      "https://g00glelogin.com/",
+      "https://xn--pple-43d.com/",
+    ];
+    const failures: string[] = [];
+    for (const url of mustAllow) {
+      const r = checkBrowserUrlPolicy(url);
+      if (!r.allowed) failures.push(`allowed-case blocked: ${url} (${r.reason ?? "?"})`);
+    }
+    for (const url of mustBlock) {
+      const r = checkBrowserUrlPolicy(url);
+      if (r.allowed) failures.push(`blocked-case allowed: ${url}`);
+    }
+    const latencyMs = Date.now() - t0;
+    if (failures.length > 0) {
+      return {
+        ok: false,
+        latencyMs,
+        detail: `policy regression: ${failures.slice(0, 3).join("; ")}`,
+        severity: "critical",
+      };
+    }
+    return { ok: true, latencyMs, detail: `${mustAllow.length + mustBlock.length} policy assertions ok` };
+  } catch (err) {
+    return timedOut(err instanceof Error ? err.message : "browser policy probe failed", Date.now() - t0);
+  }
+}
+
 export type ProbeFn = () => Promise<ProbeResult>;
 
 /** All Sentinel probes keyed by service id. Injectable for tests. */
@@ -160,5 +212,6 @@ export function defaultProbes(client: SupabaseClient | null): Record<SentinelSer
     "terminal-server": () => probeTerminalServer(),
     stripe: () => probeStripe(),
     deployment: async () => probeDeployment(),
+    "studio-browser": async () => probeStudioBrowser(),
   };
 }
