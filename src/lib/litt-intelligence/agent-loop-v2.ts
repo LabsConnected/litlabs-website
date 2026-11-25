@@ -22,6 +22,7 @@ import { calculateLlmCost } from "@/lib/llm-cost-engine";
 import type { CheckpointInfo, WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
+import { buildScopeApprovalReason, buildScopeCoversTool, isBuildScopeTool } from "./build-scope";
 import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallRequest, type ToolCallResult, type LLMMessage, type RoutePlanSummary } from "./llm-tool-calling";
 // Re-exported so launch-flow can seed a continued loop's messages.
 export type { LLMMessage };
@@ -215,6 +216,14 @@ export interface AgentLoopConfig {
   /** Parent ActionRun owning this work; injected server-side. */
   actionRunId?: string;
   /**
+   * ACC-07 build scope (build-scope.ts): true when this run already
+   * holds the user's one-approval build authorization. The resume
+   * path sets it from the paused-run record; a fresh run starts
+   * unscoped, and its first gated build-scope call asks for the
+   * scope with the scope text on the card.
+   */
+  buildScopeApproved?: boolean;
+  /**
    * Item 5a — optional durable event sink for the Activity truth.
    * When set, every ProgressEvent emitted through this run's
    * `localProgress` is also offered to the hook. The loop invokes it in
@@ -315,6 +324,19 @@ export interface PendingApproval {
    * verification sees the full mutation history across the boundary.
    */
   priorToolCalls?: AgentToolCallLogEntry[];
+  /**
+   * ACC-07: approving THIS gate grants the run's build scope (the
+   * gated call is a build-scope tool and the run does not hold scope
+   * yet). The card's reason carries the scope text — what the
+   * approval authorizes is displayed before the user decides.
+   */
+  grantsBuildScope?: boolean;
+  /**
+   * ACC-07: the run already held build scope when it paused here
+   * (e.g. a deploy gate mid-build). Carried on the pause so the
+   * scope survives pauses for out-of-scope actions.
+   */
+  buildScopeApproved?: boolean;
 }
 
 /**
@@ -1321,6 +1343,63 @@ function successfulMutationPaths(
         .flatMap((c) => c.paths ?? []),
     ),
   ];
+}
+
+/**
+ * ACC-07 Item 2 — automatic project checks at build completion.
+ *
+ * When a run lands successful mutations in a project workspace, all
+ * seven project checks (Build, TypeScript, Lint, Test, Security,
+ * Accessibility, Performance) run before the run may settle: their
+ * results are emitted as build_result events (the Jobs tab's Checks
+ * section reads exactly these), persisted to project_check_runs (the
+ * Checks panel reads the latest persisted set), and any FAILED check
+ * settles the run honestly failed with a plain-language reason — a
+ * run never reports successful completion while its checks failed or
+ * were left pending.
+ *
+ * When the checks cannot run at all (no project context on the run,
+ * project gone, workspace not ready, terminal unconfigured), the
+ * build is NOT failed on their absence: no results are fabricated,
+ * the panel keeps its honest not-run/on-demand state, and the run's
+ * own evidence decides its outcome — the same honesty rule the
+ * contrast verifier follows for unjudgeable colors.
+ */
+async function runCompletionChecks(opts: {
+  cfg: AgentLoopConfig;
+  localProgress: ProgressEmitter;
+}): Promise<{ failureMessage?: string }> {
+  const ctx = actionContextFrom(opts.cfg);
+  const projectId = ctx?.projectId ?? opts.cfg.qualityLoop?.projectId;
+  const userId = ctx?.userId ?? opts.cfg.userId ?? opts.cfg.qualityLoop?.userId;
+  if (!projectId || !userId) return {};
+  try {
+    const { runAllProjectChecks, saveProjectCheckRun, completionChecksFailureMessage } =
+      await import("@/lib/projects/project-checks");
+    const outcome = await runAllProjectChecks({ projectId, userId });
+    for (const check of outcome.checks) {
+      opts.localProgress.emit({
+        type: "build_result",
+        check: check.label,
+        passed: check.status === "passed",
+        ...(check.status === "failed" ? { errorCount: 1 } : {}),
+      });
+    }
+    await saveProjectCheckRun({
+      projectId,
+      userId,
+      conversationId: ctx?.conversationId ?? opts.cfg.conversationId ?? null,
+      checks: outcome.checks,
+      summary: outcome.summary,
+    });
+    const failed = outcome.checks.filter((c) => c.status === "failed");
+    if (failed.length > 0) {
+      return { failureMessage: completionChecksFailureMessage(failed) };
+    }
+    return {};
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -2345,6 +2424,9 @@ async function runAgentLoopV2Inner(
   const events: ProgressEvent[] = [];
   const toolCallRecords: ToolCallRecord[] = [];
   let hasInterveningMutation = false;
+  // ACC-07 build scope: seeded from config (the resume path passes
+  // the run's carried authorization); a fresh run starts unscoped.
+  const buildScopeAuthorized = cfg.buildScopeApproved === true;
   // Mutating tool calls that already executed successfully this run —
   // keyed by toolId+inputs. A replacement provider that re-emits an
   // identical mutation after failover replays the recorded result instead
@@ -3205,14 +3287,26 @@ async function runAgentLoopV2Inner(
         batchHasMutation = true;
       }
 
-      if (permResult.requiresApproval) {
+      // ACC-07: a granted build scope covers in-scope calls — they
+      // proceed without re-prompting. Out-of-scope and
+      // always-separate calls still gate exactly as before.
+      const requiresApproval =
+        permResult.requiresApproval && !buildScopeCoversTool(buildScopeAuthorized, toolCall.toolId);
+
+      if (requiresApproval) {
+        // ACC-07: the first gated build-scope call of a run asks for
+        // the SCOPE, not just the step — its card carries the scope
+        // text stating what the approval authorizes.
+        const grantsBuildScope = !buildScopeAuthorized && isBuildScopeTool(toolCall.toolId);
         // Phase 3: browser mutations get an action-and-target description
         // so the in-chat approval card says what is being approved.
-        const approvalReason = await pauseReasonFor(
-          toolCall.toolId,
-          toolCall.inputs,
-          permResult.reason ?? "Approval required",
-        );
+        const approvalReason = grantsBuildScope
+          ? buildScopeApprovalReason(toolCall.toolId)
+          : await pauseReasonFor(
+              toolCall.toolId,
+              toolCall.inputs,
+              permResult.reason ?? "Approval required",
+            );
         localProgress.emit({
           type: "approval_required",
           toolId: toolCall.toolId,
@@ -3274,6 +3368,8 @@ async function runAgentLoopV2Inner(
               stepsUsedAtPause: stepsUsed,
               hadInterveningMutationAtPause: hasInterveningMutation,
               priorToolCalls: [...toolCallLog],
+              grantsBuildScope,
+              buildScopeApproved: buildScopeAuthorized,
             },
             finalMessages: [...llmMessages],
           };
@@ -3329,7 +3425,7 @@ async function runAgentLoopV2Inner(
       try {
         // Use the registry's execute method, passing transport for V2 handlers
         const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId ?? actionContextFrom(cfg)?.userId, cfg.conversationId ?? actionContextFrom(cfg)?.conversationId), {
-          hasApproval: !permResult.requiresApproval,
+          hasApproval: !requiresApproval,
           availableCapabilities,
           transport,
           signal: cfg.signal,
@@ -3713,6 +3809,24 @@ async function runAgentLoopV2Inner(
       finalText = failedHonestly;
     } else if (contrastCheck.applies && contrastCheck.unverifiableFiles.length > 0) {
       contrastNote = textContrastUnverifiableNote(contrastCheck.unverifiableFiles);
+    }
+  }
+
+  // ACC-07 Item 2 — automatic checks: a build that landed mutations
+  // runs all seven project checks before it may settle (see
+  // runCompletionChecks). A failed check settles the run honestly
+  // failed, exactly like a contrast violation.
+  if (
+    !cancelled &&
+    !modelFailed &&
+    !failedHonestly &&
+    hasInterveningMutation &&
+    toolCallLog.some((t) => t.success && t.mutating)
+  ) {
+    const completionChecks = await runCompletionChecks({ cfg, localProgress });
+    if (completionChecks.failureMessage) {
+      failedHonestly = completionChecks.failureMessage;
+      finalText = failedHonestly;
     }
   }
 
@@ -4167,6 +4281,13 @@ export interface ResumeInput {
    * resets the resumed counter.
    */
   zeroWriteStepsAtPause?: number;
+  /**
+   * ACC-07: whether the resumed run holds build-scope authorization
+   * (build-scope.ts) — computed by the approvals route from the
+   * paused-run record: scope the run already held, or scope this
+   * decision just granted by approving a scope-granting gate.
+   */
+  buildScopeApproved?: boolean;
 }
 
 /**
@@ -4249,6 +4370,9 @@ export interface DeferredToolBatchContext {
   isStaticWorkspace?: boolean;
   /** Full trusted context propagated to ToolRegistry.execute. */
   actionContext?: ActionExecutionContext;
+  /** ACC-07: the owning run's build-scope authorization, so deferred
+   *  in-scope calls execute without re-prompting. */
+  buildScopeApproved?: boolean;
 }
 
 export interface DeferredToolBatchResult {
@@ -4379,14 +4503,22 @@ export async function executeDeferredToolCalls(
       continue;
     }
 
-    if (permResult.requiresApproval) {
+    // ACC-07: the owning run's build scope covers in-scope deferred
+    // calls too — no re-prompt inside the same build.
+    const requiresApproval =
+      permResult.requiresApproval && !buildScopeCoversTool(ctx.buildScopeApproved === true, toolCall.toolId);
+
+    if (requiresApproval) {
+      const grantsBuildScope = ctx.buildScopeApproved !== true && isBuildScopeTool(toolCall.toolId);
       // Phase 3: browser mutations get an action-and-target description
       // on the nested gate too.
-      const approvalReason = await pauseReasonFor(
-        toolCall.toolId,
-        toolCall.inputs,
-        permResult.reason ?? "Approval required",
-      );
+      const approvalReason = grantsBuildScope
+        ? buildScopeApprovalReason(toolCall.toolId)
+        : await pauseReasonFor(
+            toolCall.toolId,
+            toolCall.inputs,
+            permResult.reason ?? "Approval required",
+          );
       ctx.localProgress.emit({
         type: "approval_required",
         toolId: toolCall.toolId,
@@ -4408,6 +4540,8 @@ export async function executeDeferredToolCalls(
             stepsUsedAtPause: ctx.stepsUsed,
             hadInterveningMutationAtPause: state.hasInterveningMutation,
             priorToolCalls: [...ctx.toolCallLog],
+            grantsBuildScope,
+            buildScopeApproved: ctx.buildScopeApproved === true,
           },
         };
       }
@@ -4466,7 +4600,7 @@ export async function executeDeferredToolCalls(
     let result: ToolCallResult;
     try {
       const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, ctx.userId ?? ctx.actionContext?.userId, ctx.conversationId ?? ctx.actionContext?.conversationId), {
-        hasApproval: !permResult.requiresApproval,
+        hasApproval: !requiresApproval,
         transport: ctx.transport,
         signal: ctx.signal,
         actionContext: ctx.actionContext ?? actionContextFrom(ctx),
@@ -4647,6 +4781,10 @@ async function resumeAgentLoopV2Inner(
     resume.pausedMessages,
   );
   let hasInterveningMutation = resume.hadInterveningMutation;
+  // ACC-07 build scope: the approvals route computed this run's
+  // authorization from the paused-run record (scope already held, or
+  // granted by approving the scope-granting gate).
+  const buildScopeAuthorized = resume.buildScopeApproved === true;
   const executedMutations = new Map<string, ExecutedMutation>();
 
   const localProgress = new ProgressEmitter((event) => {
@@ -5046,6 +5184,7 @@ async function resumeAgentLoopV2Inner(
       actionRunId: cfg.actionRunId,
       actionContext: actionContextFrom(cfg),
       isStaticWorkspace: cfg.isStaticWorkspace,
+      buildScopeApproved: buildScopeAuthorized,
     });
     hasInterveningMutation = deferredState.hasInterveningMutation;
     cancelled = deferredState.cancelled;
@@ -5463,14 +5602,22 @@ async function resumeAgentLoopV2Inner(
         }
       }
 
-      if (permResult.requiresApproval) {
+      // ACC-07: build scope carried into the resume covers in-scope
+      // calls here exactly as in the initial loop.
+      const requiresApproval =
+        permResult.requiresApproval && !buildScopeCoversTool(buildScopeAuthorized, toolCall.toolId);
+
+      if (requiresApproval) {
+        const grantsBuildScope = !buildScopeAuthorized && isBuildScopeTool(toolCall.toolId);
         // Phase 3: browser mutations get an action-and-target description
         // on the resumed-run gate too.
-        const approvalReason = await pauseReasonFor(
-          toolCall.toolId,
-          toolCall.inputs,
-          permResult.reason ?? "Approval required",
-        );
+        const approvalReason = grantsBuildScope
+          ? buildScopeApprovalReason(toolCall.toolId)
+          : await pauseReasonFor(
+              toolCall.toolId,
+              toolCall.inputs,
+              permResult.reason ?? "Approval required",
+            );
         localProgress.emit({ type: "approval_required", toolId: toolCall.toolId, reason: approvalReason });
 
         // Pause for approval in AUTO as well as ACT — the same contract as
@@ -5510,6 +5657,8 @@ async function resumeAgentLoopV2Inner(
             // Pausing FOR a file write is write intent in flight — reset
             // the stall counter so the resumed segment starts clean.
             zeroWriteStepsAtPause: isFileWritingTool(toolCall.toolId) ? 0 : resumeZeroWriteSteps,
+            grantsBuildScope,
+            buildScopeApproved: buildScopeAuthorized,
           },
         };
       }
@@ -5545,7 +5694,7 @@ async function resumeAgentLoopV2Inner(
       let result: ToolCallResult;
       try {
         const execResult = await toolRegistry.execute(toolCall.toolId, withUserScopeForBrowserTools(toolCall.toolId, toolCall.inputs, cfg.userId ?? actionContextFrom(cfg)?.userId, cfg.conversationId ?? actionContextFrom(cfg)?.conversationId), {
-          hasApproval: !permResult.requiresApproval,
+          hasApproval: !requiresApproval,
           availableCapabilities,
           transport,
           signal: cfg.signal,
@@ -5770,6 +5919,24 @@ async function resumeAgentLoopV2Inner(
       finalText = failedHonestly;
     } else if (contrastCheck.applies && contrastCheck.unverifiableFiles.length > 0) {
       contrastNote = textContrastUnverifiableNote(contrastCheck.unverifiableFiles);
+    }
+  }
+
+  // ACC-07 Item 2 — automatic checks, identical to the initial loop:
+  // a resumed build that landed mutations runs all seven project
+  // checks before it may settle; a failed check settles it honestly
+  // failed.
+  if (
+    !cancelled &&
+    !modelFailed &&
+    !failedHonestly &&
+    hasInterveningMutation &&
+    toolCallLog.some((t) => t.success && t.mutating)
+  ) {
+    const completionChecks = await runCompletionChecks({ cfg, localProgress });
+    if (completionChecks.failureMessage) {
+      failedHonestly = completionChecks.failureMessage;
+      finalText = failedHonestly;
     }
   }
 

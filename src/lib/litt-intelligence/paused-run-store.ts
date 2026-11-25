@@ -201,6 +201,13 @@ export interface PausedRunRecord {
    * column) and on rows created before the migration is applied.
    */
   priorToolCalls?: RunResult["toolCalls"];
+  /**
+   * ACC-07 build-scope state (build-scope.ts): `grants` — approving
+   * this gate grants the run's build scope; `authorized` — the run
+   * already held build scope when it paused. Absent on legacy rows
+   * and before the migration is applied (treated as no scope).
+   */
+  buildScope?: { grants: boolean; authorized: boolean };
 }
 
 interface PausedRunRow {
@@ -235,6 +242,7 @@ interface PausedRunRow {
   steps_used?: number | null;
   had_intervening_mutation?: boolean | null;
   prior_tool_calls?: RunResult["toolCalls"] | null;
+  build_scope?: { grants: boolean; authorized: boolean } | null;
 }
 
 function rowToRecord(row: PausedRunRow): PausedRunRecord {
@@ -270,6 +278,7 @@ function rowToRecord(row: PausedRunRow): PausedRunRecord {
     stepsUsed: row.steps_used ?? undefined,
     hadInterveningMutation: row.had_intervening_mutation ?? undefined,
     priorToolCalls: row.prior_tool_calls ?? undefined,
+    buildScope: row.build_scope ?? undefined,
   };
 }
 
@@ -294,6 +303,8 @@ export async function createPausedRun(input: {
   hadInterveningMutation?: boolean;
   /** Pre-pause tool-call evidence — see PausedRunRecord.priorToolCalls. */
   priorToolCalls?: RunResult["toolCalls"];
+  /** ACC-07 build-scope state — see PausedRunRecord.buildScope. */
+  buildScope?: { grants: boolean; authorized: boolean };
 }): Promise<PausedRunRecord> {
   if (!supabaseAdmin) throw new Error("Database not available");
 
@@ -326,9 +337,24 @@ export async function createPausedRun(input: {
 
   let { data, error } = await supabaseAdmin
     .from(TABLE)
-    .insert({ ...baseRow, prior_tool_calls: input.priorToolCalls ?? null })
+    .insert({
+      ...baseRow,
+      prior_tool_calls: input.priorToolCalls ?? null,
+      build_scope: input.buildScope ?? null,
+    })
     .select()
     .single();
+
+  if (error && /build_scope/.test(error.message ?? "")) {
+    // ACC-07 migration not applied yet — degrade to the pre-column
+    // behavior (approvals ask per step, as before) rather than
+    // breaking pauses.
+    ({ data, error } = await supabaseAdmin
+      .from(TABLE)
+      .insert({ ...baseRow, prior_tool_calls: input.priorToolCalls ?? null })
+      .select()
+      .single());
+  }
 
   if (error && /prior_tool_calls/.test(error.message ?? "")) {
     // Migration not applied yet — degrade to the pre-column behavior
