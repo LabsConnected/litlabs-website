@@ -16,6 +16,7 @@ const { state, fakeAdmin } = vi.hoisted(() => {
     exempt: false,
     priorRuns: [] as Record<string, unknown>[],
     insertedRun: null as Record<string, unknown> | null,
+    insertError: null as { message: string; code?: string } | null,
     rpcCalls: [] as { name: string; args: Record<string, unknown> }[],
     runRow: {} as Record<string, unknown>,
   };
@@ -39,7 +40,9 @@ const { state, fakeAdmin } = vi.hoisted(() => {
         table === "users"
           ? { data: { id: "user-123", email: "t@example.com" }, error: null }
           : table === "agent_runs"
-            ? { data: state.runRow, error: null }
+            ? state.insertError
+              ? { data: null, error: state.insertError }
+              : { data: state.runRow, error: null }
             : { data: null, error: null },
       maybeSingle: async () =>
         table === "users"
@@ -102,6 +105,7 @@ beforeEach(() => {
   state.exempt = false;
   state.priorRuns = [];
   state.insertedRun = null;
+  state.insertError = null;
   state.rpcCalls = [];
   state.runRow = { id: "run-1" };
 });
@@ -191,5 +195,72 @@ describe("reserveResumeCredits agent_mode (ACC-01 F7)", () => {
     expect(result.engaged).toBe(true);
     expect(state.insertedRun?.agent_mode).toBe("standard");
     expect(VALID_MODES).toContain(state.insertedRun?.agent_mode);
+  });
+});
+
+describe("reserveCredits billing-exempt insert failures (ACC-04)", () => {
+  // The exempt branch previously destructured only `data` from the
+  // agent_runs insert, so any insert error collapsed into the hard-coded
+  // "Failed to create run row" — and the messages route then dressed it
+  // up as a purchase-credits refusal on the owner's own account. The
+  // fake insert above always succeeded, which is why the suite never
+  // saw this class; state.insertError now drives the failure cases.
+
+  it("surfaces the real insert error instead of 'Failed to create run row'", async () => {
+    state.exempt = true;
+    state.insertError = {
+      message: 'null value in column "some_column" violates not-null constraint',
+      code: "23502",
+    };
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const result = await reserveCredits({ ...BASE_CTX }, 10);
+      expect(result.ok).toBe(false);
+      expect(result.status).toBe(500);
+      expect(result.error).toBe(
+        'null value in column "some_column" violates not-null constraint',
+      );
+      expect(result.error).not.toBe("Failed to create run row");
+      expect(result.runId).toBeNull();
+      expect(result.reservedCredits).toBe(0);
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
+
+  it("treats a duplicate idempotency key (23505) as an idempotent success returning the existing run", async () => {
+    state.exempt = true;
+    state.insertError = {
+      message:
+        'duplicate key value violates unique constraint "idx_agent_runs_idempotency_unique"',
+      code: "23505",
+    };
+    // The lookup for (user_id, idempotency_key) finds the prior attempt's row.
+    state.runRow = { id: "run-existing" };
+    const result = await reserveCredits({ ...BASE_CTX }, 10);
+    expect(result.ok).toBe(true);
+    expect(result.runId).toBe("run-existing");
+    expect(result.reservationId).toBeNull();
+    expect(result.reservedCredits).toBe(0);
+  });
+
+  it("falls through to the honest error when a 23505 has no existing row to return", async () => {
+    state.exempt = true;
+    state.insertError = {
+      message:
+        'duplicate key value violates unique constraint "idx_agent_runs_idempotency_unique"',
+      code: "23505",
+    };
+    state.runRow = null as unknown as Record<string, unknown>;
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const result = await reserveCredits({ ...BASE_CTX }, 10);
+      expect(result.ok).toBe(false);
+      expect(result.status).toBe(500);
+      expect(result.error).toContain("idx_agent_runs_idempotency_unique");
+      expect(result.error).not.toBe("Failed to create run row");
+    } finally {
+      consoleSpy.mockRestore();
+    }
   });
 });

@@ -201,7 +201,7 @@ export async function reserveCredits(
     if (!user) {
       return { ok: false, runId: null, reservationId: null, status: 404, error: "User not found", reservedCredits: 0 };
     }
-    const { data: runRow } = await supabaseAdmin
+    const { data: runRow, error: runError } = await supabaseAdmin
       .from("agent_runs")
       .insert({
         user_id: user.id,
@@ -225,6 +225,29 @@ export async function reserveCredits(
       })
       .select("id")
       .single();
+    if (runError) {
+      // Mirror the paid path's duplicate handling: a 23505 on the
+      // idempotency unique index means a run row already exists for this
+      // request (a retry/resend of the same message) — return that row as
+      // an idempotent success instead of failing the retry.
+      if (runError.code === "23505") {
+        const { data: existingRun } = await supabaseAdmin
+          .from("agent_runs")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("idempotency_key", ctx.idempotencyKey)
+          .maybeSingle();
+        if (existingRun) {
+          return { ok: true, runId: existingRun.id, reservationId: null, reservedCredits: 0 };
+        }
+      }
+      // Surface the real database error, exactly as the paid path does —
+      // never collapse it into a generic string (ACC-04: this branch
+      // previously discarded the error, so an insert failure on the
+      // owner's exempt account presented as a purchase-credits refusal).
+      console.error(`[agent-billing] exempt run-row insert FAILED — aborting run. Error: ${runError.message}`);
+      return { ok: false, runId: null, reservationId: null, status: 500, error: runError.message, reservedCredits: 0 };
+    }
     if (!runRow) {
       return { ok: false, runId: null, reservationId: null, status: 500, error: "Failed to create run row", reservedCredits: 0 };
     }
