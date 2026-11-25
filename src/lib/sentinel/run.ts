@@ -13,15 +13,19 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { alertLog } from "@/lib/alerts";
+import { litt } from "@/lib/litt";
 import { _clearAiHealthCache } from "@/lib/system-health";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { acquireLeaderLease } from "./leader";
 import { defaultProbes, type ProbeFn } from "./probes";
+import { proposeRepairCandidate } from "./repairs";
 import { evaluateTransition, initialServiceState, SENTINEL_SERVICE_IDS, SERVICE_LABELS } from "./state";
 import {
   findOpenIncidentId,
   loadRecentIncidents,
   loadServiceStates,
   openIncident,
+  recordHeartbeat,
   resolveIncident,
   saveServiceState,
 } from "./store";
@@ -40,6 +44,26 @@ const memoryStates = new Map<SentinelServiceId, ServiceState>();
 let lastIncidents: SentinelIncident[] = [];
 let lastPassAt: string | null = null;
 let passInFlight = false;
+let passCounter = 0;
+
+/**
+ * Probe cadence: external/paid probes (AI providers, Stripe, terminal)
+ * run every SLOW_PROBE_EVERY passes; cheap internal probes (database)
+ * run every pass. Keeps Sentinel's external footprint at a handful of
+ * tiny requests per hour regardless of replica count (leader lease
+ * ensures only one replica probes at all).
+ */
+const SLOW_SERVICES = new Set<SentinelServiceId>([
+  "ai-gemini",
+  "ai-openrouter",
+  "terminal-server",
+  "stripe",
+]);
+
+function slowProbeEvery(): number {
+  const raw = Number(process.env.SENTINEL_SLOW_PROBE_EVERY);
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 5;
+}
 
 /** Bounded remediation chosen per transition event. */
 export function planRemediation(
@@ -68,6 +92,32 @@ function applyRemediation(actions: SentinelRemediation[]): void {
   }
 }
 
+/**
+ * Owner alert fan-out: logs + LiTT notification channels (email via
+ * Resend → ADMIN_EMAIL, Discord webhook, generic webhook, push).
+ * Fire-and-forget; litt.notify persists to agent_system_notifications
+ * and dispatches per configured channels. Never throws.
+ */
+function notifyOwner(
+  key: string,
+  meta: Record<string, unknown>,
+  priority: "high" | "critical",
+): void {
+  void alertLog(key, meta);
+  try {
+    void litt.notify({
+      type: "system_alert",
+      priority,
+      title: `Sentinel: ${SERVICE_LABELS[(meta.service as SentinelServiceId)] ?? String(meta.service ?? key)}`,
+      body: `${String(meta.summary ?? "service transition")} — ${String(meta.detail ?? "")}`.slice(0, 1500),
+      data: meta,
+      channels: ["email", "discord", "webhook"],
+    });
+  } catch {
+    // Notification fan-out is best-effort; alertLog already fired.
+  }
+}
+
 async function handleEvent(
   client: SupabaseClient | null,
   serviceId: SentinelServiceId,
@@ -85,11 +135,9 @@ async function handleEvent(
     latencyMs: state.lastLatencyMs,
     remediation: actions,
   };
-
   if (event.type === "opened") {
     // Reuse an existing open incident if one is already recorded —
-    // multi-replica deployments can race here; duplicates are resolved
-    // together on recovery, so this is cosmetic at worst.
+    // leader election makes races rare; duplicates resolve together.
     const existing = state.openIncidentId ?? (await findOpenIncidentId(client, serviceId));
     const id =
       existing ??
@@ -100,12 +148,41 @@ async function handleEvent(
         detail: probe.detail,
         remediation: actions,
       }));
-    void alertLog(`sentinel.incident.opened.${serviceId}`, { ...meta, summary: event.summary });
+    notifyOwner(
+      `sentinel.incident.opened.${serviceId}`,
+      { ...meta, summary: event.summary },
+      event.severity === "critical" ? "critical" : "high",
+    );
+
+    // Critical incidents become proposed repair candidates — deduped,
+    // cooldown-guarded, budget-capped. Never auto-executed.
+    if (event.severity === "critical") {
+      void proposeRepairCandidate(client, {
+        incidentId: id ?? existing ?? null,
+        serviceId,
+        severity: event.severity,
+        summary: event.summary,
+        detail: probe.detail,
+        diagnostics: { latencyMs: probe.latencyMs, probedAt: state.lastCheckedAt },
+      });
+    }
     return { ...state, openIncidentId: id ?? existing };
   }
 
   if (event.type === "escalated") {
-    void alertLog(`sentinel.incident.escalated.${serviceId}`, { ...meta, summary: event.summary });
+    notifyOwner(`sentinel.incident.escalated.${serviceId}`, { ...meta, summary: event.summary }, "critical");
+    // Escalation to down on an already-open critical incident: refresh
+    // the repair candidate link if one wasn't proposed at open time.
+    if (state.openIncidentId) {
+      void proposeRepairCandidate(client, {
+        incidentId: state.openIncidentId,
+        serviceId,
+        severity: "critical",
+        summary: event.summary,
+        detail: probe.detail,
+        diagnostics: { latencyMs: probe.latencyMs, probedAt: state.lastCheckedAt },
+      });
+    }
     return state;
   }
 
@@ -113,7 +190,7 @@ async function handleEvent(
   if (state.openIncidentId) {
     await resolveIncident(client, state.openIncidentId);
   }
-  void alertLog(`sentinel.incident.recovered.${serviceId}`, { ...meta, summary: event.summary });
+  notifyOwner(`sentinel.incident.recovered.${serviceId}`, { ...meta, summary: event.summary }, "high");
   return { ...state, openIncidentId: null };
 }
 
@@ -154,7 +231,23 @@ async function runSentinelPassInner(
 ): Promise<SentinelPassResult> {
   const db = client === undefined ? getSupabaseAdmin() : client;
   const now = new Date().toISOString();
+
+  // Leader election: on multi-replica deployments only the lease
+  // holder runs the pass. "unmanaged" (no table / no DB / single
+  // process) runs anyway — availability over perfect dedup.
+  const lease = await acquireLeaderLease(db);
+  if (lease.kind === "held-by-other") {
+    const states = SENTINEL_SERVICE_IDS.map(
+      (id) => memoryStates.get(id) ?? initialServiceState(id),
+    );
+    return { passAt: now, states, events: [], persisted: !!db };
+  }
+
   const probeMap = probes ?? defaultProbes(db);
+  passCounter += 1;
+  // Injected probe maps (tests, manual runs) always probe every
+  // service — cadence only applies to the production default map.
+  const runSlow = probes !== undefined || passCounter % slowProbeEvery() === 0;
 
   // Merge persisted states under in-memory ones: DB wins for fields
   // memory hasn't seen (fresh process), memory wins for live counters.
@@ -164,6 +257,18 @@ async function runSentinelPassInner(
 
   await Promise.all(
     SENTINEL_SERVICE_IDS.map(async (serviceId) => {
+      const prev =
+        memoryStates.get(serviceId) ??
+        persisted.get(serviceId) ??
+        initialServiceState(serviceId);
+
+      // Slow probes (external/paid) run on cadence only; on off-passes
+      // the previous state carries forward untouched.
+      if (SLOW_SERVICES.has(serviceId) && !runSlow && prev.lastCheckedAt) {
+        nextStates.push(prev);
+        return;
+      }
+
       let probe: ProbeResult;
       try {
         probe = await probeMap[serviceId]();
@@ -175,10 +280,6 @@ async function runSentinelPassInner(
         };
       }
 
-      const prev =
-        memoryStates.get(serviceId) ??
-        persisted.get(serviceId) ??
-        initialServiceState(serviceId);
       const transition = evaluateTransition(serviceId, prev, probe, now);
 
       let state = transition.state;
@@ -195,6 +296,7 @@ async function runSentinelPassInner(
 
   if (db) {
     lastIncidents = await loadRecentIncidents(db, 20);
+    await recordHeartbeat(db, lease.kind === "acquired" ? lease.holder : null, now);
   }
   lastPassAt = now;
 
@@ -207,6 +309,7 @@ export function _resetSentinelForTests(): void {
   lastIncidents = [];
   lastPassAt = null;
   passInFlight = false;
+  passCounter = 0;
 }
 
 function overallFrom(states: ServiceState[]): SentinelSnapshot["overall"] {

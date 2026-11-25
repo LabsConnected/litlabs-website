@@ -8,6 +8,16 @@
 
 export { runSentinelPass, getSentinelSnapshot, planRemediation } from "./run";
 export { evaluateTransition, mapAiProviderProbe, SENTINEL_SERVICE_IDS } from "./state";
+export {
+  proposeRepairCandidate,
+  transitionRepairCandidate,
+  loadRepairCandidates,
+  repairSignature,
+  sanitizeDiagnosticText,
+  REPAIR_COOLDOWN_MS,
+} from "./repairs";
+export type { RepairCandidate, RepairCandidateState } from "./repairs";
+export { acquireLeaderLease, sentinelHolderId } from "./leader";
 export type {
   ProbeResult,
   SentinelEvent,

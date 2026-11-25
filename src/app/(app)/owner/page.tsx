@@ -210,6 +210,18 @@ interface SentinelIncident {
   resolvedAt: string | null;
 }
 
+interface RepairCandidate {
+  id: string;
+  serviceId: string;
+  state: "proposed" | "approved" | "running" | "pr_open" | "resolved" | "rejected" | "cancelled" | "failed";
+  severity: "warning" | "critical";
+  summary: string;
+  attemptCount: number;
+  maxAttempts: number;
+  prUrl: string | null;
+  createdAt: string;
+}
+
 interface SentinelSnapshot {
   generatedAt: string;
   overall: "healthy" | "degraded" | "critical" | "unknown";
@@ -217,6 +229,8 @@ interface SentinelSnapshot {
   openIncidents: SentinelIncident[];
   recentIncidents: SentinelIncident[];
   lastPassAt: string | null;
+  repairCandidates?: RepairCandidate[];
+  heartbeat?: { lastPassAt: string | null; holder: string | null } | null;
 }
 
 type SentinelState =
@@ -269,6 +283,21 @@ function SentinelStatusCard() {
   useEffect(() => {
     check();
   }, [check]);
+
+  const transitionRepair = useCallback(
+    async (id: string, action: "approve" | "cancel" | "reject") => {
+      try {
+        await fetch(`/api/owner/sentinel/repairs/${id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        });
+      } finally {
+        void check();
+      }
+    },
+    [check],
+  );
 
   const data = state.status === "ok" ? state.data : null;
   const overallColor = data
@@ -342,6 +371,52 @@ function SentinelStatusCard() {
               </div>
             ))}
           </div>
+
+          {(data.repairCandidates?.length ?? 0) > 0 && (
+            <div className="mt-4 space-y-2">
+              <div className="text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: T.textMuted }}>
+                Repair candidates
+              </div>
+              {data.repairCandidates!.map((rc) => (
+                <div
+                  key={rc.id}
+                  className="rounded-2xl border p-3 text-xs"
+                  style={{ borderColor: T.borderColor + "18", color: T.textColor }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold">{rc.summary}</span>
+                    <span className="font-bold" style={{ color: rc.state === "resolved" ? "#22c55e" : rc.state === "failed" || rc.state === "rejected" ? "#ef4444" : "#f59e0b" }}>
+                      {rc.state}
+                    </span>
+                  </div>
+                  <div className="mt-1" style={{ color: T.textMuted }}>
+                    {rc.serviceId} · attempt {rc.attemptCount}/{rc.maxAttempts} · {new Date(rc.createdAt).toLocaleString()}
+                    {rc.prUrl ? ` · PR: ${rc.prUrl}` : ""}
+                  </div>
+                  {(rc.state === "proposed" || rc.state === "approved") && (
+                    <div className="mt-2 flex gap-2">
+                      {rc.state === "proposed" && (
+                        <button
+                          onClick={() => transitionRepair(rc.id, "approve")}
+                          className="rounded-lg border px-2 py-1 text-[10px] font-bold"
+                          style={{ borderColor: "#22c55e44", color: "#22c55e" }}
+                        >
+                          Approve
+                        </button>
+                      )}
+                      <button
+                        onClick={() => transitionRepair(rc.id, "cancel")}
+                        className="rounded-lg border px-2 py-1 text-[10px] font-bold"
+                        style={{ borderColor: "#ef444444", color: "#ef4444" }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
 
           {data.openIncidents.length > 0 && (
             <div className="mt-4 space-y-2">

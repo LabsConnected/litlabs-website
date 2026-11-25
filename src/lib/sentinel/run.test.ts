@@ -7,6 +7,9 @@ vi.mock("@/lib/alerts", () => ({
 vi.mock("@/lib/system-health", () => ({
   _clearAiHealthCache: vi.fn(),
 }));
+vi.mock("@/lib/litt", () => ({
+  litt: { notify: vi.fn().mockResolvedValue(true) },
+}));
 vi.mock("@/lib/sentinel/store", () => ({
   loadServiceStates: vi.fn().mockResolvedValue(new Map()),
   loadRecentIncidents: vi.fn().mockResolvedValue([]),
@@ -14,6 +17,8 @@ vi.mock("@/lib/sentinel/store", () => ({
   findOpenIncidentId: vi.fn().mockResolvedValue(null),
   openIncident: vi.fn().mockResolvedValue("inc-1"),
   resolveIncident: vi.fn().mockResolvedValue(undefined),
+  recordHeartbeat: vi.fn().mockResolvedValue(undefined),
+  readHeartbeat: vi.fn().mockResolvedValue(null),
 }));
 
 import { alertLog } from "@/lib/alerts";

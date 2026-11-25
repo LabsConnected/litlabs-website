@@ -1,0 +1,32 @@
+name: Cron — Sentinel Heartbeat
+
+# External monitor for Sentinel itself: if the in-process probe loop
+# dies (crash, deploy wedge, missed leader lease), this check detects
+# the stale heartbeat and fails the workflow — GitHub notifies on
+# scheduled-workflow failure.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Sentinel heartbeat
+        env:
+          SITE_URL: ${{ vars.SENTINEL_SITE_URL || vars.DIGEST_URL || 'https://www.litlabs.net' }}
+        run: |
+          RESPONSE=$(curl -s --max-time 20 "${SITE_URL}/api/health/sentinel")
+          echo "Response: $RESPONSE"
+          STATUS=$(echo "$RESPONSE" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{console.log(JSON.parse(d).status)}catch{console.log('parse-error')}})")
+          echo "Sentinel status: $STATUS"
+          if [ "$STATUS" = "stale" ]; then
+            echo "::error::Sentinel heartbeat is stale — probe loop may be dead"
+            exit 1
+          fi
+          # "ok" and "unknown" (pre-migration) pass; "parse-error" fails.
+          if [ "$STATUS" = "parse-error" ]; then
+            echo "::error::Could not parse /api/health/sentinel response"
+            exit 1
+          fi

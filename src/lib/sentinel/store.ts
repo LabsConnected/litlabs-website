@@ -174,6 +174,41 @@ export async function resolveIncident(
   }
 }
 
+/** Record a completed leader pass — the external heartbeat signal. */
+export async function recordHeartbeat(
+  client: SupabaseClient | null,
+  holder: string | null,
+  passAt: string,
+): Promise<void> {
+  if (!client) return;
+  try {
+    await client.from("sentinel_heartbeat").upsert(
+      { id: "heartbeat", last_pass_at: passAt, holder, updated_at: passAt },
+      { onConflict: "id" },
+    );
+  } catch {
+    // Non-fatal.
+  }
+}
+
+export async function readHeartbeat(
+  client: SupabaseClient | null,
+): Promise<{ lastPassAt: string | null; holder: string | null } | null> {
+  if (!client) return null;
+  try {
+    const { data, error } = await client
+      .from("sentinel_heartbeat")
+      .select("last_pass_at, holder")
+      .eq("id", "heartbeat")
+      .maybeSingle();
+    if (error || !data) return null;
+    const row = data as { last_pass_at: string | null; holder: string | null };
+    return { lastPassAt: row.last_pass_at, holder: row.holder };
+  } catch {
+    return null;
+  }
+}
+
 /** Recent incidents for the owner API (open first, then latest). */
 export async function loadRecentIncidents(
   client: SupabaseClient | null,

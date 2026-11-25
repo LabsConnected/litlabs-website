@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { isOwnerClerkId } from "@/lib/owner-identity";
 import { getSentinelSnapshot } from "@/lib/sentinel";
+import { loadRepairCandidates } from "@/lib/sentinel/repairs";
+import { readHeartbeat } from "@/lib/sentinel/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,8 +29,13 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const snapshot = await getSentinelSnapshot(getSupabaseAdmin());
-    return NextResponse.json(snapshot);
+    const db = getSupabaseAdmin();
+    const [snapshot, repairCandidates, heartbeat] = await Promise.all([
+      getSentinelSnapshot(db),
+      loadRepairCandidates(db, 20),
+      readHeartbeat(db),
+    ]);
+    return NextResponse.json({ ...snapshot, repairCandidates, heartbeat });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Sentinel snapshot failed";
     return NextResponse.json({ error: message }, { status: 500 });
