@@ -335,7 +335,7 @@ vi.mock("../stores/useExecutionStore", () => {
   // it never runs, which is why the stub could be missing until a test
   // served a real task. "idle" is the real function's answer for a tab
   // with no live execution snapshot.
-  return { useExecutionStore, deriveWorktabBadge: () => "idle" as const };
+  return { useExecutionStore, deriveWorktabBadge: () => "idle" as const, approvalForConversation: (approval: { conversationId?: string } | null, conversationId?: string | null) => (approval && approval.conversationId && approval.conversationId !== conversationId ? null : approval) };
 });
 
 vi.mock("../stores/useConversationStore", () => ({

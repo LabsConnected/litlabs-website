@@ -163,4 +163,63 @@ describe("StudioDock", () => {
     // Desktop keeps the static strip.
     expect(tablist.className).toMatch(/sm:overflow-visible/);
   });
+
+  it("offers Files / Checks / Approvals as launcher entries — never dock tabs — when the parent wires the callbacks (rail consolidation)", () => {
+    const onOpenFiles = vi.fn();
+    const onOpenChecks = vi.fn();
+    const onOpenApprovals = vi.fn();
+    renderDock({ onOpenFiles, onOpenChecks, onOpenApprovals });
+    // No dock tabs and no dock panes for these surfaces: their home
+    // is the Code box, and the dock never mounts a copy.
+    for (const id of ["files", "checks", "approvals"]) {
+      expect(screen.queryByTestId(`dock-tab-${id}`)).toBeNull();
+      expect(screen.queryByTestId(`dock-content-${id}`)).toBeNull();
+    }
+    // The launcher entries fire the parent's open callbacks instead
+    // of selecting a tab.
+    fireEvent.click(screen.getByTestId("dock-open-files"));
+    expect(onOpenFiles).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId("dock-open-checks"));
+    expect(onOpenChecks).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId("dock-open-approvals"));
+    expect(onOpenApprovals).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders no launcher entries when the parent passes no open callbacks", () => {
+    renderDock();
+    for (const id of ["files", "checks", "approvals"]) {
+      expect(screen.queryByTestId(`dock-open-${id}`)).toBeNull();
+    }
+  });
+
+  it("launcher entries fill the 44px dock strip height (touch-target floor)", () => {
+    renderDock({
+      onOpenFiles: vi.fn(),
+      onOpenChecks: vi.fn(),
+      onOpenApprovals: vi.fn(),
+    });
+    for (const id of ["files", "checks", "approvals"]) {
+      const btn = screen.getByTestId(`dock-open-${id}`);
+      // Full-height buttons inside the strip row, whose height is the
+      // 44px COLLAPSED_HEIGHT — so a launcher's hit area is ≥44px tall
+      // wherever the strip renders (the ≥44px touch-target rule).
+      expect(btn.className).toMatch(/h-full/);
+      const stripRow = btn.closest("[role='tablist']")?.parentElement;
+      expect(stripRow?.style.height).toBe("44px");
+    }
+  });
+
+  it("browser launcher mode: clicking Browser fires onBrowserLaunch and renders no browser pane", () => {
+    const onBrowserLaunch = vi.fn();
+    const { props } = renderDock({ onBrowserLaunch, browserActive: true });
+    expect(screen.queryByTestId("dock-content-browser")).toBeNull();
+    expect(screen.queryByTestId("browser-slot")).toBeNull();
+    // The launcher tab reflects the side dock's open state.
+    expect(
+      screen.getByTestId("dock-tab-browser").getAttribute("aria-selected"),
+    ).toBe("true");
+    fireEvent.click(screen.getByTestId("dock-tab-browser"));
+    expect(onBrowserLaunch).toHaveBeenCalledTimes(1);
+    expect(props.onTabChange).not.toHaveBeenCalledWith("browser");
+  });
 });

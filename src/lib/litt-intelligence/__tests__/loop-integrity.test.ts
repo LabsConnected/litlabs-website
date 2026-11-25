@@ -121,9 +121,13 @@ describe("loop-integrity: domain-failure normalization", () => {
     // Window widened 2026-09-30: the Tool Orchestrator (capability planning,
     // reference-match, tool health, observability) added legitimate setup
     // code between resumeAgentLoopV2Inner and the handler-error site.
+    // Widened again 2026-11-25: the reply-content guard's approval-resume
+    // finalize wiring added legitimate code in the same span (site now sits
+    // 12,650 chars out). The invariant is unchanged: the resume execute site
+    // must normalize handler failures via handlerFailureError.
     expect(
       AGENT_LOOP_SRC.match(
-        /resumeAgentLoopV2[\s\S]{0,12000}const handlerError = handlerFailureError\(execResult\.result\)/,
+        /resumeAgentLoopV2[\s\S]{0,20000}const handlerError = handlerFailureError\(execResult\.result\)/,
       ),
     ).not.toBeNull();
   });

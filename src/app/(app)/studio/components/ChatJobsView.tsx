@@ -30,7 +30,7 @@
 
 import { CheckCircle2, LoaderCircle, ShieldCheck, XCircle } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
-import { useExecutionStore } from "../stores/useExecutionStore";
+import { approvalForConversation, useExecutionStore } from "../stores/useExecutionStore";
 import { ActionRunStatusPanel } from "./ActionRunStatusPanel";
 import StudioHealthPanel from "./StudioHealthPanel";
 import RunChangesPanel from "./RunChangesPanel";
@@ -58,7 +58,13 @@ export default function ChatJobsView({
   const { tokens } = useTheme();
   const isRunning = useExecutionStore((s) => s.isRunning);
   const events = useExecutionStore((s) => s.events);
-  const pendingApproval = useExecutionStore((s) => s.pendingApproval);
+  // ACC-06a item 4: the "approval waiting" notice is scoped to this
+  // view's conversation — another project's gate is not announced
+  // in this session.
+  const pendingApproval = approvalForConversation(
+    useExecutionStore((s) => s.pendingApproval),
+    conversationId,
+  );
 
   // The plan as a green-check list: the run's own recorded steps (the
   // same execution events the transcript's live progress reads) — real

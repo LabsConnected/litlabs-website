@@ -699,10 +699,22 @@ export function workLogLabel(verdict: CompletionVerdict): string | null {
       return null;
     case "not_started":
       return "No action taken — work not started";
-    case "failed":
+    case "failed": {
+      // ACC-06a item 3: the label must reflect what actually
+      // happened. A verdict whose own evidence proves files changed
+      // never claims "no work completed" — it names the change, with
+      // the transcript's changed-files wording. Otherwise the step
+      // count comes from the verdict itself: the old label hardcoded
+      // 0, erasing steps that succeeded before the failure.
+      if (verdict.workspaceChange === "changed") {
+        const files = verdict.changedFiles ?? [];
+        const detail = files.length === 1 ? files[0] : files.length > 1 ? `${files.length} files` : "changes";
+        return `Failed after changing ${detail} — review or roll back`;
+      }
       return verdict.totalSteps > 0
-        ? `0 of ${verdict.totalSteps} steps complete — failed`
+        ? `${verdict.completedSteps} of ${verdict.totalSteps} steps complete — failed`
         : "Failed — no work completed";
+    }
     case "partial": {
       const missing = verdict.missing[0] ? ` · ${verdict.missing[0]} missing` : "";
       return `${verdict.completedSteps} of ${verdict.totalSteps} steps complete${missing}`;

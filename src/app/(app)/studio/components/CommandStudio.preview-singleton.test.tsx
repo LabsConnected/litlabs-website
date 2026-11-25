@@ -350,7 +350,7 @@ vi.mock("../stores/useExecutionStore", () => {
     (selector: (s: Record<string, unknown>) => unknown) => selector(execState.state),
     { getState: () => execState.state },
   );
-  return { useExecutionStore };
+  return { useExecutionStore, approvalForConversation: (approval: { conversationId?: string } | null, conversationId?: string | null) => (approval && approval.conversationId && approval.conversationId !== conversationId ? null : approval) };
 });
 
 vi.mock("../stores/useConversationStore", () => ({
@@ -631,7 +631,7 @@ describe("CommandStudio — canvas-first 2-zone layout", () => {
     expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
     // Mockup port (2026-11-18): the LiTT panel is Chat-only in the
     // Regular layout — there is no Live pane in the panel anymore;
-    // the activity feed lives in the right rail's Activity tab.
+    // the activity feed lives in the Code box's Run section (Activity).
     expect(screen.queryByTestId("litt-live-panel")).toBeNull();
     expect(screen.queryByTestId("studio-completion")).toBeNull();
   });
@@ -684,7 +684,7 @@ describe("CommandStudio — approval gate convergence", () => {
     // (2026-11-18): the LiTT panel is Chat-only in the Regular layout, so
     // the chat surface (composer included) can no longer be hidden behind
     // a panel tab at all; the activity feed the user inspects lives in
-    // the right rail. The convergence contract under test is unchanged:
+    // the Code box's Run section. The convergence contract is unchanged:
     // the watcher fires, the store resolves, the transcript reloads.
     convState.selectedConversationId = "conv-1";
     execState.state.pendingApproval = {
@@ -702,9 +702,13 @@ describe("CommandStudio — approval gate convergence", () => {
 
     // The user inspects the Activity feed while the gate is pending (the
     // actionable card itself lives in Chat since the approve-in-chat fix).
-    await user.click(screen.getByTestId("studio-rail-tab-activity"));
+    // Rail consolidation (2026-11-25): the feed's Regular home is the
+    // Code box's Run section, Activity tab.
+    await user.click(screen.getByTestId("workspace-tab-code"));
+    await user.click(await screen.findByTestId("code-box-view-run"));
+    await user.click(screen.getByTestId("code-run-section-activity"));
     await settle();
-    expect(screen.getByTestId("studio-rail-pane-activity")).toHaveAttribute("data-active", "true");
+    expect(screen.getByTestId("code-run-pane-activity")).toHaveAttribute("data-active", "true");
     expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
 
     act(() => {
@@ -733,8 +737,10 @@ describe("CommandStudio — approval gate convergence", () => {
     const { user } = await renderCommandStudio();
     await settle();
 
-    // Watching the Activity feed (right rail) when the gate settles.
-    await user.click(screen.getByTestId("studio-rail-tab-activity"));
+    // Watching the Activity feed (Code box Run section) when the gate settles.
+    await user.click(screen.getByTestId("workspace-tab-code"));
+    await user.click(await screen.findByTestId("code-box-view-run"));
+    await user.click(screen.getByTestId("code-run-section-activity"));
     await settle();
 
     act(() => {
@@ -792,8 +798,11 @@ describe("CommandStudio — approval gate convergence", () => {
 
     // resolveApproval alone leaves the phase at "editing" — the run
     // would show as working forever. The terminal outcome must settle it.
+    // ACC-06a item 2: the settle also names the run's conversation so
+    // the terminal phase lands on the OWNING worktab, not just the
+    // active one.
     expect(execState.state.resolveApproval).toHaveBeenCalledWith("approved");
-    expect(execState.state.settleResumedRun).toHaveBeenCalledWith("completed");
+    expect(execState.state.settleResumedRun).toHaveBeenCalledWith("completed", "conv-1");
   });
 
   it("does NOT end the run when the approved outcome mounts a follow-up gate", async () => {
@@ -855,7 +864,8 @@ describe("CommandStudio — approval gate convergence", () => {
     await settle();
 
     expect(execState.state.resolveApproval).toHaveBeenCalledWith("rejected");
-    expect(execState.state.settleResumedRun).toHaveBeenCalledWith("rejected");
+    // ACC-06a item 2: rejection settles are conversation-attributed too.
+    expect(execState.state.settleResumedRun).toHaveBeenCalledWith("rejected", "conv-1");
   });
 
   it("does NOT report 'could not be resumed' when the gate already settled before the click", async () => {
@@ -876,11 +886,14 @@ describe("CommandStudio — approval gate convergence", () => {
     const { user } = await renderCommandStudio();
     await settle();
 
-    // Mockup port (2026-11-18): the activity feed — and its approval
-    // controls — live in the right rail's Activity tab in the Regular
-    // layout; the LiTT panel is Chat-only. Open the rail tab so the
-    // feed's own Approve control is the one under test.
-    await user.click(screen.getByTestId("studio-rail-tab-activity"));
+    // Rail consolidation (2026-11-25): the activity feed — and its
+    // approval controls — live in the Code box's Run section,
+    // Activity tab, in the Regular layout; the LiTT panel is
+    // Chat-only. Open the run section so the feed's own Approve
+    // control is the one under test.
+    await user.click(screen.getByTestId("workspace-tab-code"));
+    await user.click(await screen.findByTestId("code-box-view-run"));
+    await user.click(screen.getByTestId("code-run-section-activity"));
     await settle();
 
     // Gate settles between render and click (mock store doesn't re-render,
@@ -888,7 +901,7 @@ describe("CommandStudio — approval gate convergence", () => {
     execState.state.pendingApproval = null;
 
     await user.click(
-      within(screen.getByTestId("studio-rail-pane-activity")).getByRole("button", { name: /^approve$/i }),
+      within(screen.getByTestId("code-run-pane-activity")).getByRole("button", { name: /^approve$/i }),
     );
     await settle();
 
@@ -897,13 +910,19 @@ describe("CommandStudio — approval gate convergence", () => {
     expect(submitApprovalAndPoll).not.toHaveBeenCalled();
   });
 
-  it("posts the approval to the gate's OWN conversation, not the current selection", async () => {
+  it("does NOT render or action another conversation's gate in this session (ACC-06a item 4)", async () => {
     globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
-    // Production defect: the gate mounted in conv-1, the user then opened
-    // another conversation, and clicking Approve posted the pausedRunId to
-    // the newly selected conversation — the server 403'd with "Conversation
-    // mismatch" and the card dead-ended as unretryable. The POST must
-    // always target the conversation the gate was issued in.
+    // Superseded behavior: this scenario used to assert the gate
+    // stayed actionable after switching conversations, posting to
+    // the gate's own conversation to dodge the server's
+    // "Conversation mismatch" 403. Larry's ACC-06a item 4 ruling
+    // (Acceptance Run 1 on 8cd7728c — a bakery project's card
+    // appeared inside another project's session) supersedes it:
+    // approvals are scoped to the project + conversation that
+    // requested them and must never render or be actionable in
+    // another session. The gate stays pending for its OWN
+    // conversation, where the own-conversation POST behavior still
+    // applies (covered by the conv-1 tests in this file).
     convState.selectedConversationId = "conv-2";
     execState.state.pendingApproval = {
       toolId: "files.write",
@@ -917,21 +936,22 @@ describe("CommandStudio — approval gate convergence", () => {
     const { user } = await renderCommandStudio();
     await settle();
 
-    // Mockup port (2026-11-18): the activity feed — and its approval
-    // controls — live in the right rail's Activity tab in the Regular
-    // layout; the LiTT panel is Chat-only. Open the rail tab so the
-    // feed's own Approve control is the one under test.
-    await user.click(screen.getByTestId("studio-rail-tab-activity"));
-    await settle();
-    await user.click(
-      within(screen.getByTestId("studio-rail-pane-activity")).getByRole("button", { name: /^approve$/i }),
-    );
+    // Open the run section's Activity pane — the surface whose
+    // approval controls are under test.
+    await user.click(screen.getByTestId("workspace-tab-code"));
+    await user.click(await screen.findByTestId("code-box-view-run"));
+    await user.click(screen.getByTestId("code-run-section-activity"));
     await settle();
 
+    // No Approve control for conv-1's gate mounts in conv-2's
+    // session, and nothing is ever posted.
+    expect(
+      within(screen.getByTestId("code-run-pane-activity")).queryByRole("button", { name: /^approve$/i }),
+    ).toBeNull();
     const { submitApprovalAndPoll } = await import("../lib/approval-polling");
-    expect(submitApprovalAndPoll).toHaveBeenCalledWith(
-      expect.objectContaining({ conversationId: "conv-1", pausedRunId: "paused-1" }),
-    );
+    expect(submitApprovalAndPoll).not.toHaveBeenCalled();
+    // The gate itself is untouched — still pending for conv-1.
+    expect((execState.state.pendingApproval as { pausedRunId?: string } | null)?.pausedRunId).toBe("paused-1");
   });
 
   it("falls back to the selected conversation for gates mounted before binding existed", async () => {
@@ -951,13 +971,16 @@ describe("CommandStudio — approval gate convergence", () => {
     await settle();
 
     // Mockup port (2026-11-18): the activity feed — and its approval
-    // controls — live in the right rail's Activity tab in the Regular
-    // layout; the LiTT panel is Chat-only. Open the rail tab so the
+    // controls — live in the Code box's Run section, Activity tab,
+    // in the Regular layout; the LiTT panel is Chat-only. Open the
+    // run section so the
     // feed's own Approve control is the one under test.
-    await user.click(screen.getByTestId("studio-rail-tab-activity"));
+    await user.click(screen.getByTestId("workspace-tab-code"));
+    await user.click(await screen.findByTestId("code-box-view-run"));
+    await user.click(screen.getByTestId("code-run-section-activity"));
     await settle();
     await user.click(
-      within(screen.getByTestId("studio-rail-pane-activity")).getByRole("button", { name: /^approve$/i }),
+      within(screen.getByTestId("code-run-pane-activity")).getByRole("button", { name: /^approve$/i }),
     );
     await settle();
 
@@ -1004,13 +1027,16 @@ describe("CommandStudio — approval gate convergence", () => {
     await settle();
 
     // Mockup port (2026-11-18): the activity feed — and its approval
-    // controls — live in the right rail's Activity tab in the Regular
-    // layout; the LiTT panel is Chat-only. Open the rail tab so the
+    // controls — live in the Code box's Run section, Activity tab,
+    // in the Regular layout; the LiTT panel is Chat-only. Open the
+    // run section so the
     // feed's own Approve control is the one under test.
-    await user.click(screen.getByTestId("studio-rail-tab-activity"));
+    await user.click(screen.getByTestId("workspace-tab-code"));
+    await user.click(await screen.findByTestId("code-box-view-run"));
+    await user.click(screen.getByTestId("code-run-section-activity"));
     await settle();
     await user.click(
-      within(screen.getByTestId("studio-rail-pane-activity")).getByRole("button", { name: /^approve$/i }),
+      within(screen.getByTestId("code-run-pane-activity")).getByRole("button", { name: /^approve$/i }),
     );
     await settle();
 
@@ -1019,6 +1045,79 @@ describe("CommandStudio — approval gate convergence", () => {
     expect(convState.reportSendError).toHaveBeenCalledWith(
       expect.stringContaining("could not be resumed"),
     );
+  });
+});
+
+describe("CommandStudio — rail consolidation topology (2026-11-25)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sendMock.mockResolvedValue({ accepted: true });
+    convState.selectedConversationId = null;
+    execState.state.pendingApproval = null;
+    execState.state.approvalPhase = "idle";
+    execState.state.isRunning = false;
+    sessionStorage.clear();
+    localStorage.setItem("litt:studio:layout-mode", "classic");
+  });
+
+  it("no right rail; Files and the run section live in the Code box; exactly one LiTTLiveActivity", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    const { user } = await renderCommandStudio();
+    await settle();
+
+    // The permanent right rail is gone from Regular.
+    expect(screen.queryByTestId("studio-right-rail")).toBeNull();
+    expect(screen.queryByTestId("studio-rail-tab-files")).toBeNull();
+
+    // The bottom dock offers launcher entries for Files / Checks /
+    // Approvals — never dock tabs, never a second copy of any surface
+    // (their one home is the Code box: Files view + Run section).
+    await user.click(screen.getByTestId("studio-dock-toggle"));
+    expect(screen.queryByTestId("dock-tab-files")).toBeNull();
+    expect(screen.queryByTestId("dock-tab-checks")).toBeNull();
+    expect(screen.queryByTestId("dock-tab-approvals")).toBeNull();
+    expect(screen.getByTestId("dock-open-files")).toBeTruthy();
+    expect(screen.getByTestId("dock-open-checks")).toBeTruthy();
+    expect(screen.getByTestId("dock-open-approvals")).toBeTruthy();
+
+    // The Files launcher lands in the Code box's Files view — Files'
+    // one home.
+    await user.click(screen.getByTestId("dock-open-files"));
+    const filesView = await screen.findByTestId("code-box-files-view");
+    expect(filesView).toHaveAttribute("data-active", "true");
+
+    // The run section holds Plan · Checks · Approvals · Changes ·
+    // Activity · Deploy, and the Activity feed is a singleton.
+    await user.click(screen.getByTestId("code-box-view-run"));
+    expect(screen.getByTestId("code-box-run-view")).toHaveAttribute("data-active", "true");
+    expect(screen.getAllByTestId("litt-live-activity").length).toBe(1);
+    await user.click(screen.getByTestId("code-run-section-activity"));
+    expect(screen.getByTestId("code-run-pane-activity")).toHaveAttribute("data-active", "true");
+    expect(screen.getAllByTestId("litt-live-activity").length).toBe(1);
+    for (const section of ["plan", "checks", "approvals", "changes", "deploy"]) {
+      expect(screen.getByTestId(`code-run-section-${section}`)).toBeTruthy();
+    }
+  });
+
+  it("the Browser is reachable in Regular: header entry opens the side dock, closable", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    const { user } = await renderCommandStudio();
+    await settle();
+
+    expect(screen.queryByTestId("studio-browser-side-dock")).toBeNull();
+    // Header overflow menu → Browser (the obvious entry point).
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    await user.click(await screen.findByTestId("header-open-browser"));
+    const dock = await screen.findByTestId("studio-browser-side-dock");
+    expect(dock).toHaveAttribute("data-side", "right");
+    // Flip to the left side and back via the dock's own control.
+    await user.click(screen.getByTestId("browser-dock-flip"));
+    expect(screen.getByTestId("studio-browser-side-dock")).toHaveAttribute("data-side", "left");
+    await user.click(screen.getByTestId("browser-dock-flip"));
+    expect(screen.getByTestId("studio-browser-side-dock")).toHaveAttribute("data-side", "right");
+    // Closable — on-demand, never a permanent rail.
+    await user.click(screen.getByTestId("browser-dock-close"));
+    await waitFor(() => expect(screen.queryByTestId("studio-browser-side-dock")).toBeNull());
   });
 });
 

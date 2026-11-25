@@ -213,7 +213,17 @@ interface ExecutionStore {
 
   // ── Actions ──
   startRun: () => void;
-  endRun: (reason?: string) => void;
+  /**
+   * End the current run. `conversationId` (ACC-06a item 2) names the
+   * conversation the ending run belongs to: the terminal phase is
+   * mirrored to that conversation's OWNING worktab as well as the
+   * active tab. Without it, a run that ended while another tab was
+   * active kept its working phase on the owning tab forever — the
+   * worktab showed "Run in progress" long after the work completed
+   * (production proof on 8cd7728c, 2026-11-25). Callers that do not
+   * know the conversation keep the legacy active-tab-only behavior.
+   */
+  endRun: (reason?: string, conversationId?: string) => void;
   addEvent: (event: Omit<ExecutionEvent, "id" | "seq" | "ts">) => void;
   setPhase: (phase: ExecutionPhase, taskId?: string) => void;
   setPendingApproval: (approval: PendingApproval | null) => void;
@@ -230,7 +240,7 @@ interface ExecutionStore {
    * is still alive. Unlike endRun this does not rewrite in-flight tool
    * events: the resumed run's events already settled server-side.
    */
-  settleResumedRun: (outcome: "completed" | "rejected") => void;
+  settleResumedRun: (outcome: "completed" | "rejected", conversationId?: string) => void;
   /** Approval POST submitted — card stays mounted, shows submitting state. */
   beginApprovalSubmit: () => void;
   /** Approval POST accepted (202) — card shows the run executing. */
@@ -334,6 +344,31 @@ function mirrorTaskPhase(
 
 function nextId(): string {
   return `exec_${Date.now()}_${idCounter++}`;
+}
+
+/**
+ * ACC-06a item 4 — the approval scope derivation every surface
+ * uses. The store holds ONE global pendingApproval, but a gate is
+ * bound to the conversation (and therefore the project) whose run
+ * requested it: it may render — and be actioned — ONLY in that
+ * conversation's session. A gate bound to a different conversation
+ * derives to null here, synchronously during render, so it can
+ * never flash into another project's session while an effect-based
+ * reset is still pending (Acceptance Run 1 on 8cd7728c). The gate
+ * itself stays in the store, untouched, so returning to its own
+ * conversation finds it still pending. Legacy gates with no
+ * conversation binding predate scoping and keep their historical
+ * visibility.
+ */
+export function approvalForConversation(
+  approval: PendingApproval | null,
+  conversationId: string | null | undefined,
+): PendingApproval | null {
+  if (!approval) return null;
+  if (!approval.conversationId) return approval;
+  return conversationId != null && approval.conversationId === conversationId
+    ? approval
+    : null;
 }
 
 /**
@@ -521,7 +556,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     mirrorTaskPhase(get, set);
   },
 
-  endRun: (reason?: string) => {
+  endRun: (reason?: string, conversationId?: string) => {
     const state = get();
     // Mark any in-flight tool_start events as completed
     const updatedEvents = state.events.map((e) =>
@@ -545,6 +580,13 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       approvalExpired: paused ? state.approvalExpired : false,
     });
     mirrorTaskPhase(get, set);
+    // ACC-06a item 2: the terminal phase must also land on the
+    // worktab that OWNS the ending run's conversation — the active
+    // tab is not necessarily the run's tab.
+    if (conversationId) {
+      const owningTaskId = get().taskConversationIndex[conversationId];
+      if (owningTaskId) mirrorTaskPhase(get, set, owningTaskId);
+    }
   },
 
   addEvent: (event) => {
@@ -613,6 +655,14 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       set({ approvalPhase: "idle", approvalError: null, approvalRetryable: true, approvalExpired: false });
       return;
     }
+    // ACC-06a item 4: mirror the gate's phase onto the worktab that
+    // OWNS the gate's conversation too — a gate set while another
+    // tab is active (background stream, watcher, rehydration) must
+    // still mark its own tab needs-approval.
+    if (approval.conversationId) {
+      const owningTaskId = get().taskConversationIndex[approval.conversationId];
+      if (owningTaskId) mirrorTaskPhase(get, set, owningTaskId);
+    }
     const gateId = approval.pausedRunId;
     // Same gate already pending — its entry is already logged. A repeated
     // pending_approval signal for one gate must not duplicate the entry.
@@ -669,12 +719,21 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
     mirrorTaskPhase(get, set);
   },
 
-  settleResumedRun: (outcome) => {
+  settleResumedRun: (outcome, conversationId) => {
     set({
       phase: outcome === "completed" ? "done" : "cancelled",
       isRunning: false,
     });
     mirrorTaskPhase(get, set);
+    // ACC-06a item 2: approval-resumed runs never stream SSE, so
+    // this settle is the ONLY terminal phase the owning worktab ever
+    // receives — attribute it to the run's own conversation, not
+    // just whichever tab is active (production "Run in progress"
+    // wart on 8cd7728c).
+    if (conversationId) {
+      const owningTaskId = get().taskConversationIndex[conversationId];
+      if (owningTaskId) mirrorTaskPhase(get, set, owningTaskId);
+    }
   },
 
   beginApprovalSubmit: () => {

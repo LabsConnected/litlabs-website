@@ -24,9 +24,17 @@ export async function getVoiceConnection(forceRefresh = false): Promise<VoiceCon
   }
   if (!forceRefresh && pending) return pending;
 
+  // Bound the token fetch: on a stalled mobile network an unbounded fetch
+  // left the composer sitting on "Connecting…" forever with no error and
+  // no way out. Ten seconds matches the scale of the session-ready wait
+  // downstream; an abort surfaces as the connect-timeout message.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10_000);
+
   pending = fetch("/api/voice/token", {
     credentials: "include",
     cache: "no-store",
+    signal: controller.signal,
   })
     .then(async (response) => {
       const body = (await response.json().catch(() => ({}))) as Partial<
@@ -45,7 +53,14 @@ export async function getVoiceConnection(forceRefresh = false): Promise<VoiceCon
       };
       return cached;
     })
+    .catch((err: unknown) => {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw new Error("Voice connection timed out. Please try again.");
+      }
+      throw err;
+    })
     .finally(() => {
+      clearTimeout(timeoutId);
       pending = null;
     });
 

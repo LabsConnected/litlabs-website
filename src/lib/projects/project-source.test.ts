@@ -54,6 +54,7 @@ function project(overrides: Partial<CanonicalProject> = {}): CanonicalProject {
     testCommand: null,
     installCommand: null,
     workspaceType: "website",
+    topicPackId: null,
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),
     ...overrides,

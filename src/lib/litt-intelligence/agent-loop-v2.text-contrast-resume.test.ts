@@ -170,6 +170,43 @@ describe("resumeAgentLoopV2 — invisible-text verification (ACC-02 Defect A, re
     expect(result.finalText).toContain("glassmorphic dark theme");
   });
 
+  // ACC-06a item 1, resumed path: an approved write whose colors are
+  // runtime-decided (Tailwind browser compiler) passes with a note —
+  // never failedHonestly — and the written bytes are untouched.
+  const UNVERIFIABLE = [
+    "<!DOCTYPE html>",
+    "<html>",
+    "<head><title>Sunny Crust Bakery</title>",
+    '  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>',
+    "</head>",
+    "<body>",
+    '  <section class="bg-zinc-900">',
+    '    <p class="text-zinc-100">Fresh from the oven every morning.</p>',
+    "  </section>",
+    "</body>",
+    "</html>",
+  ].join("\n");
+
+  it("passes with a note — never failed — when the approved write's colors are runtime-decided", async () => {
+    const { transport, files } = memoryTransport();
+    vi.mocked(callLLMWithTools).mockResolvedValueOnce(doneReply);
+
+    const result = await resumeAgentLoopV2(makeResume(UNVERIFIABLE), transport);
+
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.contrastNote).toBeTruthy();
+    expect(result.contrastNote).toContain("couldn't statically verify");
+    expect(result.finalText).toContain("couldn't statically verify the text contrast");
+    // Byte-identical read-back: the verifier fix never alters content.
+    expect(files.get("index.html")).toBe(UNVERIFIABLE);
+    // No repair pressure for a page the checker cannot judge.
+    expect(
+      firstCallMessages().some(
+        (m) => typeof m.content === "string" && m.content.includes("Verification could not judge"),
+      ),
+    ).toBe(false);
+  });
+
   it("offers no feedback when the approved write was readable the first time", async () => {
     const { transport } = memoryTransport();
     vi.mocked(callLLMWithTools).mockResolvedValueOnce(doneReply);

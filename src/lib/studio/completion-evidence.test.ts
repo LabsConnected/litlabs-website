@@ -218,6 +218,38 @@ describe("workLogLabel", () => {
     });
     expect(workLogLabel(verdict)).toBe("1 of 1 steps complete · deployment missing");
   });
+
+  // ACC-06a item 3: the failed label hardcoded "0 of N steps
+  // complete", erasing steps that actually succeeded before the
+  // failure — the count must come from the verdict itself.
+  it("counts the steps that actually completed before a failure", () => {
+    const verdict = evaluateCompletion(requirementForMode("build"), {
+      toolCalls: [
+        { toolId: "read_file", success: true, mutating: false },
+        { toolId: "edit_file", success: false, mutating: true },
+      ],
+    });
+    expect(verdict.state).toBe("failed");
+    expect(verdict.completedSteps).toBe(1);
+    expect(workLogLabel(verdict)).toBe("1 of 2 steps complete — failed");
+  });
+
+  // ACC-06a item 3: a failed verdict whose own evidence proves files
+  // changed must never claim "no work completed" — the label names
+  // the change, mirroring the transcript's changed-files wording.
+  it("never claims no work completed when the verdict proves files changed", () => {
+    const verdict = {
+      state: "failed",
+      completedSteps: 0,
+      totalSteps: 0,
+      missing: ["verified workspace file mutation"],
+      workspaceChange: "changed",
+      changedFiles: ["index.html"],
+    } as unknown as Parameters<typeof workLogLabel>[0];
+    const label = workLogLabel(verdict);
+    expect(label).toBe("Failed after changing index.html — review or roll back");
+    expect(label).not.toContain("no work completed");
+  });
 });
 
 /* ── Deployment evidence extraction ─────────────────────────────── */

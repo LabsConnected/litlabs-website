@@ -32,8 +32,11 @@ export interface FailureReasonRun {
   createdAt: string;
 }
 
-/** Same bound item 1 established for the live reason: one line, ≤200 chars. */
-export const MAX_FAILURE_REASON_CHARS = 200;
+/**
+ * ACC-06a item 3: reasons are no longer length-bounded. The former
+ * 200-char bound (MAX_FAILURE_REASON_CHARS) cut reasons
+ * mid-sentence; the constant is removed with the bound.
+ */
 
 /**
  * A run is created moments before its assistant message placeholder,
@@ -45,15 +48,14 @@ export const MAX_FAILURE_REASON_CHARS = 200;
 const RUN_MESSAGE_TOLERANCE_MS = 60_000;
 
 export function boundFailureReason(raw: string): string {
-  const oneLine = raw.replace(/\s+/g, " ").trim();
-  return oneLine.length > MAX_FAILURE_REASON_CHARS
-    ? oneLine.slice(0, MAX_FAILURE_REASON_CHARS)
-    : oneLine;
+  // One line, complete: whitespace is collapsed, the text is never
+  // cut (ACC-06a item 3 — a truncated reason misstates what happened).
+  return raw.replace(/\s+/g, " ").trim();
 }
 
 /**
  * Pair each failed assistant message with the failed run that produced
- * it. Returns messageId → bounded failure reason. Messages with no
+ * it. Returns messageId → complete failure reason. Messages with no
  * matching run (or runs with no recorded reason) are simply absent
  * from the map.
  *

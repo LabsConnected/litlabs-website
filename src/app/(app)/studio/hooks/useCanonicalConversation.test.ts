@@ -821,6 +821,45 @@ describe("regenerate() Retry honesty", () => {
     expect(regenerateBodies).toHaveLength(0);
   });
 
+  it("Retry works after a timeout failure: the timed-out turn re-sends and the retry settles (ACC-06a item 2)", async () => {
+    // The run failed because its preview-inspection session could
+    // not start/finish in time (ACC-06a item 2's capture timeout
+    // settles the inspection as unavailable with this reason). The
+    // failed turn carries that reason; Retry must re-run the
+    // original request through the agent pipeline — not the
+    // chat-only regenerate endpoint — and the retried send must
+    // settle, not strand the conversation in a busy state.
+    const TIMEOUT_REASON =
+      "Verification unavailable: The preview-inspection session did not start or finish within the time limit (browser capture timed out).";
+    canonicalMessages = [
+      makeMsg({ id: "u1", role: "user", content: PROMPT }),
+      makeMsg({ id: "asst-1", content: "We hit a snag — try again.", status: "failed", parentMessageId: "u1", failureReason: TIMEOUT_REASON }),
+    ];
+    const result = await renderAndSeed([
+      makeChatMsg({ id: "u1", role: "user", content: PROMPT, status: "completed" }),
+      makeChatMsg({
+        id: "asst-1",
+        content: "We hit a snag — try again.",
+        status: "failed",
+        parentMessageId: "u1",
+        execution: { mode: "unknown", toolCalls: [], failureReason: TIMEOUT_REASON },
+      }),
+    ]);
+
+    await act(async () => { await result.current.regenerate("asst-1"); });
+
+    // The original turn re-ran through the agent pipeline.
+    expect(postMessageBodies).toHaveLength(1);
+    expect(postMessageBodies[0].message).toBe(PROMPT);
+    expect(regenerateBodies).toHaveLength(0);
+    // And it settled: not busy, no send error, the new assistant
+    // turn is in the transcript as completed.
+    expect(result.current.busy).toBe(false);
+    expect(result.current.sendError).toBeNull();
+    const msgs = useConversationStore.getState().messagesByConversationId["conv-1"] ?? [];
+    expect(msgs.some((m) => m.id === "a-new" && m.status === "completed")).toBe(true);
+  });
+
   it("surfaces feedback instead of dying silently when Retry is pressed while a run is still in flight (ACC-03 item 5)", async () => {
     const result = await renderAndSeed([
       makeChatMsg({ id: "u1", role: "user", content: PROMPT, status: "completed" }),

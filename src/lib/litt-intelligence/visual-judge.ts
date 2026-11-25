@@ -348,7 +348,20 @@ export interface JudgeOptions {
   /** Injectable for tests. Defaults to the real LLM call. */
   judgeCall?: (prompt: string, imageDataUrl: string) => Promise<{ text: string; model: string }>;
   maxTextChars?: number;
+  /**
+   * ACC-06a item 2: bound on the screenshot capture. The default
+   * capturer starts a headless browser session; if that session
+   * cannot start and the call stalls, an unbounded await hangs the
+   * whole run in progress forever. On timeout the inspection
+   * settles honestly as unavailable (see runVisualJudge).
+   */
+  captureTimeoutMs?: number;
 }
+
+/** Default capture bound: page navigation inside the capturer
+ *  already allows 30s, so session start + navigation get 60s total
+ *  before the inspection gives up honestly instead of hanging. */
+export const DEFAULT_CAPTURE_TIMEOUT_MS = 60_000;
 
 export interface JudgeOutcome {
   status: "scored" | "unavailable";
@@ -398,9 +411,24 @@ function buildJudgePrompt(context: JudgeContext): string {
 export async function runVisualJudge(options: JudgeOptions): Promise<JudgeOutcome> {
   let screenshot = options.screenshot;
   let captureEvidence: ScreenshotEvidence | null = null;
+  let captureTimedOut = false;
   if (!screenshot && options.capture) {
+    const captureTimeoutMs = options.captureTimeoutMs ?? DEFAULT_CAPTURE_TIMEOUT_MS;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const captured = await options.capture(options.context.previewUrl);
+      // ACC-06a item 2: race the capture against a hard bound. A
+      // preview-inspection session that cannot start must settle
+      // this inspection as unavailable — never leave the run in
+      // progress forever (2026-11-24 acceptance evidence).
+      const captured = await Promise.race([
+        options.capture(options.context.previewUrl),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            captureTimedOut = true;
+            reject(new Error(`Screenshot capture timed out after ${captureTimeoutMs}ms`));
+          }, captureTimeoutMs);
+        }),
+      ]);
       if (typeof captured === "string") screenshot = captured;
       else if (captured) {
         captureEvidence = captured;
@@ -408,6 +436,8 @@ export async function runVisualJudge(options: JudgeOptions): Promise<JudgeOutcom
       }
     } catch {
       screenshot = null;
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
@@ -415,9 +445,11 @@ export async function runVisualJudge(options: JudgeOptions): Promise<JudgeOutcom
     return {
       status: "unavailable",
       browserInspected: false,
-      reason:
-        "Verification unavailable: No screenshot could be captured of the preview (browser capture unavailable or failed). " +
-        "Visual inspection did not pass and no success was declared.",
+      reason: captureTimedOut
+        ? "Verification unavailable: The preview-inspection session did not start or finish within the time limit " +
+          "(browser capture timed out). Visual inspection did not pass and no success was declared."
+        : "Verification unavailable: No screenshot could be captured of the preview (browser capture unavailable or failed). " +
+          "Visual inspection did not pass and no success was declared.",
     };
   }
 

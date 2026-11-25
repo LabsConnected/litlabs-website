@@ -11,8 +11,13 @@ import {
   buildMicAudioConstraints,
   clampGain,
   clampVolume,
+  clearStoredDeviceId,
   readStoredDeviceId,
 } from "@/features/voice/lib/mixer-settings";
+import {
+  classifyVoiceFailure,
+  voiceFailureError,
+} from "@/features/voice/lib/voice-failure";
 
 const TARGET_SAMPLE_RATE = 24000;
 const CHUNK_SIZE = 2048;
@@ -483,9 +488,32 @@ export function useInworldSession(
     try {
       // Mic & Mixer: merge the canonical voice gate constraints with the
       // persisted input-device selection (null/absent = OS default).
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: buildMicAudioConstraints({ deviceId: readStoredDeviceId() }),
-      });
+      // The stored deviceId is applied as an { exact } constraint, so a
+      // vanished device (unplugged headset, dropped Bluetooth) makes
+      // every tap throw OverconstrainedError — recover by forgetting the
+      // stale selection and retrying once with the default device. The
+      // retry is inlined (not a helper promise) so failure timing for
+      // every other error class is unchanged.
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: buildMicAudioConstraints({ deviceId: readStoredDeviceId() }),
+        });
+      } catch (gumErr) {
+        const gumName = gumErr instanceof DOMException ? gumErr.name : "";
+        if (
+          readStoredDeviceId() &&
+          (gumName === "OverconstrainedError" ||
+            gumName === "ConstraintNotSatisfiedError")
+        ) {
+          clearStoredDeviceId();
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: buildMicAudioConstraints({ deviceId: null }),
+          });
+        } else {
+          throw gumErr;
+        }
+      }
       micStreamRef.current = stream;
 
       const audioContext = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
@@ -655,14 +683,12 @@ export function useInworldSession(
       };
       animationFrameRef.current = requestAnimationFrame(checkLevel);
     } catch (err) {
-      const errorName = err instanceof DOMException ? err.name : "";
-      const message = err instanceof Error ? err.message : "Failed to access microphone";
-      let userMessage = `Microphone error: ${message}`;
-      if (errorName === "NotAllowedError" || errorName === "PermissionDeniedError" || /permission|notallowed/i.test(message)) {
-        userMessage = "Microphone permission denied. Please allow microphone access in your browser settings.";
-      } else if (errorName === "NotFoundError" || errorName === "DevicesNotFoundError" || /notfound|no microphone/i.test(message)) {
-        userMessage = "No microphone found. Please connect a microphone and try again.";
-      }
+      // Every capture failure class gets its plain-language message from
+      // the shared classifier (permission recovery steps, mic busy,
+      // stale device, audio-context retry) — never a raw DOMException
+      // string like "Microphone error: NotReadableError".
+      const failure = classifyVoiceFailure(err);
+      const userMessage = failure.message;
       setErrorState(userMessage);
       setError(userMessage);
       setState("error");
@@ -691,7 +717,7 @@ export function useInworldSession(
       setIsListening(false);
       isListeningRef.current = false;
       useVoiceStore.getState().setAudioLevel(0);
-      throw new Error(userMessage);
+      throw voiceFailureError(failure.kind, userMessage);
     }
   }, [ensureAudioContextRunning, setState, setError]);
 
@@ -1144,8 +1170,9 @@ export function useInworldSession(
             // (VoiceSessionContext) display the thrown error's message, so
             // throwing the raw transport error here would show "Voice
             // connection closed before session was ready (code 4001)."
-            // instead of the diagnosis above.
-            throw new Error(message);
+            // instead of the diagnosis above. Tag it as an auth failure
+            // so the classifier keeps the long diagnosis text verbatim.
+            throw voiceFailureError("auth", message);
           }
         }
 

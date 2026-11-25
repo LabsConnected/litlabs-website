@@ -90,6 +90,21 @@ export function readStoredDeviceId(): string | null {
   }
 }
 
+/**
+ * Forget the persisted input-device id. Used when the stored device has
+ * vanished (unplugged headset, dropped Bluetooth): the { exact: deviceId }
+ * constraint would otherwise make every future getUserMedia call fail
+ * with OverconstrainedError until the user found the mixer setting.
+ */
+export function clearStoredDeviceId(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(DEVICE_ID_STORAGE_KEY);
+  } catch {
+    return;
+  }
+}
+
 // ── Persistence ─────────────────────────────────────────────────────────────
 
 /** Load mixer prefs from localStorage, falling back to defaults on any error. */

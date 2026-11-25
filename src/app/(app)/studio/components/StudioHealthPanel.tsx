@@ -350,7 +350,9 @@ export default function StudioHealthPanel({
     source: "No result returned",
     timestamp: null,
     output: null,
-    error: null,
+    // ACC-06a item 2: same not-run reason the checks route records —
+    // a missing result is still recorded with WHY, never reasonless.
+    error: "Not run yet — project checks run on demand from the Checks panel; a completed build does not run them automatically.",
   }), [payload.checks]);
 
   // Kimi wiring item 2: publish the checks summary as this panel's own
@@ -518,7 +520,7 @@ export default function StudioHealthPanel({
               )}
             </div>
             <div className="mt-1 text-[9px] leading-4" style={{ color: "var(--text-muted)" }}>{check.source} · {formatTime(check.timestamp)}</div>
-            {check.error && <div className="mt-1 text-[9px] leading-4" style={{ color: check.status === "unavailable" ? "#e3b341" : "#fca5a5" }}>{check.error}</div>}
+            {check.error && <div className="mt-1 text-[9px] leading-4" style={{ color: check.status === "unavailable" ? "#e3b341" : check.status === "not_run" ? "var(--text-muted)" : "#fca5a5" }}>{check.error}</div>}
             {projectId && <CheckFileRefChip check={check} projectId={projectId} />}
             {check.suggestedFix && <div className="mt-1 text-[9px] leading-4" style={{ color: "#a78bfa" }}>Fix: {check.suggestedFix}</div>}
             {check.output && (

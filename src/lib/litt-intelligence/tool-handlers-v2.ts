@@ -1317,8 +1317,31 @@ export const handleSiteCompose: ToolHandler = async (inputs, transport) => {
   delete (planInput as Record<string, unknown>).path;
   delete (planInput as Record<string, unknown>).projectId;
   delete (planInput as Record<string, unknown>).allowOverwrite;
+  delete (planInput as Record<string, unknown>).pack;
 
-  const validation = validateSitePlan(planInput);
+  // Topic packs (§4.3.3): the handler validates against the pack too,
+  // so no path bypasses it — the explicit tool argument wins; when it
+  // is absent, the pack stored on the project record applies (§4.2.4).
+  // Resolution is best-effort and only active behind the packs flag
+  // (LITT_TOPIC_PACKS=1 — the single rollout switch, §4.6.1).
+  let pack: import("./topic-packs/types").TopicPack | undefined;
+  const packsEnabled = process.env.LITT_TOPIC_PACKS === "1";
+  if (packsEnabled) {
+    const { getPack } = await import("./topic-packs");
+    pack = getPack(typeof inputs.pack === "string" ? inputs.pack : undefined);
+    if (!pack) {
+      try {
+        const { getProject } = await import("@/lib/projects/project-repository");
+        const project = await getProject(transport.projectId, transport.userId);
+        pack = getPack(project?.topicPackId);
+      } catch {
+        // Best-effort: a missing project record never blocks a compose.
+        pack = undefined;
+      }
+    }
+  }
+
+  const validation = validateSitePlan(planInput, pack ? { pack } : undefined);
   if (!validation.ok || !validation.plan) {
     return {
       success: false,
@@ -1342,12 +1365,14 @@ export const handleSiteCompose: ToolHandler = async (inputs, transport) => {
     sections: validation.plan.sections.length,
     theme: validation.plan.theme ?? "light",
     composed: true,
+    ...(pack ? { pack: pack.id, packLabel: pack.label } : {}),
     hint:
       `index.html was assembled from the plan and written. ` +
       `data-litt-image slots become real photos automatically — do NOT call image tools. ` +
       `To change a whole section later (footer text, hero heading, section content), ` +
       `call site.patch with the section name and new fields — no verbatim matching needed. ` +
-      `For precise small edits use files.read + apply_patch on the generated file.`,
+      `For precise small edits use files.read + apply_patch on the generated file.` +
+      (pack ? ` This site was built with the ${pack.label} pack (${pack.id}) — name the pack in your summary to the user.` : ""),
   };
 };
 

@@ -25,6 +25,7 @@ import {
   CircleAlert,
   CircleCheck,
   CircleDot,
+  Globe,
   PanelBottom,
   MoreHorizontal,
   Plus,
@@ -55,7 +56,11 @@ const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
 export type StudioTopBarMode = "plan" | "act" | "auto";
 // No "files": the dock's Files tab is retired (Larry, 2026-11-13) —
 // files open in the LiTT panel's top-row Files tab, not the dock.
-export type StudioTopBarDockTab = "activity" | "terminal" | "inspector" | "media";
+// "browser" joins the set with the rail consolidation (2026-11-25):
+// the Browser had NO header entry point in Regular at all, which is
+// why it could not be found there. CommandStudio routes it to the
+// board Browser panel (shell) or the Browser side dock (Regular).
+export type StudioTopBarDockTab = "activity" | "terminal" | "inspector" | "media" | "browser";
 
 const MODE_META: { id: StudioTopBarMode; label: string; desc: string; color: string; tint: string; border: string }[] = [
   { id: "plan", label: "PLAN", desc: "Inspect and explain; do not change files", color: "#52684f", tint: "#e4f2d6", border: "#6e9a57" },
@@ -535,7 +540,7 @@ export default function CommandStudioHeader({
           color: dockOpen ? "var(--color-accent)" : "var(--text-secondary)",
           backgroundColor: dockOpen ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent",
         }}
-        title="Toggle the dock — activity, terminal, inspector, media"
+        title="Toggle the dock — activity, terminal, inspector, media, browser"
         aria-label={dockOpen ? "Close dock" : "Open dock"}
         aria-pressed={dockOpen}
         data-testid="studio-dock-toggle"
@@ -1014,6 +1019,19 @@ function OverflowMenu({
         >
           <Terminal size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
           Terminal
+        </button>
+      )}
+      {onOpenDockTabAction && (
+        <button
+          type="button"
+          onClick={() => { onClose(); onOpenDockTabAction("browser"); }}
+          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] font-bold transition-colors hover:bg-black/5"
+          style={{ color: "var(--text-primary)" }}
+          aria-label="Browser"
+          data-testid="header-open-browser"
+        >
+          <Globe size={13} className="pointer-events-none" style={{ color: "var(--text-secondary)" }} />
+          Browser
         </button>
       )}
       {onExecutionModeChange && (

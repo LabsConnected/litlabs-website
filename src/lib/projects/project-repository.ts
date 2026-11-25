@@ -1255,6 +1255,42 @@ export async function updateProjectRuntime(
 }
 
 /**
+ * Store the topic pack selected for a project's site (topic-packs
+ * §4.2.4). Best-effort by design: callers (the agent loop) treat a
+ * null return as "not stored" and carry on — a pre-migration database
+ * without the topic_pack_id column lands here and simply reports
+ * null, exactly like the other optional-column updates.
+ */
+export async function updateProjectTopicPack(
+  projectId: string,
+  userId: string,
+  topicPackId: string | null,
+): Promise<CanonicalProject | null> {
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .update({
+      topic_pack_id: topicPackId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", projectId)
+    .eq("user_id", userId)
+    .eq("is_system", false)
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    studioLog("updateProjectTopicPack:update_error", {
+      projectId,
+      userId,
+      errorClass: error.message,
+    });
+    return null;
+  }
+  if (!data) return null;
+  return rowToCanonical(data as StudioProjectRow);
+}
+
+/**
  * Delete a canonical project. Only deletes from studio_projects.
  * Does NOT delete from the legacy projects table.
  * Returns false if the project doesn't exist or doesn't belong to the user.

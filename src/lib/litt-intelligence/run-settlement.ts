@@ -114,7 +114,13 @@ export function collectFailureContributors(
  * completed" even when the loop knew exactly what died (Acceptance
  * Run 1 on 8935b2a9 — a first build failed after its approval with no
  * detail anywhere). Contributors are already sanitized at their
- * sources; the result is still bounded to one short line here.
+ * sources; the result is normalized to one line here.
+ *
+ * ACC-06a item 3: the reason is NOT length-bounded. The old 200-char
+ * bound cut reasons mid-sentence (Acceptance Run 1 on 8cd7728c),
+ * which is its own dishonesty — a truncated reason misstates what
+ * happened. The full reason renders; whitespace collapse to a
+ * single line is the only transformation.
  */
 export function primaryFailureReason(
   result:
@@ -141,7 +147,7 @@ export function primaryFailureReason(
   if (!raw) return null;
   const oneLine = raw.replace(/\s+/g, " ").trim();
   if (!oneLine) return null;
-  return oneLine.length > 200 ? `${oneLine.slice(0, 197)}...` : oneLine;
+  return oneLine;
 }
 
 /** The run's requested work is done: a mutation landed and the gate passed. */

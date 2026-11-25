@@ -120,19 +120,19 @@ describe("failureReasonByMessageId", () => {
     expect(reasons.size).toBe(0);
   });
 
-  it("bounds the attached reason to one sanitized line of at most 200 chars", () => {
+  it("attaches the reason complete on one sanitized line — no truncation (ACC-06a item 3)", () => {
     const long = `files.write: ${"x".repeat(400)}\nsecond line`;
     const reasons = failureReasonByMessageId([failedMessage("a1", 2)], [failedRun("run-1", 1, long)]);
     const reason = reasons.get("a1");
     expect(reason).toBeDefined();
-    expect(reason!.length).toBeLessThanOrEqual(200);
+    expect(reason).toBe(`files.write: ${"x".repeat(400)} second line`);
     expect(reason).not.toContain("\n");
   });
 });
 
 describe("boundFailureReason", () => {
-  it("collapses whitespace and truncates to 200 chars", () => {
+  it("collapses whitespace to one line and keeps the reason complete", () => {
     expect(boundFailureReason("  a\n\n b\t c  ")).toBe("a b c");
-    expect(boundFailureReason("y".repeat(250))).toHaveLength(200);
+    expect(boundFailureReason("y".repeat(250))).toHaveLength(250);
   });
 });

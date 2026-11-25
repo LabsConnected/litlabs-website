@@ -268,8 +268,16 @@ describe("runAgentLoopV2 — unverifiable runtime colors (ACC-03)", () => {
     vi.mocked(callLLMWithTools).mockReset();
   });
 
-  it("feeds back the unverifiable page once, then settles failedHonestly when it is not repaired", async () => {
-    const { transport } = memoryTransport();
+  // ACC-06a item 1 (supersedes the ACC-03 settlement for this shape):
+  // Acceptance Run 1 on 8cd7728c marked a build FAILED even though
+  // the page was written and rendered correctly, because the
+  // verifier cannot judge colors the Tailwind compiler decides at
+  // runtime. Larry's rule: the verifier may only fail a build on
+  // contrast evidence it can statically decide; runtime-decided
+  // colors produce a pass-with-note, never a build failure — and no
+  // repair pressure to rewrite a page the checker cannot judge.
+  it("passes with a note — never failed — when colors are runtime-decided", async () => {
+    const { transport, files } = memoryTransport();
     vi.mocked(callLLMWithTools)
       .mockResolvedValueOnce(
         toolCallReply("tc-1", "files.write", { projectId: "p-test", path: "index.html", content: UNVERIFIABLE }),
@@ -278,6 +286,7 @@ describe("runAgentLoopV2 — unverifiable runtime colors (ACC-03)", () => {
 
     const result = await runAgentLoopV2(INSTRUCTION, transport, config);
 
+    // No repair feedback for a page the checker cannot judge.
     const secondCallMessages = vi.mocked(callLLMWithTools).mock.calls[1][1] as Array<{
       role: string;
       content: string;
@@ -286,13 +295,19 @@ describe("runAgentLoopV2 — unverifiable runtime colors (ACC-03)", () => {
       secondCallMessages.some(
         (m) =>
           m.role === "user" &&
-          m.content.includes("Verification could not judge") &&
-          m.content.includes("plain CSS"),
+          typeof m.content === "string" &&
+          m.content.includes("Verification could not judge"),
       ),
-    ).toBe(true);
-    expect(result.failedHonestly).toBeTruthy();
-    expect(result.failedHonestly).toContain("can't verify");
-    expect(result.finalText).toBe(result.failedHonestly);
+    ).toBe(false);
+    // The run PASSES, with the unverifiable scope stated as a note.
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.contrastNote).toBeTruthy();
+    expect(result.contrastNote).toContain("couldn't statically verify");
+    expect(result.finalText).toContain("Your bakery site is live.");
+    expect(result.finalText).toContain("couldn't statically verify the text contrast");
+    // The verifier fix must never alter written content: the file on
+    // disk is byte-identical to what the model wrote.
+    expect(files.get("index.html")).toBe(UNVERIFIABLE);
   });
 
   it("succeeds when the model repairs the page with plain-CSS colors", async () => {

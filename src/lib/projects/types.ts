@@ -74,6 +74,13 @@ export interface CanonicalProject {
   // Separate from framework — framework is for runtime technology (static, nextjs, vite, expo)
   workspaceType: string;
 
+  /**
+   * Topic pack id selected for this project's site (topic-packs
+   * registry id, e.g. "roofing"); null when no pack is attached.
+   * Later edits and regenerations reuse the stored pack (§4.2.4).
+   */
+  topicPackId: string | null;
+
   createdAt: string;
   updatedAt: string;
 }
@@ -116,6 +123,8 @@ export interface StudioProjectRow {
   workspace_type: string | null;
   /** Added by 20261018000000. Optional: a pre-migration DB omits it. */
   idempotency_key?: string | null;
+  /** Added by 20261125120000. Optional: a pre-migration DB omits it. */
+  topic_pack_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -181,6 +190,7 @@ export function rowToCanonical(row: StudioProjectRow): CanonicalProject {
     testCommand: row.test_command,
     installCommand: row.install_command,
     workspaceType: row.workspace_type ?? "website",
+    topicPackId: row.topic_pack_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -222,6 +232,7 @@ export function legacyRowToCanonical(row: LegacyProjectRow): CanonicalProject {
     testCommand: null,
     installCommand: null,
     workspaceType: "website",
+    topicPackId: null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

@@ -1480,8 +1480,10 @@ export function registerInternalTools(): void {
           type: "object",
           properties: {
             path: { type: "string", description: "Workspace-relative output path; defaults to index.html" },
+            pack: { type: "string", description: "Topic pack id for this site (e.g. \"roofing\") — set automatically when a pack was selected for the run; when set, the plan is validated against the pack's completeness rules" },
             title: { type: "string", description: "Site name" },
             description: { type: "string", description: "One-line site summary" },
+            seoTitle: { type: "string", description: "Full page <title> when it differs from the site name (SEO shape from the topic pack)" },
             theme: { type: "string", enum: ["light", "dark", "warm", "forest", "ocean", "mono"] },
             accentHue: { type: "number", description: "Accent color hue 0-360" },
             hero: {
@@ -1498,7 +1500,7 @@ export function registerInternalTools(): void {
             sections: {
               type: "array",
               description:
-                "Ordered page sections. kinds: features/services/cards/menu {heading,items:[{title,text,icon?}]}; gallery {heading,images:[keywords]}; testimonials {items:[{quote,author}]}; pricing {plans:[{name,price,features[]}]}; stats {items:[{value,label}]}; about {heading,text,image?}; cta {heading,button,href}; contact {items:[{label,value}]}; footer {text,links?}",
+                "Ordered page sections. kinds: features/services/cards {heading,items:[{title,text,icon?}]}; menu {heading,items:[{title,text,price?,group?}]} — priced items render as price rows; gallery {heading,images:[keywords]}; testimonials {items:[{quote,author}]}; pricing {plans:[{name,price,features[]}]}; stats {items:[{value,label}]}; about {heading,text,image?}; cta {heading,button,href}; contact {items:[{label,value}]}; process {heading,items:[{title,text}]} — numbered steps; faq {heading,items:[{question,answer}]}; form {heading,formKind:quote|contact|reservation|intake,fields:[{name,label,type:text|tel|email|select|textarea|date|time|number,options?,required?}],button} — a real form posting to the platform form backend; booking — same shape as form, for appointment requests; areas {heading,items:[{town}],text?,href?} — service-area towns + directions link; hours {heading,items:[{day,hours}]}; footer {text,links?}",
               // Deliberately shapeless: small local models mirror nested
               // JSON-Schema keywords ({"type":"object","properties":{…}})
               // into the plan instead of emitting data. The validator in
@@ -1519,12 +1521,19 @@ export function registerInternalTools(): void {
         idempotent: false,
         readOnly: false,
         permissionLevel: 'workspace-write',
-        // Local-lane only: registered disabled unless the small-lane env is
-        // set at process start (same predicate as isLocalSmallLane, inlined
-        // to avoid a tool-registry -> agent-loop import cycle), so
-        // production tool catalogs and prompts are byte-identical — the
-        // tool never exists where cloud models run.
-        enabled: !!(process.env.LITT_LOCAL_SMALL === "1" || /coder|fast|:(2|4|8)k$/i.test(process.env.OLLAMA_MODEL ?? "")),
+        // Local-lane only by default: registered disabled unless the
+        // small-lane env is set at process start (same predicate as
+        // isLocalSmallLane, inlined to avoid a tool-registry ->
+        // agent-loop import cycle), so production tool catalogs and
+        // prompts are byte-identical — the tool never exists where
+        // cloud models run. Topic packs (§4.6.1) additionally enable
+        // it in production behind LITT_TOPIC_PACKS=1, so the rollout
+        // can be staged and rolled back without a code revert.
+        enabled: !!(
+          process.env.LITT_LOCAL_SMALL === "1" ||
+          process.env.LITT_TOPIC_PACKS === "1" ||
+          /coder|fast|:(2|4|8)k$/i.test(process.env.OLLAMA_MODEL ?? "")
+        ),
       },
       handler: lazyHandlers["site.compose"],
     },
@@ -1551,6 +1560,7 @@ export function registerInternalTools(): void {
             plans: { type: "array", items: { type: "object" } },
             images: { type: "array", items: { type: "string" } },
             links: { type: "array", items: { type: "object" } },
+            fields: { type: "array", items: { type: "object" }, description: "Replacement field list for a form/booking section rebuild" },
           },
           required: ["section"],
         },
