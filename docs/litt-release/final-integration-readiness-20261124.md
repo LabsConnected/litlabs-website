@@ -2,12 +2,12 @@
 
 Production remains on HOLD. This is preparation, not authorization to merge, deploy, mutate hosted databases, or run provider-backed tests.
 
-## Current integration boundary
+## Integration snapshot at preparation
 
 | Item | Verified SHA/status | Release role |
 | --- | --- | --- |
-| main | 18d0f2ba882c1fdabf4fe3cc33f7a76e16454737 | Contains PRs #1108 and #1109; supersedes 9f8501ee81d0a585570d662bd53da72541c40b5c |
-| PR #1111 | 27226ff53f525c85588a228109b1c169dd3b4c30; draft; 8/8 checks passed | Staging scope, deployment and acceptance gates |
+| main | 8935b2a91964d8efc9a8c3d0839cd53077e7b6c9 | Contains PRs #1108, #1109, and #1110; supersedes 9f8501ee81d0a585570d662bd53da72541c40b5c |
+| PR #1111 | Draft; prior head f2678a156ed616b446db038d87ae579337c1d6a5 passed 8/8; verify the latest head and CI at merge | Staging scope, deployment and acceptance gates |
 | PR #1112 | 381bb868d5a891bd36a63e8db4193f8e1c41a580; draft; 10/10 checks passed | Recovered billing migrations and canonical settle_bits |
 | PR #726 | 64bc42b3783a018f2f10b444dcc80fc777487246; draft, non-main base | Historical source of 16 migrations only; do not merge the application diff |
 | PR #1067 | 6806a2ffcba29352090b75bf2545bca615dd4cce; open, non-main base | Devin webhook work requires claim-token RPC integration on current main |
