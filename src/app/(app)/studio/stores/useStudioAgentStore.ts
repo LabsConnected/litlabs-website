@@ -66,6 +66,14 @@ export interface MessageExecution {
    * wrote bytes must not be labelled "no work completed".
    */
   workspaceChange?: WorkspaceChangeEvidence | null;
+  /**
+   * ACC-05 item 1: the failed run's primary failure reason (sanitized,
+   * one line), recorded by the agent loop and carried through the
+   * messages route so the work log can report WHY the run died —
+   * not only that it did. Absent/null on non-failed runs and on runs
+   * that recorded no failure detail.
+   */
+  failureReason?: string | null;
 }
 
 export interface AgentMeta {

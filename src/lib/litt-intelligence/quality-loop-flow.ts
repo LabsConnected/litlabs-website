@@ -1422,6 +1422,15 @@ const TASK_SCOPE_PROMPT: Record<QualityTaskScope, string[]> = {
     "build/test checks for a media-only request, and do not emit QUALITY markers for",
     "stages that do not apply.",
   ],
+  deploy: [
+    "",
+    "Task scope for this run: DEPLOY (determined by the system from the request).",
+    "This is a deploy-only request: publish the project's CURRENT files exactly as",
+    "they are with the deploy tool. Do NOT write, edit, or rebuild any file — a",
+    "deploy transports what exists. Only the understand and plan stages apply;",
+    "the deployment result (with its live public URL) is the evidence. Do not emit",
+    "QUALITY markers for stages that do not apply.",
+  ],
 };
 
 /** The quality-loop prompt section tailored to the run's task scope. */

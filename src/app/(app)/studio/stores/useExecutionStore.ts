@@ -218,6 +218,19 @@ interface ExecutionStore {
   setPhase: (phase: ExecutionPhase, taskId?: string) => void;
   setPendingApproval: (approval: PendingApproval | null) => void;
   resolveApproval: (decision: "approved" | "rejected") => void;
+  /**
+   * Terminate the execution phase for an approval-resumed run whose
+   * outcome is final (PR #1114 Greptile thread 1). resolveApproval only
+   * records the decision and moves the phase to "editing" — correct
+   * while the resumed run executes, but nothing on the approval path
+   * ever ended the phase afterwards, so finished runs kept showing as
+   * working. Called by applyApprovalOutcome ONLY when the outcome is
+   * terminal: an approved run that completed with no follow-up gate,
+   * or a rejection. A mounted follow-up gate must NOT settle — the run
+   * is still alive. Unlike endRun this does not rewrite in-flight tool
+   * events: the resumed run's events already settled server-side.
+   */
+  settleResumedRun: (outcome: "completed" | "rejected") => void;
   /** Approval POST submitted — card stays mounted, shows submitting state. */
   beginApprovalSubmit: () => void;
   /** Approval POST accepted (202) — card shows the run executing. */
@@ -652,6 +665,14 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
       approvalError: null,
       approvalRetryable: true,
       approvalExpired: false,
+    });
+    mirrorTaskPhase(get, set);
+  },
+
+  settleResumedRun: (outcome) => {
+    set({
+      phase: outcome === "completed" ? "done" : "cancelled",
+      isRunning: false,
     });
     mirrorTaskPhase(get, set);
   },

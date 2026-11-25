@@ -3588,9 +3588,11 @@ async function runAgentLoopV2Inner(
       : gatedFinalText);
   // Round 14: generated images render inline in the settled text —
   // appended here, by the loop, only on a completed settlement.
+  // ACC-05 item 3: the same guarantee for a completed deployment's
+  // stable public URL.
   const finalTextWithChatImages =
     settlement.outcome === "completed"
-      ? appendChatImagesToFinalText(settledFinalText, chatImages)
+      ? ensureStableUrlInFinalText(appendChatImagesToFinalText(settledFinalText, chatImages), completedDeployment)
       : settledFinalText;
   // Round 14: "finished" is emitted BEFORE the after-run checkpoint,
   // and the checkpoint is time-bounded — settlement must never wait
@@ -3685,6 +3687,10 @@ function describeSilentOutcome(
 interface CompletedDeployment {
   deploymentId: string | null;
   publicUrl: string;
+  /** The project's stable public URL when the deploy produced one —
+   *  carried separately from publicUrl (which already prefers it) so
+   *  the settled reply can GUARANTEE its presence (ACC-05 item 3). */
+  stablePublicUrl: string | null;
 }
 
 /** Extract a completed deployment from a successful project.deploy result. */
@@ -3716,7 +3722,28 @@ function readDeploymentOutcome(toolId: string, result: unknown): CompletedDeploy
   return {
     deploymentId: typeof payload.deployment?.deploymentId === "string" ? payload.deployment.deploymentId : null,
     publicUrl: url,
+    stablePublicUrl: stableUrl,
   };
+}
+
+/**
+ * ACC-05 item 3 — guarantee the stable public URL in a completed
+ * deploy run's settled text. Acceptance Run 1 on 8935b2a9: the
+ * transport-only chat deploy succeeded and the tool result carried
+ * the stable URL, but the model's closing reply cited only the
+ * per-deployment /sites/<uuid>/ URL — whether the user ever saw the
+ * address that keeps working depended on the model's narration. Like
+ * appendChatImagesToFinalText, the loop appends the stable URL itself
+ * when the settled text lacks it; a reply that already cites it is
+ * left untouched.
+ */
+export function ensureStableUrlInFinalText(
+  finalText: string,
+  deployment: CompletedDeployment | null,
+): string {
+  const stable = deployment?.stablePublicUrl;
+  if (!stable || finalText.includes(stable)) return finalText;
+  return `${finalText}\n\nStable public URL: ${stable}`;
 }
 
 /** A generated image that should render inline in the chat outcome. */
@@ -5584,9 +5611,11 @@ async function resumeAgentLoopV2Inner(
       : gatedFinalText);
   // Round 14: generated images render inline in the settled text —
   // appended here, by the loop, only on a completed settlement.
+  // ACC-05 item 3: the same guarantee for a completed deployment's
+  // stable public URL.
   const finalTextWithChatImages =
     settlement.outcome === "completed"
-      ? appendChatImagesToFinalText(settledFinalText, chatImages)
+      ? ensureStableUrlInFinalText(appendChatImagesToFinalText(settledFinalText, chatImages), completedDeployment)
       : settledFinalText;
   // Round 14: "finished" before the bounded after-run checkpoint —
   // identical to the initial loop's tail (see there).

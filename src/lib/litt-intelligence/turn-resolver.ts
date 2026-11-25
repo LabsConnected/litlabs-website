@@ -11,6 +11,8 @@
 
 import "server-only";
 
+import { isDeployOnlyInstruction } from "./deploy-intent";
+
 export interface ConversationTurn {
   role: "user" | "assistant";
   content: string;
@@ -108,6 +110,19 @@ function resolveMessage(
   history: ConversationTurn[],
 ): TurnResolverResult {
   const trimmed = raw.trim();
+
+  // ACC-05: a deploy-only instruction is self-contained — "this
+  // project" names the project already in context, not a reference
+  // for the resolver to expand. Expanding it appended the previous
+  // (often EDIT) request as the message's "topic", and the agent
+  // loop's deploy-only classifier then judged the topic's verbs
+  // instead of the user's ask: the product's own Deploy… draft
+  // reached the loop as a mixed edit+deploy and rewrote files before
+  // publishing (Acceptance Run 1 on 8935b2a9). Deploy asks pass
+  // through exactly as written.
+  if (isDeployOnlyInstruction(trimmed)) {
+    return { resolved: trimmed, raw: trimmed, confidence: 1.0 };
+  }
 
   // Not ambiguous — return as-is with high confidence
   if (!isAmbiguous(trimmed)) {

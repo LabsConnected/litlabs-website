@@ -72,6 +72,29 @@ describe("Turn Resolver", () => {
     expect(result.confidence).toBeGreaterThan(0.7);
   });
 
+  it("ACC-05: never expands a deploy-only instruction — 'this project' is the project in context, not a reference to resolve", () => {
+    // Acceptance Run 1 on 8935b2a9: "Deploy this project to a live
+    // public URL" (the Code Deploy… draft) contains "this" and is under
+    // 80 chars, so the generic rule appended the previous EDIT request
+    // as its "topic" — and the agent loop's deploy-only classifier then
+    // saw the edit's verbs and let the deploy run rewrite files. A
+    // deploy instruction is self-contained: it goes to the loop
+    // exactly as the user (or the product's own button) wrote it.
+    const history: ConversationTurn[] = [
+      { role: "user", content: "Rename the menu item 'Chocolate Chip Cookie' to 'Midnight Chocolate Croissant', keep the price and description the same" },
+      { role: "assistant", content: "Renamed." },
+    ];
+    for (const draft of ["Deploy this project to a live public URL", "Deploy this project", "Deploy this project to production"]) {
+      const result = resolveTurn(draft, history);
+      expect(result.resolved).toBe(draft);
+      expect(result.confidence).toBe(1.0);
+    }
+    // A mixed ask is NOT deploy-only, so it still resolves normally
+    // (and the loop's classifier still sees its content verbs).
+    const mixed = resolveTurn("Rename the cookie and deploy it", history);
+    expect(mixed.resolved).toContain("Rename the cookie");
+  });
+
   it("expands 'dont' corrections", () => {
     const history: ConversationTurn[] = [
       { role: "user", content: "Add a sidebar to the dashboard" },

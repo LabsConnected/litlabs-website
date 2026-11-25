@@ -154,8 +154,19 @@ export const STAGE_REQUIREMENTS: Record<QualityStage, StageRequirement> = {
  *   stages match inspection's set for the same reason: the cognitive
  *   stages are filed from the request itself, and the generation's
  *   tool result is judged by the completion path, not by this gate.
+ * - "deploy": a deploy-only turn (publish the workspace exactly as it
+ *   stands). Assigned only from the SYSTEM's deterministic deploy-only
+ *   classification (deploy-intent.ts, threaded route → agent loop →
+ *   session creation, like inspection/media) — never derived from
+ *   prose here and never agent-chosen. A transport publish produces
+ *   no build/test evidence BY NATURE — gating it on those stages made
+ *   a completed deploy log "Quality gate failed: 3 required stage(s)
+ *   lack evidence" beside "Deploy completed" (Acceptance Run 1 on
+ *   8935b2a9, ACC-05 item 3). Its required stages match inspection's
+ *   set; whether the deploy actually delivered is judged from the
+ *   deployment evidence by the completion path, not by this gate.
  */
-export type QualityTaskScope = "trivial" | "standard" | "full" | "inspection" | "media";
+export type QualityTaskScope = "trivial" | "standard" | "full" | "inspection" | "media" | "deploy";
 
 /**
  * Stages that must pass with recorded evidence for each task scope.
@@ -187,6 +198,14 @@ export const REQUIRED_STAGES_BY_SCOPE: Record<QualityTaskScope, readonly Quality
   // the generation actually delivered is judged from the tool results
   // by the completion path.
   media: ["understand", "plan"],
+  // Deploy-only transport (system-classified via deploy-intent): the
+  // run's deliverable is the publish itself. Build/test evidence for
+  // content the user never asked to change can never exist, so —
+  // exactly as with inspection/media — the gate requires only the
+  // cognitive stages; the deployment's own evidence (recorded by the
+  // loop's deployment path and bound via deployRequested in
+  // declareSuccess) is judged by the completion path.
+  deploy: ["understand", "plan"],
 };
 
 /**

@@ -270,6 +270,7 @@ const execState = vi.hoisted(() => {
     // this, a prior test's "executing" phase leaks into the next gate.
     setPendingApproval: vi.fn((approval: unknown) => { state.pendingApproval = approval; state.approvalPhase = "idle"; }),
     resolveApproval: vi.fn(() => { state.pendingApproval = null; }),
+    settleResumedRun: vi.fn(),
     beginApprovalSubmit: vi.fn(() => { state.approvalPhase = "submitting"; }),
     approvalAccepted: vi.fn(() => { state.approvalPhase = "executing"; }),
     failApproval: vi.fn((error: string, retryable?: boolean, opts?: { expired?: boolean }) => {
@@ -396,6 +397,7 @@ vi.mock("../tools/BuilderTool", () => ({ default: () => <div data-testid="builde
 vi.mock("../tools/CanvasTool", () => ({ default: () => <div data-testid="canvas-tool" /> }));
 vi.mock("../tools/AgentTool", () => ({ default: () => <div data-testid="agent-tool" /> }));
 vi.mock("../tools/GalleryTool", () => ({ default: () => <div data-testid="gallery-tool" /> }));
+vi.mock("../tools/AgentsTerminalTool", () => ({ default: () => <div data-testid="terminal-tool" /> }));
 vi.mock("../tools/MissionForge", () => ({ default: () => <div data-testid="mission-forge" /> }));
 vi.mock("../tools/CLIBridgeTool", () => ({ default: () => <div data-testid="cli-bridge" /> }));
 vi.mock("../tools/SpaceTool", () => ({ default: () => <div data-testid="space-tool" /> }));
@@ -765,6 +767,95 @@ describe("CommandStudio — approval gate convergence", () => {
     );
     expect(screen.getByTestId("litt-chat-panel")).toHaveAttribute("data-active", "true");
     expect(screen.queryByTestId("litt-live-panel")).toBeNull();
+  });
+
+  it("ends the execution phase when an approved resumed run finishes (PR #1114 Greptile thread 1)", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    convState.selectedConversationId = "conv-1";
+    execState.state.pendingApproval = {
+      toolId: "project.deploy",
+      reason: "Sensitive action — requires explicit approval",
+      pausedRunId: "paused-1",
+    };
+    await renderCommandStudio();
+    await settle();
+
+    act(() => {
+      approvalWatch.onSettled?.({
+        status: "approved",
+        runStatus: "completed",
+        runResult: { finalText: "Deployed", stepsUsed: 2, toolCalls: [], cancelled: false },
+        runError: null,
+      });
+    });
+    await settle();
+
+    // resolveApproval alone leaves the phase at "editing" — the run
+    // would show as working forever. The terminal outcome must settle it.
+    expect(execState.state.resolveApproval).toHaveBeenCalledWith("approved");
+    expect(execState.state.settleResumedRun).toHaveBeenCalledWith("completed");
+  });
+
+  it("does NOT end the run when the approved outcome mounts a follow-up gate", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    convState.selectedConversationId = "conv-1";
+    execState.state.pendingApproval = {
+      toolId: "project.deploy",
+      reason: "Sensitive action",
+      pausedRunId: "paused-1",
+    };
+    await renderCommandStudio();
+    await settle();
+
+    act(() => {
+      approvalWatch.onSettled?.({
+        status: "approved",
+        runStatus: "completed",
+        runResult: {
+          finalText: "",
+          stepsUsed: 2,
+          toolCalls: [],
+          cancelled: false,
+          pendingApproval: {
+            toolId: "files.delete",
+            reason: "Deletion requires approval",
+            pausedRunId: "paused-2",
+          },
+        },
+        runError: null,
+      });
+    });
+    await settle();
+
+    expect(execState.state.setPendingApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ pausedRunId: "paused-2" }),
+    );
+    expect(execState.state.settleResumedRun).not.toHaveBeenCalled();
+  });
+
+  it("ends the execution phase when the gate outcome is a rejection", async () => {
+    globalThis.__TEST_VIEWPORT_WIDTH__ = 1600;
+    convState.selectedConversationId = "conv-1";
+    execState.state.pendingApproval = {
+      toolId: "project.deploy",
+      reason: "Sensitive action — requires explicit approval",
+      pausedRunId: "paused-1",
+    };
+    await renderCommandStudio();
+    await settle();
+
+    act(() => {
+      approvalWatch.onSettled?.({
+        status: "rejected",
+        runStatus: null,
+        runResult: null,
+        runError: null,
+      });
+    });
+    await settle();
+
+    expect(execState.state.resolveApproval).toHaveBeenCalledWith("rejected");
+    expect(execState.state.settleResumedRun).toHaveBeenCalledWith("rejected");
   });
 
   it("does NOT report 'could not be resumed' when the gate already settled before the click", async () => {

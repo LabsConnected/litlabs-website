@@ -143,11 +143,34 @@ const CONTENT_CHANGE_PATTERNS = [
 ];
 
 /**
+ * The turn resolver (turn-resolver.ts) appends conversation context to
+ * short messages in three machine-generated shapes: a leading
+ * "[Context: …] " and the trailing " — referring to: …" /
+ * " — in the context of: …" segments. That context is not instruction:
+ * Acceptance Run 1 on 8935b2a9 watched the Deploy… draft ("Deploy this
+ * project to a live public URL") arrive here wearing the previous EDIT
+ * request as its appended topic — the topic's verbs tripped the
+ * content net, the run kept the full tool set, and it rewrote the
+ * page (with stale content) before deploying. The resolver now leaves
+ * deploy-only instructions unexpanded at the source; this strip is
+ * the second line of defense for any already-expanded string (a
+ * paused run's stored user message is re-classified on resume).
+ * Only the machine-appended segments are removed — the user's own
+ * words, including their own content verbs, are judged whole.
+ */
+export function stripResolverContext(instruction: string): string {
+  let text = (instruction ?? "").trim();
+  text = text.replace(/^\[Context:[^\]]*\]\s*/i, "");
+  text = text.replace(/\s+—\s+(?:referring to|in the context of):[\s\S]*$/i, "");
+  return text.trim();
+}
+
+/**
  * True when the instruction asks ONLY to deploy/publish the project
  * as it stands — no content creation or modification requested.
  */
 export function isDeployOnlyInstruction(instruction: string): boolean {
-  const text = (instruction ?? "").trim();
+  const text = stripResolverContext(instruction ?? "");
   if (!text) return false;
   if (!DEPLOY_PATTERNS.some((p) => p.test(text))) return false;
   if (CONTENT_CHANGE_PATTERNS.some((p) => p.test(text))) return false;

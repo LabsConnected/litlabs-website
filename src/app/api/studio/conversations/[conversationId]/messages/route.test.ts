@@ -126,6 +126,7 @@ const actionRuntimeMocks = vi.hoisted(() => ({
   transitionActionRunEventActivity: vi.fn(),
   transitionActionRun: vi.fn(),
   requestActionRunCancellation: vi.fn(),
+  listActionRuns: vi.fn(async () => [] as unknown[]),
 }));
 
 vi.mock("@/lib/action-runtime", () => actionRuntimeMocks);
@@ -1924,6 +1925,116 @@ describe("GET /api/studio/conversations/[conversationId]/messages — approval r
     expect(updateMessageStatus).not.toHaveBeenCalled();
 
     expect(body.messages.at(-1).status).toBe("awaiting_approval");
+  });
+});
+
+describe("GET /api/studio/conversations/[conversationId]/messages — failure reason rehydration (PR #1114 Greptile thread 2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetExecutionRegistryForTests();
+    vi.mocked(auth).mockResolvedValue({ userId: "user_123", clerkId: "clerk_123" } as any);
+    vi.mocked(getConversation).mockResolvedValue({
+      id: "conv-123",
+      projectId: "proj-123",
+      revision: 4,
+      activeAgentSlug: "litt",
+      ownerId: "user_123",
+    } as any);
+    vi.mocked(getPendingPausedRunForConversation).mockResolvedValue(null);
+    vi.mocked(getLatestPausedRunForConversation).mockResolvedValue(null);
+  });
+
+  it("re-attaches a failed run's reason to its failed message — the reason survives a reload", async () => {
+    const t0 = Date.parse("2026-11-24T19:10:00.000Z");
+    const iso = (s: number) => new Date(t0 + s * 1000).toISOString();
+    vi.mocked(listMessages).mockResolvedValue([
+      { id: "m1", role: "user", content: "build it", status: "completed", createdAt: iso(0), updatedAt: iso(0) },
+      {
+        id: "m2",
+        role: "assistant",
+        content: "We hit a snag, try again.",
+        status: "failed",
+        createdAt: iso(2),
+        updatedAt: iso(32),
+      },
+    ] as any);
+    actionRuntimeMocks.listActionRuns.mockResolvedValue([
+      {
+        id: "run-1",
+        status: "failed",
+        failureMessage: "files.write: workspace transport unavailable",
+        createdAt: iso(1),
+      },
+    ] as any);
+
+    const res = await GET(new NextRequest("http://localhost/api/studio/conversations/conv-123/messages"), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const failed = body.messages.find((m: { id: string }) => m.id === "m2");
+    // The bubble text stays the plain snag line; the reason rides as
+    // execution data for the work log.
+    expect(failed.content).toBe("We hit a snag, try again.");
+    expect(failed.failureReason).toBe("files.write: workspace transport unavailable");
+    expect(actionRuntimeMocks.listActionRuns).toHaveBeenCalledWith(
+      "user_123",
+      expect.objectContaining({ conversationId: "conv-123" }),
+    );
+  });
+
+  it("re-attaches an approval-resume failure's contributor reason after reload", async () => {
+    // The resumed run's settle records primaryFailureReason(result) as
+    // the action run's failureMessage; the reload path must surface it
+    // on the message whose approval gate resumed into the failure.
+    const t0 = Date.parse("2026-11-24T19:10:00.000Z");
+    const iso = (s: number) => new Date(t0 + s * 1000).toISOString();
+    vi.mocked(listMessages).mockResolvedValue([
+      {
+        id: "m2",
+        role: "assistant",
+        content: "We hit a snag, try again.",
+        status: "failed",
+        createdAt: iso(2),
+        updatedAt: iso(400),
+      },
+    ] as any);
+    actionRuntimeMocks.listActionRuns.mockResolvedValue([
+      {
+        id: "run-1",
+        status: "failed",
+        failureMessage: "image.generate: Bad input: width not allowed",
+        createdAt: iso(1),
+      },
+    ] as any);
+
+    const res = await GET(new NextRequest("http://localhost/api/studio/conversations/conv-123/messages"), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const body = await res.json();
+    expect(body.messages.at(-1).failureReason).toBe("image.generate: Bad input: width not allowed");
+  });
+
+  it("leaves failed messages untouched when no failed run record exists", async () => {
+    const t0 = Date.parse("2026-11-24T19:10:00.000Z");
+    const iso = (s: number) => new Date(t0 + s * 1000).toISOString();
+    vi.mocked(listMessages).mockResolvedValue([
+      {
+        id: "m2",
+        role: "assistant",
+        content: "We hit a snag, try again.",
+        status: "failed",
+        createdAt: iso(2),
+        updatedAt: iso(32),
+      },
+    ] as any);
+    actionRuntimeMocks.listActionRuns.mockResolvedValue([] as any);
+
+    const res = await GET(new NextRequest("http://localhost/api/studio/conversations/conv-123/messages"), {
+      params: Promise.resolve({ conversationId: "conv-123" }),
+    });
+    const body = await res.json();
+    expect(body.messages.at(-1).failureReason).toBeUndefined();
   });
 });
 describe("POST /api/studio/conversations/[conversationId]/messages — project reconciliation (#551a)", () => {

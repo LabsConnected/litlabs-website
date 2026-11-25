@@ -651,6 +651,10 @@ function CommandStudioContent() {
   // board-only successor to landing on a stage surface. Runs once per
   // project + tool pair; following the link is the user's gesture.
   const handledToolLinkRef = useRef<string | null>(null);
+  // ACC-05 item 4: the ask-litt listener (registered before
+  // handleComposerSend exists in this component) sends through this
+  // ref when an event carries autoSend.
+  const composerSendRef = useRef<((value: string) => Promise<unknown>) | null>(null);
   useEffect(() => {
     if (!studioShellActive || !userId || !boardProjectId) return;
     const tool = searchParams.get("tool");
@@ -1325,7 +1329,7 @@ function CommandStudioContent() {
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail as
-        | { context?: string; prompt?: string; selection?: StudioSelectionPayload }
+        | { context?: string; prompt?: string; selection?: StudioSelectionPayload; autoSend?: boolean }
         | undefined;
       if (isMobileLitt) {
         setMobileLittOpen(true);
@@ -1338,7 +1342,34 @@ function CommandStudioContent() {
       }
       setLittActiveTab("chat");
       if (detail?.prompt) {
-        setComposerValue(detail.prompt);
+        // ACC-05 item 4: an explicit ACTION surface (Static View
+        // Publish) marks its request autoSend — the prompt is SENT
+        // through the same composer send path a user's own send takes
+        // (the deploy still pauses at the ApprovalCard gate), not
+        // merely drafted into the composer. Drafting left the Publish
+        // click reading as a no-op (Acceptance Run 1 on 8935b2a9).
+        // Plain ask-litt intents keep draft semantics: pre-fill, the
+        // user confirms. If no sender is mounted yet, fall back to
+        // drafting rather than dropping the request.
+        const sender = detail.autoSend ? composerSendRef.current : null;
+        if (sender) {
+          const prompt = detail.prompt;
+          void (async () => {
+            const result = await sender(prompt).catch(() => null);
+            // PR #1114 Greptile thread 3: a send the conversation
+            // refuses (busy with another run → { accepted: false })
+            // must not silently vanish — Publish stays enabled during
+            // a build, so the click lands here. Fall back to the same
+            // draft the no-sender path uses, so the deploy request is
+            // retained in the composer for the user to send when the
+            // current run finishes.
+            if (!result || (result as { accepted?: boolean }).accepted !== true) {
+              setComposerValue(prompt);
+            }
+          })();
+        } else {
+          setComposerValue(detail.prompt);
+        }
       }
       if (detail?.selection) {
         // Read the active task id fresh (no stale closure): the shell keeps
@@ -1399,7 +1430,11 @@ function CommandStudioContent() {
       // The Deploy surface passes the user's chosen target; the prompt
       // names it so the agent calls project.deploy with that target and
       // the approval card can name it before anything publishes.
-      const target = (e as CustomEvent).detail?.target as string | undefined;
+      // ACC-05 item 4: an autoSend flag from the source surface (Static
+      // View Publish) passes through — that click IS the user's
+      // publish confirmation, so the request is sent, not drafted.
+      const deployDetail = (e as CustomEvent).detail as { target?: string; autoSend?: boolean } | undefined;
+      const target = deployDetail?.target;
       window.dispatchEvent(
         new CustomEvent("studio:ask-litt", {
           detail: {
@@ -1407,6 +1442,7 @@ function CommandStudioContent() {
               target === "netlify"
                 ? "Deploy this project to Netlify"
                 : "Deploy this project to production",
+            ...(deployDetail?.autoSend ? { autoSend: true } : {}),
           },
         }),
       );
@@ -2043,6 +2079,11 @@ function CommandStudioContent() {
     }
   }, [conversation, capabilities.projectId, refreshCapabilities, isMobileLitt, studioShellActive, openStageSurface, studioTasks]);
 
+  // ACC-05 item 4: keep the ask-litt listener's send ref current.
+  useEffect(() => {
+    composerSendRef.current = handleComposerSend;
+  }, [handleComposerSend]);
+
   // Approval decisions resume the SAME paused server-side execution — never
   // a new run. The approval lifecycle only settles when the resumed run
   // reaches a terminal state: the card stays mounted through submitting
@@ -2092,6 +2133,10 @@ function CommandStudioContent() {
       // The resumed run's outcome was written back onto the conversation
       // transcript server-side — pull it instead of fabricating anything.
       void conversation.loadMessages(opts.conversationId);
+      // A rejection is terminal: nothing resumes. End the execution
+      // phase, or the run keeps showing as working (PR #1114 Greptile
+      // thread 1 — resolveApproval alone leaves phase "editing").
+      exec.settleResumedRun("rejected");
       setLittActiveTab("chat");
       return;
     }
@@ -2151,6 +2196,11 @@ function CommandStudioContent() {
       setLittActiveTab("chat");
       return;
     }
+    // Approved and finished, with no follow-up gate mounted above: the
+    // resumed run is over. End the execution phase — resolveApproval
+    // leaves it at "editing", so without this the completed run shows
+    // as working forever (PR #1114 Greptile thread 1).
+    exec.settleResumedRun("completed");
     setLittActiveTab("chat");
   }, [conversation, capabilities.projectId]);
 

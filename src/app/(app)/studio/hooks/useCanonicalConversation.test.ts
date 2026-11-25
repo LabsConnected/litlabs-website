@@ -1364,3 +1364,121 @@ describe("send() generate_image — no Image Studio bounce", () => {
     expect(sendResult?.suppressCompletion).toBeFalsy();
   });
 });
+
+// ─── ACC-05 item 5b: a run that finishes via the reconcile/repoll path
+// must END in the execution store. reconcileAndApply released the
+// streaming/busy flags on a terminal canonical state but never called
+// endRun, so the worktab kept showing "Run in progress" forever after
+// exactly the runs that end this way (approval-resumed runs whose send
+// already returned still-active). Acceptance Run 1 on 8935b2a9.
+describe("reconciled terminal state ends the execution run (ACC-05)", () => {
+  const CONVERSATION: Conversation = {
+    id: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-1",
+    title: "Test",
+    activeAgentSlug: "litt",
+    activeAgentMode: "standard",
+    agentInstanceId: null,
+    revision: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    archivedAt: null,
+  };
+
+  const makeMsg = (overrides: Partial<ConversationMessage>): ConversationMessage => ({
+    id: "msg-x",
+    conversationId: "conv-1",
+    ownerId: "user-1",
+    projectId: "proj-1",
+    role: "assistant",
+    agentSlug: "litt",
+    agentMode: "standard",
+    agentInstanceId: null,
+    content: "",
+    status: "completed",
+    parentMessageId: null,
+    regenerationOfMessageId: null,
+    clientRequestId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  });
+
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  let capturedClientRequestId: string | null = null;
+  let assistantStatus: string = "streaming";
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    capturedClientRequestId = null;
+    assistantStatus = "streaming";
+    useConversationStore.getState().resetForProject();
+    useExecutionStore.setState({ isRunning: false, phase: "idle", pendingApproval: null });
+
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "POST" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        capturedClientRequestId = (JSON.parse(String(init?.body)) as { clientRequestId: string }).clientRequestId;
+        throw new TypeError("fetch failed");
+      }
+      if (method === "GET" && /\/api\/studio\/conversations\/[^/]+\/messages$/.test(url)) {
+        return jsonResponse({
+          messages: capturedClientRequestId
+            ? [
+                makeMsg({ id: "user-1", role: "user", clientRequestId: capturedClientRequestId, content: "Build a bakery site" }),
+                makeMsg({ id: "asst-1", role: "assistant", parentMessageId: "user-1", status: assistantStatus as ConversationMessage["status"], content: assistantStatus === "completed" ? "Done." : "" }),
+              ]
+            : [],
+          revision: 2,
+        });
+      }
+      if (url.startsWith("/api/studio/conversations")) {
+        return jsonResponse({ conversations: [] });
+      }
+      return jsonResponse({});
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    useConversationStore.getState().resetForProject();
+  });
+
+  it("ends the run when the repoll reconciles a terminal state", async () => {
+    const { result } = renderHook(() =>
+      useCanonicalConversation({ serverProjectId: "proj-1" }),
+    );
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    act(() => {
+      const st = useConversationStore.getState();
+      st.setConversations([CONVERSATION]);
+      st.selectConversation("conv-1");
+    });
+
+    // Send: transport dies; the reconcile budget burns against a
+    // still-streaming snapshot and reports the run as still active, so
+    // the send path deliberately does NOT end the execution run.
+    let sendPromise: Promise<SendResult> | undefined;
+    await act(async () => {
+      sendPromise = result.current.send("Build a bakery site");
+      await vi.advanceTimersByTimeAsync(120_000);
+    });
+    await act(async () => { await sendPromise; });
+    expect(useExecutionStore.getState().isRunning).toBe(true);
+
+    // The run finishes server-side; the 30s repoll reconciles the
+    // terminal snapshot. The execution store must end with it.
+    assistantStatus = "completed";
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(useExecutionStore.getState().isRunning).toBe(false);
+    expect(useExecutionStore.getState().phase).toBe("done");
+  });
+});

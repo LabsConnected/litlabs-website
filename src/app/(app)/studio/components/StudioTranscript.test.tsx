@@ -310,6 +310,45 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
     expect(onRegenerate).toHaveBeenCalledWith("assistant-failed");
   });
 
+  it("ACC-05: a long FAILED message is never height-clipped, so its Retry stays fully in view", () => {
+    // Acceptance Run 1 on 8935b2a9: a Retry under a failed message was
+    // partly overlapped by the work-log bar. Cause: the bubble's
+    // collapsible clip (max-h-80) is judged on the RAW message length,
+    // while a failed message displays only its short snag line — the
+    // clip still applied and crushed the bubble (and the Retry at its
+    // bottom edge) against the Execution block below. The owner's
+    // standing rule: controls stay fully in view at any scale.
+    const onRegenerate = vi.fn();
+    const messages: ChatMessage[] = [
+      { role: "user", content: "Build my site", createdAt: Date.now() },
+      {
+        id: "assistant-failed-long",
+        role: "assistant",
+        content: `partial output ${"x".repeat(700)}`,
+        status: "failed",
+        createdAt: Date.now(),
+      },
+    ];
+    const { container } = render(
+      <StudioTranscript
+        messages={messages}
+        busy={false}
+        activeAgentId={"litt" as AgentId}
+        onRouteToolAction={vi.fn()}
+        onRegenerateAction={onRegenerate}
+      />,
+    );
+    const retry = screen.getByTestId("retry-assistant-failed-long");
+    expect(retry).toBeTruthy();
+    // The only long message on screen is the failed one: NOTHING may
+    // carry the collapsible height clip — a clipped failed bubble puts
+    // its fade/clip edge exactly where the Retry and the work-log bar
+    // begin (the overlap seen live).
+    expect(container.querySelectorAll('[class*="max-h-80"]')).toHaveLength(0);
+    fireEvent.click(retry);
+    expect(onRegenerate).toHaveBeenCalledWith("assistant-failed-long");
+  });
+
   it("keeps Retry visible when the failed assistant has no response text", () => {
     const onRegenerate = vi.fn();
     const messages: ChatMessage[] = [
@@ -944,6 +983,22 @@ describe("StudioTranscript — failed-run work log truthfulness (ACC-03 item 5)"
       />,
     );
   }
+
+  it("ACC-05: a failed run's work log carries the run's real failure reason", () => {
+    // Acceptance Run 1 on 8935b2a9: the first build failed after its
+    // approval and the work log said only "Failed — no work
+    // completed" — the loop knew why it died and the reason never
+    // reached the message. When the execution evidence carries the
+    // reason, the label reports it.
+    renderFailed({
+      mode: "build",
+      toolCalls: [],
+      workspaceChange: null,
+      failureReason: "files.write: workspace transport unavailable",
+    });
+    expect(screen.getByText(/Failed — no work completed/)).toBeTruthy();
+    expect(screen.getByText(/workspace transport unavailable/)).toBeTruthy();
+  });
 
   it("does NOT blame file verification when the failed run attempted no work at all", () => {
     // ACC-03 item 5: a first build that died before any tool call (e.g.

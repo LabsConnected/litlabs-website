@@ -262,6 +262,7 @@ const execState = vi.hoisted(() => {
     setPhase: vi.fn(),
     setPendingApproval: vi.fn((approval: unknown) => { state.pendingApproval = approval; }),
     resolveApproval: vi.fn(() => { state.pendingApproval = null; }),
+    settleResumedRun: vi.fn(),
     setCheckpoint: vi.fn(),
     collapseEvent: vi.fn(),
     collapseLowLevel: vi.fn(),

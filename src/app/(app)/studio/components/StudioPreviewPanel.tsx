@@ -1715,13 +1715,17 @@ export default function StudioPreviewPanel({
             to mount a second, direct publish implementation whose
             two-step confirm rendered outside the toolbar's visible
             strip, so the button appeared to do nothing at all. One
-            publish path only. */}
+            publish path only. ACC-05 item 4: Publish is an explicit
+            publish ACTION, so the request carries autoSend — the
+            canonical path SENDS it (the deploy still pauses at the
+            ApprovalCard gate); draft-only dispatch left the click
+            reading as a no-op in Acceptance Run 1 on 8935b2a9. */}
         {projectId && (
           <button
             type="button"
             onClick={() =>
               window.dispatchEvent(
-                new CustomEvent(STUDIO_EVENT_REQUEST_DEPLOY, { detail: { target: "litt" } }),
+                new CustomEvent(STUDIO_EVENT_REQUEST_DEPLOY, { detail: { target: "litt", autoSend: true } }),
               )
             }
             className="grid min-h-9 min-w-9 lg:min-h-8 lg:min-w-8 shrink-0 place-items-center rounded-lg transition hover:bg-black/5"
