@@ -274,6 +274,60 @@ describe("checkBrowserUrlPolicy", () => {
     });
   });
 
+  it("blocks IPv4-mapped IPv6 literals that reach blocked IPv4 targets", () => {
+    // Regression (security review 2026-11-25): "::ffff:x.x.x.x" bypassed
+    // every IPv4 range check — including loopback and the cloud
+    // metadata endpoint.
+    for (const url of [
+      "http://[::ffff:127.0.0.1]/",
+      "http://[::ffff:7f00:1]/",
+      "http://[::ffff:169.254.169.254]/",
+      "http://[::ffff:a9fe:a9fe]/",
+    ]) {
+      const r = checkBrowserUrlPolicy(url);
+      expect(r.allowed, url).toBe(false);
+      expect(r.reason).toMatch(/IPv4-mapped|loopback|metadata|link-local/i);
+    }
+  });
+
+  it("blocks the full fe80::/10 link-local range, not just fe80:", () => {
+    for (const url of ["http://[fe80::1]/", "http://[febf::1]/", "http://[febf:ffff::1]/"]) {
+      const r = checkBrowserUrlPolicy(url);
+      expect(r.allowed, url).toBe(false);
+      expect(r.reason).toMatch(/link-local/i);
+    }
+  });
+
+  it("blocks deceptive structure even under trusted suffixes", () => {
+    // Regression (security review 2026-11-25): .gov/.mil/.edu suffix
+    // trust used to short-circuit BEFORE impersonation checks, so a
+    // trusted-looking name embedded mid-host was allowed.
+    for (const url of [
+      "https://google.com.evil.edu/",
+      "https://state.gov.evil.edu/",
+      "https://google.com.evil.gov/",
+      "https://accounts.google.com.harvard.edu.evil.com/",
+      "https://wikipedia.org.phish.edu/",
+    ]) {
+      const r = checkBrowserUrlPolicy(url);
+      expect(r.allowed, `${url} unexpectedly allowed`).toBe(false);
+      expect(r.reason).toMatch(/phishing/i);
+    }
+  });
+
+  it("still allows legitimate institutional and suffix-trusted hosts", () => {
+    for (const url of [
+      "https://www.whitehouse.gov/",
+      "https://web.mit.edu/",
+      "https://secure-login.mit.edu/", // real university SSO page shape
+      "https://accounts.google.com/",
+      "https://login.microsoftonline.com/",
+    ]) {
+      const r = checkBrowserUrlPolicy(url);
+      expect(r.allowed, `${url} → ${r.reason ?? ""}`).toBe(true);
+    }
+  });
+
   it("rejects garbage input", () => {
     const r = checkBrowserUrlPolicy("not a url!!!");
     expect(r.allowed).toBe(false);

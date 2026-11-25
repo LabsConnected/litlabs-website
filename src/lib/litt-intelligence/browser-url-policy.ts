@@ -468,11 +468,41 @@ function blockedIpv4Reason(host: string): string | null {
 
 function blockedIpv6Reason(host: string): string | null {
   // Node's URL.hostname keeps the brackets on IPv6 literals ("[::1]");
-  // strip them before range checks.
+  // strip them before range checks. The URL parser canonicalizes to
+  // compressed lowercase form.
   const h = host.toLowerCase().replace(/^\[|\]$/g, "");
-  if (h === "::1") return "loopback address";
+  if (h === "::1" || h === "0:0:0:0:0:0:0:1") return "loopback address";
   if (h === "::" || h === "0:0:0:0:0:0:0:0") return "unspecified address";
-  if (h.startsWith("fe80:")) return "link-local address";
+
+  // IPv4-mapped IPv6 (::ffff:a.b.c.d) — the URL parser renders these
+  // in hex form ("::ffff:7f00:1"), but accept the dotted spelling too.
+  // Without this an attacker reaches loopback/link-local/metadata
+  // targets that the IPv4 rules already block.
+  const mappedDotted = h.match(/::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  const mappedHex = h.match(/::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mappedDotted || mappedHex) {
+    let ipv4: string | null = null;
+    if (mappedDotted) {
+      ipv4 = mappedDotted[1];
+    } else if (mappedHex) {
+      const hi = parseInt(mappedHex[1], 16);
+      const lo = parseInt(mappedHex[2], 16);
+      ipv4 = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+    }
+    if (ipv4) {
+      const reason = blockedIpv4Reason(ipv4);
+      if (reason) return `IPv4-mapped IPv6 address → ${reason}`;
+    }
+  }
+
+  // fe80::/10 link-local: first hextet in 0xfe80–0xfebf (the old
+  // startsWith("fe80:") check missed febf:: and every compressed
+  // variant).
+  const firstHextet = h.split(":")[0];
+  const first = parseInt(firstHextet || "0", 16);
+  if (Number.isFinite(first) && first >= 0xfe80 && first <= 0xfebf) {
+    return "link-local address";
+  }
   return null;
 }
 
@@ -521,27 +551,10 @@ export function checkBrowserUrlPolicy(raw: string): BrowserUrlPolicyResult {
     return { allowed: false, reason: ipReason, host };
   }
 
-  // Verified legitimate domains are exempt from impersonation
-  // checks — this is what separates google.com from g00gle.com.
-  // localhost / metadata / literal-IP rules above still apply to
-  // every host, trusted or not.
-  if (isTrustedHost(host)) {
-    return { allowed: true, host };
-  }
-
-  // Credential-phishing patterns
-  for (const { pattern, label } of PHISHING_PATTERNS) {
-    if (pattern.test(host)) {
-      return {
-        allowed: false,
-        reason: `blocked by phishing policy (${label})`,
-        host,
-      };
-    }
-  }
-
-  // A trusted domain or restricted public TLD used as a non-final
-  // part of the host is deceptive by construction.
+  // Deceptive structure is checked BEFORE the trusted-domain
+  // exemption: a trusted name or restricted TLD appearing as a
+  // non-final label is phishing regardless of what the final suffix
+  // is ("google.com.evil.edu", "state.gov.evil.com").
   const impersonated = impersonatedDomain(host);
   if (impersonated) {
     return {
@@ -556,6 +569,27 @@ export function checkBrowserUrlPolicy(raw: string): BrowserUrlPolicyResult {
       reason: "blocked by phishing policy (restricted TLD used mid-host)",
       host,
     };
+  }
+
+  // Verified legitimate domains are exempt from the remaining
+  // impersonation checks (typosquat tokens, credential-bait phrasing,
+  // punycode) — this is what separates google.com from g00gle.com and
+  // keeps real institutional login pages like secure-login.mit.edu
+  // working. localhost / metadata / literal-IP rules above still
+  // apply to every host, trusted or not.
+  if (isTrustedHost(host)) {
+    return { allowed: true, host };
+  }
+
+  // Credential-phishing patterns
+  for (const { pattern, label } of PHISHING_PATTERNS) {
+    if (pattern.test(host)) {
+      return {
+        allowed: false,
+        reason: `blocked by phishing policy (${label})`,
+        host,
+      };
+    }
   }
 
   // Token-level brand analysis: squats block on their own; a verbatim
