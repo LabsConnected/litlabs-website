@@ -111,6 +111,21 @@ jobs:
           echo "CONSECUTIVE_PASSES=$passes" >> "$GITHUB_ENV"
           echo "ALL $ACCEPTANCE_RUNS consecutive acceptance runs PASSED"
 
+      - name: Studio browser security acceptance
+        # Recurring browser-security gate (PR #1115): real authenticated
+        # session drives the Studio proxy route and asserts legit domains
+        # proxy while SSRF/phishing destinations get the friendly error
+        # page. Uses its own tagged disposable user — cleaned up below.
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_TEST_SECRET_KEY }}
+          LITT_PROD_BASE_URL: ${{ env.STAGING_URL }}
+        run: |
+          set -euo pipefail
+          user_id="$(node scripts/final-acceptance/create-fresh-user.mjs)"
+          echo "browser-security user: $user_id"
+          LITT_ACCEPTANCE_USER_ID="$user_id" \
+            node scripts/final-acceptance/browser-security-check.mjs
+
       - name: Clean up tagged disposable acceptance users (post-run)
         # Every iteration's user is disposable by design — removing them
         # keeps the 100-user TEST instance from accumulating quota debt for
