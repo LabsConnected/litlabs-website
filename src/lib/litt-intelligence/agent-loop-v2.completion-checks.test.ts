@@ -15,7 +15,7 @@ vi.mock("@/lib/action-runtime/tool-runtime", async (original) => ({
 }));
 
 const runAllProjectChecksMock = vi.fn();
-const saveProjectCheckRunMock = vi.fn(async () => true);
+const saveProjectCheckRunMock = vi.fn(async (..._args: unknown[]) => true);
 vi.mock("@/lib/projects/project-checks", () => ({
   runAllProjectChecks: (...args: unknown[]) => runAllProjectChecksMock(...args),
   saveProjectCheckRun: (...args: unknown[]) => saveProjectCheckRunMock(...args),

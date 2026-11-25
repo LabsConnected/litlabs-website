@@ -914,7 +914,8 @@ function plainFontMetrics(
       // inherited/UA answer rather than guessing.
       continue;
     }
-    if (chain[i].tagName && UA_BOLD_TAGS.has(chain[i].tagName)) {
+    const chainTag = chain[i].tagName;
+    if (chainTag && UA_BOLD_TAGS.has(chainTag)) {
       weight = 700;
       weightDecided = true;
       break;

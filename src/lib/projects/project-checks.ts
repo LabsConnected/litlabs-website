@@ -313,14 +313,14 @@ export async function saveProjectCheckRun(input: {
       summary: input.summary,
     });
     if (error) {
-      studioLog("project-checks:persist_failed", { projectId: input.projectId, error: error.message });
+      studioLog("project-checks:persist_failed", { projectId: input.projectId, errorClass: error.message });
       return false;
     }
     return true;
   } catch (err) {
     studioLog("project-checks:persist_failed", {
       projectId: input.projectId,
-      error: err instanceof Error ? err.message : "unknown",
+      errorClass: err instanceof Error ? err.message : "unknown",
     });
     return false;
   }
