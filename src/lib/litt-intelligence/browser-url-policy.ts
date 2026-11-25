@@ -196,6 +196,26 @@ const TRUSTED_DOMAINS = new Set([
   "bybit.com", "blockchain.com", "ethereum.org", "nasa.gov",
 ]);
 
+/**
+ * Trusted domains whose tenants are NOT controlled by the brand —
+ * anyone can publish under them (GitHub Pages, Blogspot, Azure App
+ * Service, …). They stay trusted for boundary and impersonation
+ * purposes, but they do NOT get the phishing-check exemption:
+ * "g00gle.github.io" must still be caught. (Greptile review, PR #1115.)
+ */
+const SHARED_PLATFORM_DOMAINS = new Set([
+  "github.io", "blogspot.com", "azurewebsites.net", "tumblr.com",
+  "medium.com", "substack.com", "myshopify.com", "fandom.com",
+  "wikia.org",
+]);
+
+function isSharedPlatformHost(host: string): boolean {
+  for (const domain of SHARED_PLATFORM_DOMAINS) {
+    if (host === domain || host.endsWith(`.${domain}`)) return true;
+  }
+  return false;
+}
+
 /** Restricted public suffixes — legitimate only as the FINAL labels. */
 const RESTRICTED_PUBLIC_TLDS = [".gov.", ".mil.", ".edu."];
 
@@ -333,6 +353,13 @@ function isOneSquatEdit(a: string, b: string): boolean {
   if (la < 4 || lb < 4) return false;
   if (Math.abs(la - lb) === 1) {
     const [short, long] = la < lb ? [a, b] : [b, a];
+    // Indel near-misses need more evidence than substitutions or
+    // transpositions: ordinary words collide at this distance
+    // constantly ("team"→"steam", "metal"→"meta"), so both sides
+    // must be at least 5 chars and a trailing plural "s" is never
+    // an edit ("apples" is not a squat of "apple").
+    if (short.length < 5 || long.length < 5) return false;
+    if (long === `${short}s`) return false;
     let i = 0;
     let j = 0;
     let edits = 0;
@@ -385,6 +412,58 @@ function matchBrand(token: HostToken): BrandHit | null {
     if (token.raw === brand) return { brand, kind: "verbatim" };
     if (token.norm === norm) return { brand, kind: "squat" };
     if (isOneSquatEdit(token.norm, norm)) return { brand, kind: "squat" };
+  }
+  return null;
+}
+
+/**
+ * Credential/impersonation words that, glued to a brand inside a
+ * single DNS token with no separator, mark a joined typosquat:
+ * "g00glelogin" → google+login. Tighter than BAIT_TOKENS — these must
+ * be convincing on their own, which keeps "googlemaps",
+ * "steamcommunity", "dockerhub" and "metabase" allowed.
+ */
+const BRAND_AFFIXES = [
+  "login", "signin", "verify", "verification", "account", "secure",
+  "security", "auth", "billing", "payment", "update", "confirm",
+  "suspend", "recover", "wallet", "invoice", "unlock", "password",
+  "official", "support",
+];
+
+/** Brand-first glued form: affix alone or affix + trailing digits. */
+const BRAND_AFFIX_PREFIX_RE = new RegExp(
+  `^(?:${BRAND_AFFIXES.join("|")})[0-9]*$`,
+);
+
+/**
+ * A brand glued to a credential word inside ONE token — the shape
+ * token-splitting cannot see ("g00glelogin.com" is a single alnum
+ * piece). The brand may lead ("googlelogin", "googlelogin2024") or
+ * trail ("accountgoogle"); the glued-on side must be an affix.
+ */
+function matchJoinedBrand(token: HostToken): BrandHit | null {
+  const t = token.norm;
+  for (const { brand, norm } of NORMALIZED_BRANDS) {
+    if (t.length <= norm.length) continue;
+    // The glued-on brand may itself be a near-miss ("netfl1xofficial"
+    // → netflix+official), so compare the fixed-width head/tail with
+    // the same one-edit rule used for whole tokens.
+    const head = t.slice(0, norm.length);
+    const rest = t.slice(norm.length);
+    if (
+      (head === norm || isOneSquatEdit(head, norm)) &&
+      BRAND_AFFIX_PREFIX_RE.test(rest)
+    ) {
+      return { brand, kind: "squat" };
+    }
+    const tail = t.slice(t.length - norm.length);
+    const lead = t.slice(0, t.length - norm.length);
+    if (
+      (tail === norm || isOneSquatEdit(tail, norm)) &&
+      BRAND_AFFIXES.some((a) => lead === a || lead.endsWith(a))
+    ) {
+      return { brand, kind: "squat" };
+    }
   }
   return null;
 }
@@ -575,9 +654,12 @@ export function checkBrowserUrlPolicy(raw: string): BrowserUrlPolicyResult {
   // impersonation checks (typosquat tokens, credential-bait phrasing,
   // punycode) — this is what separates google.com from g00gle.com and
   // keeps real institutional login pages like secure-login.mit.edu
-  // working. localhost / metadata / literal-IP rules above still
-  // apply to every host, trusted or not.
-  if (isTrustedHost(host)) {
+  // working. Shared-platform domains (github.io, blogspot.com, …) are
+  // trusted for structure but NOT exempt: their tenants are
+  // attacker-controlled, so "g00gle.github.io" still faces the full
+  // phishing checks. localhost / metadata / literal-IP rules above
+  // still apply to every host, trusted or not.
+  if (isTrustedHost(host) && !isSharedPlatformHost(host)) {
     return { allowed: true, host };
   }
 
@@ -597,7 +679,7 @@ export function checkBrowserUrlPolicy(raw: string): BrowserUrlPolicyResult {
   const tokens = host.split(".").flatMap(hostTokens);
   let verbatimBrand: string | null = null;
   for (const token of tokens) {
-    const hit = matchBrand(token);
+    const hit = matchBrand(token) ?? matchJoinedBrand(token);
     if (!hit) continue;
     if (hit.kind === "squat") {
       return {

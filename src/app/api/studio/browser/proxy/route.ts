@@ -117,6 +117,14 @@ export async function GET(req: NextRequest) {
 
     const location = res.headers.get("location");
     if (REDIRECT_STATUSES.has(res.status) && location) {
+      // Drop the redirect body before the next hop — otherwise each
+      // hop keeps downloading a page we will never show and holds
+      // its connection open until completion or timeout.
+      try {
+        await res.body?.cancel();
+      } catch {
+        // Body already consumed or locked — nothing to release.
+      }
       try {
         currentUrl = new URL(location, currentUrl).toString();
       } catch {

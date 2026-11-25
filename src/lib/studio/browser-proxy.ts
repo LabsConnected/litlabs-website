@@ -279,7 +279,16 @@ export function buildProxyErrorPage(opts: ProxyErrorPageOptions): string {
     : "";
   const hintHtml = hint ? `<p class="hint">${hint}</p>` : "";
   const linkHtml = safeUrl
-    ? `<p class="actions"><a class="btn" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">Open in a new tab</a></p>`
+    ? `<p class="actions"><a id="open-external" class="btn" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">Open in a new tab</a></p>`
+    : "";
+  // The document runs sandboxed inside the panel iframe, so a
+  // target=_blank click would open a tab that INHERITS the sandbox
+  // (opaque origin, no cookies/storage). Hand the open to the parent
+  // instead — the panel's message listener calls window.open from
+  // the unsandboxed page, exactly like proxied-page external links.
+  // The href stays as a no-JS fallback.
+  const externalScript = safeUrl
+    ? `<script>document.getElementById("open-external").addEventListener("click",function(e){e.preventDefault();try{parent.postMessage({source:${JSON.stringify(BROWSER_PROXY_MESSAGE_SOURCE)},type:"external",url:${JSON.stringify(safeUrl).replace(/</g, "\\u003c")}},"*")}catch(_){}});</script>`
     : "";
   return `<!DOCTYPE html>
 <html lang="en">
@@ -332,6 +341,7 @@ export function buildProxyErrorPage(opts: ProxyErrorPageOptions): string {
     ${hintHtml}
     ${linkHtml}
   </main>
+${externalScript}
 </body>
 </html>`;
 }

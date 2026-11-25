@@ -157,9 +157,15 @@ describe("buildProxyErrorPage", () => {
     expect(html).toContain("g00gle.com");
     expect(html).toContain('href="https://g00gle.com/"');
     expect(html).toContain('target="_blank"');
+    // The open-externally click is handed to the parent via the
+    // litt-browser postMessage protocol so the new tab escapes the
+    // iframe sandbox (Greptile review, PR #1115).
+    expect(html).toContain('type:"external"');
+    expect(html).toContain("litt-browser");
     // No external resources — the document must render inside the
-    // sandboxed iframe with no network fetches of its own.
-    expect(html).not.toMatch(/<script|<link|src=|@import|url\(/);
+    // sandboxed iframe with no network fetches of its own. The only
+    // script allowed is the inline postMessage bridge (no src=).
+    expect(html).not.toMatch(/<script[^>]*\bsrc=|<link\b|@import|url\(/);
   });
 
   it("escapes HTML in every interpolated field", () => {

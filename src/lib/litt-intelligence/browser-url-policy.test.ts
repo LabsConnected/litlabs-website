@@ -315,6 +315,89 @@ describe("checkBrowserUrlPolicy", () => {
     }
   });
 
+  it("does not exempt attacker-controlled tenants on shared platforms", () => {
+    // Greptile review (PR #1115): github.io/blogspot.com/etc. are
+    // trusted for structure but their tenants are NOT brand-owned —
+    // squats hosted there must still face the phishing checks.
+    for (const url of [
+      "https://g00gle.github.io/",
+      "https://paypa1.blogspot.com/",
+      "https://micr0s0ft.azurewebsites.net/",
+      "https://account-suspended.tumblr.com/",
+      "https://netfl1x.medium.com/",
+    ]) {
+      const r = checkBrowserUrlPolicy(url);
+      expect(r.allowed, `${url} unexpectedly allowed`).toBe(false);
+      expect(r.reason).toMatch(/phishing/i);
+    }
+    // Legitimate shared-platform pages still work.
+    for (const url of [
+      "https://some-project.github.io/",
+      "https://my-blog.blogspot.com/",
+      "https://notes.medium.com/",
+      "https://shop.myshopify.com/",
+    ]) {
+      const r = checkBrowserUrlPolicy(url);
+      expect(r.allowed, `${url} → ${r.reason ?? ""}`).toBe(true);
+    }
+  });
+
+  it("does not block ordinary words one edit from a brand", () => {
+    // Greptile review (PR #1115): indel near-misses produced false
+    // positives on common words. Substitution/transposition squats
+    // still block; 4-char-side indels and plural-"s" forms do not.
+    for (const url of [
+      "https://team.example.com/",
+      "https://metal.com/",
+      "https://apples.com/",
+      "https://steams.com/",
+      "https://metabase.com/",
+      "https://steamcommunity.com/",
+      "https://dockerhub.com/",
+      "https://nvidiageforce.com/",
+    ]) {
+      const r = checkBrowserUrlPolicy(url);
+      expect(r.allowed, `${url} → ${r.reason ?? ""}`).toBe(true);
+    }
+    // Genuine squats still block.
+    for (const url of [
+      "https://gogle.com/", // google minus a letter
+      "https://gooogle.com/", // google plus a letter
+      "https://amazno.com/", // transposed letters
+      "https://githud.com/", // confusable substitution
+    ]) {
+      const r = checkBrowserUrlPolicy(url);
+      expect(r.allowed, `${url} unexpectedly allowed`).toBe(false);
+      expect(r.reason).toMatch(/phishing/i);
+    }
+  });
+
+  it("blocks brands glued to credential words inside one token", () => {
+    // Greptile review (PR #1115): "g00glelogin.com" is a single
+    // alphanumeric token — token splitting alone misses it.
+    for (const url of [
+      "https://g00glelogin.com/",
+      "https://googlelogin.com/",
+      "https://googlelogin2024.com/",
+      "https://paypalverify.net/",
+      "https://accountgoogle.com/",
+      "https://netfl1xofficial.com/",
+    ]) {
+      const r = checkBrowserUrlPolicy(url);
+      expect(r.allowed, `${url} unexpectedly allowed`).toBe(false);
+      expect(r.reason).toMatch(/phishing/i);
+    }
+    // Brand + non-credential glue stays allowed.
+    for (const url of [
+      "https://googlemaps.com/",
+      "https://googleblog.com/",
+      "https://netflixparty.com/",
+    ]) {
+      const r = checkBrowserUrlPolicy(url);
+      expect(r.allowed, `${url} → ${r.reason ?? ""}`).toBe(true);
+    }
+  });
+
   it("still allows legitimate institutional and suffix-trusted hosts", () => {
     for (const url of [
       "https://www.whitehouse.gov/",
