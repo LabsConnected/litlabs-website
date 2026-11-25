@@ -167,10 +167,48 @@ function buildTrackingSupabase(
     }),
   });
 
+  // In-memory model of the token-fenced stripe_events claim RPCs
+  // (claim_stripe_event / finalize_stripe_event / release_stripe_event).
+  const eventClaims = new Map<string, { token: string; result: string }>();
+
   const sb = {
     from: vi.fn((table: string) => chain(table)),
     rpc: vi.fn(async (fnName: string, params: any) => {
       rpcCalls.push({ fn: fnName, params });
+      if (fnName === "claim_stripe_event") {
+        const id = params.p_stripe_event_id as string;
+        // existingEvent=true models a stripe_events row that already exists;
+        // the old isEventProcessed check replayed on ANY row, so map that to
+        // the RPC's "duplicate" (terminal) outcome.
+        if (existingEvent && !eventClaims.has(id)) {
+          return { data: "duplicate", error: null };
+        }
+        const row = eventClaims.get(id);
+        if (!row) {
+          eventClaims.set(id, { token: params.p_claim_token, result: "processing" });
+          return { data: "owned", error: null };
+        }
+        if (row.result !== "processing") return { data: "duplicate", error: null };
+        // Fresh "processing" claim held by another delivery.
+        return { data: "in_progress", error: null };
+      }
+      if (fnName === "finalize_stripe_event") {
+        const row = eventClaims.get(params.p_stripe_event_id as string);
+        if (row && row.result === "processing" && row.token === params.p_claim_token) {
+          row.result = params.p_result as string;
+          return { data: true, error: null };
+        }
+        return { data: false, error: null };
+      }
+      if (fnName === "release_stripe_event") {
+        const id = params.p_stripe_event_id as string;
+        const row = eventClaims.get(id);
+        if (row && row.result === "processing" && row.token === params.p_claim_token) {
+          eventClaims.delete(id);
+          return { data: "released", error: null };
+        }
+        return { data: row ? "lost" : "absent", error: null };
+      }
       return { data: { success: true, remaining: 100 }, error: null };
     }),
   };
@@ -685,6 +723,7 @@ describe("Webhook event processing — state mutations", () => {
       return { data: null, error: null };
     }) as any;
 
+    const eventClaims = new Map<string, { token: string; result: string }>();
     const sb = {
       from: vi.fn((table: string) => {
         const c = chain(table);
@@ -709,6 +748,34 @@ describe("Webhook event processing — state mutations", () => {
       }),
       rpc: vi.fn(async (fnName: string, params: any) => {
         rpcCalls.push({ fn: fnName, params });
+        // Emulate the token-fenced stripe_events claim RPCs.
+        if (fnName === "claim_stripe_event") {
+          const id = params.p_stripe_event_id as string;
+          const row = eventClaims.get(id);
+          if (!row) {
+            eventClaims.set(id, { token: params.p_claim_token, result: "processing" });
+            return { data: "owned", error: null };
+          }
+          if (row.result !== "processing") return { data: "duplicate", error: null };
+          return { data: "in_progress", error: null };
+        }
+        if (fnName === "finalize_stripe_event") {
+          const row = eventClaims.get(params.p_stripe_event_id as string);
+          if (row && row.result === "processing" && row.token === params.p_claim_token) {
+            row.result = params.p_result as string;
+            return { data: true, error: null };
+          }
+          return { data: false, error: null };
+        }
+        if (fnName === "release_stripe_event") {
+          const id = params.p_stripe_event_id as string;
+          const row = eventClaims.get(id);
+          if (row && row.result === "processing" && row.token === params.p_claim_token) {
+            eventClaims.delete(id);
+            return { data: "released", error: null };
+          }
+          return { data: row ? "lost" : "absent", error: null };
+        }
         return { data: { success: true, remaining: 100 }, error: null };
       }),
     };
@@ -1415,7 +1482,7 @@ describe("Webhook event processing — state mutations", () => {
     });
 
     it("invoice lookup failure → 500 so Stripe retries instead of dropping the refund", async () => {
-      const { sb, inserts, updates } = buildTrackingSupabase();
+      const { sb, rpcCalls } = buildTrackingSupabase();
       vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
       vi.mocked(getAdminSupabase).mockReturnValue(sb as any);
       // InvoicePayment carries the invoice as an id (not expanded) → the
@@ -1431,14 +1498,15 @@ describe("Webhook event processing — state mutations", () => {
       const res = await webhookPOST(makeWebhookRequest("body", "sig"));
 
       expect(res.status).toBe(500);
-      // The atomic claim inserts the event as "processing" up front; a
-      // failed delivery marks it "failed" — never "processed", which
-      // would make Stripe's redelivery a no-op.
+      // The token-fenced claim is held via claim_stripe_event; a failed
+      // delivery RELEASES the claim (release_stripe_event) so Stripe's
+      // redelivery can claim fresh — it is never finalized "processed",
+      // which would make the redelivery a no-op.
       expect(
-        inserts.filter((i) => i.table === "stripe_events" && i.row.result === "processed"),
+        rpcCalls.filter((c) => c.fn === "finalize_stripe_event" && c.params.p_result === "processed"),
       ).toHaveLength(0);
       expect(
-        updates.filter((u) => u.table === "stripe_events" && u.patch.result === "failed").length,
+        rpcCalls.filter((c) => c.fn === "release_stripe_event").length,
       ).toBeGreaterThan(0);
     });
   });
@@ -1461,9 +1529,10 @@ describe("Webhook event processing — state mutations", () => {
     function withGrantFaults(modes: FaultMode[]) {
       const tracking = buildTrackingSupabase();
       const queue = [...modes];
+      const baseRpc = tracking.sb.rpc;
       tracking.sb.rpc = vi.fn(async (fn: string, params: any): Promise<any> => {
-        tracking.rpcCalls.push({ fn, params });
         if (fn === "grant_credits") {
+          tracking.rpcCalls.push({ fn, params });
           const mode = queue.shift() ?? "ok";
           if (mode === "error") {
             return { data: null, error: { message: "injected ledger failure" } };
@@ -1471,8 +1540,11 @@ describe("Webhook event processing — state mutations", () => {
           if (mode === "throw") {
             throw new Error("injected ledger transport failure");
           }
+          return { data: { success: true, remaining: 100 }, error: null };
         }
-        return { data: { success: true, remaining: 100 }, error: null };
+        // Delegate everything else (incl. the claim/finalize/release RPCs)
+        // to the emulated implementation in buildTrackingSupabase.
+        return baseRpc(fn, params);
       });
       vi.mocked(isAdminSupabaseConfigured).mockReturnValue(true);
       vi.mocked(getAdminSupabase).mockReturnValue(tracking.sb as any);
@@ -1507,7 +1579,7 @@ describe("Webhook event processing — state mutations", () => {
       });
 
     it("credit pack: grant_credits error → 500, event NOT marked processed", async () => {
-      const { inserts, updates, rpcCalls } = withGrantFaults(["error"]);
+      const { rpcCalls } = withGrantFaults(["error"]);
       mockConstructEvent.mockReturnValue(creditPackEvent("evt_cp_fault_err"));
 
       const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
@@ -1515,10 +1587,10 @@ describe("Webhook event processing — state mutations", () => {
 
       expect(res.status).toBe(500);
       expect(
-        inserts.filter((i) => i.table === "stripe_events" && i.row.result === "processed"),
+        rpcCalls.filter((c) => c.fn === "finalize_stripe_event" && c.params.p_result === "processed"),
       ).toHaveLength(0);
       expect(
-        updates.filter((u) => u.table === "stripe_events" && u.patch.result === "failed").length,
+        rpcCalls.filter((c) => c.fn === "release_stripe_event").length,
       ).toBeGreaterThan(0);
       const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
       expect(grants).toHaveLength(1);
@@ -1526,7 +1598,7 @@ describe("Webhook event processing — state mutations", () => {
     });
 
     it("credit pack: grant_credits throw → 500, event NOT marked processed", async () => {
-      const { inserts, updates } = withGrantFaults(["throw"]);
+      const { rpcCalls } = withGrantFaults(["throw"]);
       mockConstructEvent.mockReturnValue(creditPackEvent("evt_cp_fault_throw"));
 
       const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
@@ -1534,26 +1606,23 @@ describe("Webhook event processing — state mutations", () => {
 
       expect(res.status).toBe(500);
       expect(
-        inserts.filter((i) => i.table === "stripe_events" && i.row.result === "processed"),
+        rpcCalls.filter((c) => c.fn === "finalize_stripe_event" && c.params.p_result === "processed"),
       ).toHaveLength(0);
       expect(
-        updates.filter((u) => u.table === "stripe_events" && u.patch.result === "failed").length,
+        rpcCalls.filter((c) => c.fn === "release_stripe_event").length,
       ).toBeGreaterThan(0);
     });
 
     it("credit pack: failed delivery then Stripe redelivery → grant retried under the same idempotency key", async () => {
-      const { inserts, updates, rpcCalls } = withGrantFaults(["error", "ok"]);
+      const { rpcCalls } = withGrantFaults(["error", "ok"]);
       const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
 
-      // First delivery: grant RPC is down → 500, no processed mark.
+      // First delivery: grant RPC is down → 500, claim released.
       mockConstructEvent.mockReturnValue(creditPackEvent("evt_cp_retry"));
       const first = await webhookPOST(makeWebhookRequest("body", "sig"));
       expect(first.status).toBe(500);
       expect(
-        inserts.filter((i) => i.table === "stripe_events" && i.row.result === "processed"),
-      ).toHaveLength(0);
-      expect(
-        updates.filter((u) => u.table === "stripe_events" && u.patch.result === "failed").length,
+        rpcCalls.filter((c) => c.fn === "release_stripe_event").length,
       ).toBeGreaterThan(0);
 
       // Stripe redelivers the SAME event id after the RPC recovers.
@@ -1570,20 +1639,24 @@ describe("Webhook event processing — state mutations", () => {
       expect(grants[0].params.p_idempotency_key).toBe("creditpack_cs_creditpack_fault");
       expect(grants[1].params.p_idempotency_key).toBe("creditpack_cs_creditpack_fault");
 
-      // The atomic claim inserts a "processing" row per delivery (this
-      // mock doesn't persist stripe_events, so the redelivery claims
-      // fresh rather than reclaiming "failed"); success is proven by the
-      // "processed" mark in updates, not by an insert.
-      const eventInserts = inserts.filter((i) => i.table === "stripe_events");
-      expect(eventInserts.length).toBeGreaterThanOrEqual(1);
-      expect(eventInserts.every((i) => i.row.result === "processing")).toBe(true);
-      expect(
-        updates.filter((u) => u.table === "stripe_events" && u.patch.result === "processed").length,
-      ).toBeGreaterThanOrEqual(1);
+      // Success is proven by finalize_stripe_event with p_result
+      // "processed" — the token-fenced terminal mark. The first delivery
+      // released its claim, so the redelivery claimed fresh and finalized.
+      const finalizes = rpcCalls.filter(
+        (c) => c.fn === "finalize_stripe_event" && c.params.p_result === "processed",
+      );
+      expect(finalizes).toHaveLength(1);
+      // The redelivery's claim token differs from the first delivery's —
+      // each attempt gets a fresh UUID from claimStripeEvent.
+      const claims = rpcCalls.filter((c) => c.fn === "claim_stripe_event");
+      expect(claims).toHaveLength(2);
+      expect(claims[0].params.p_claim_token).not.toBe(claims[1].params.p_claim_token);
+      // finalize used the SECOND claim's token (the surviving owner).
+      expect(finalizes[0].params.p_claim_token).toBe(claims[1].params.p_claim_token);
     });
 
     it("invoice.paid: subscription grant_credits error → 500, event NOT marked processed", async () => {
-      const { inserts, updates, rpcCalls } = withGrantFaults(["error"]);
+      const { rpcCalls } = withGrantFaults(["error"]);
       mockConstructEvent.mockReturnValue(paidInvoiceEvent("evt_inv_fault"));
 
       const { POST: webhookPOST } = await import("@/app/api/stripe/webhook/route");
@@ -1591,10 +1664,10 @@ describe("Webhook event processing — state mutations", () => {
 
       expect(res.status).toBe(500);
       expect(
-        inserts.filter((i) => i.table === "stripe_events" && i.row.result === "processed"),
+        rpcCalls.filter((c) => c.fn === "finalize_stripe_event" && c.params.p_result === "processed"),
       ).toHaveLength(0);
       expect(
-        updates.filter((u) => u.table === "stripe_events" && u.patch.result === "failed").length,
+        rpcCalls.filter((c) => c.fn === "release_stripe_event").length,
       ).toBeGreaterThan(0);
       const grants = rpcCalls.filter((c) => c.fn === "grant_credits");
       expect(grants).toHaveLength(1);

@@ -12,105 +12,105 @@ type SbAdmin = NonNullable<ReturnType<typeof getAdminSupabase>>;
 
 /**
  * A "processing" claim older than this is assumed abandoned — the holder's
- * function crashed, timed out, or was killed before reaching the catch
- * block, so the claim was never marked "failed" and would otherwise block
- * this event forever while telling Stripe (via a 200 "replayed" response on
- * retry) that nothing further needs to happen. Generous relative to typical
- * serverless function timeouts; still well inside Stripe's retry window.
+ * function crashed, timed out, or was killed before releasing the claim,
+ * so the row would otherwise block this event forever while telling Stripe
+ * (via a 200 "replayed" response on retry) that nothing further needs to
+ * happen. Generous relative to typical serverless function timeouts; still
+ * well inside Stripe's retry window. Enforced inside claim_stripe_event.
  */
 const STALE_CLAIM_MS = 5 * 60 * 1000;
 
-function isStaleProcessingClaim(existing: { result: string; processed_at: string }): boolean {
-  return (
-    existing.result === "processing" &&
-    Date.now() - new Date(existing.processed_at).getTime() > STALE_CLAIM_MS
-  );
+type ClaimStatus = "claimed" | "replayed" | "unclaimable";
+
+interface EventClaim {
+  status: ClaimStatus;
+  /** Present only when status === "claimed" — required by finalize/release. */
+  token?: string;
 }
 
 /**
- * Atomically claim a Stripe event for processing.
+ * Atomically claim a Stripe event via the token-fenced claim_stripe_event
+ * RPC (migration 20261015240000_stripe_event_claim_token).
  *
- * The prior check-then-insert pattern raced: two concurrent deliveries of
- * the same event both passed the SELECT and both processed, producing
- * duplicate side effects. stripe_events.stripe_event_id is UNIQUE, so the
- * INSERT itself is the claim — a duplicate-key error means another
- * delivery holds or completed it.
+ * The RPC inserts the row or takes over a stale "processing" claim under
+ * FOR UPDATE and returns a per-attempt UUID claim_token. Only the token
+ * that won can finalize or release the row — a stale worker that lost its
+ * claim to a takeover can no longer mark the event processed.
  *
  * Outcomes:
  *   "claimed"      — this delivery owns the event; process it.
- *   "processed"    — a prior delivery finished; acknowledge, do nothing.
- *   "claimed-else" — another delivery owns or is processing it; ack.
- *   "unclaimable"  — the claim could not be made; Stripe must retry (500).
+ *   "replayed"     — "duplicate" (already finalized) or "in_progress"
+ *                    (fresh claim held by another delivery); acknowledge.
+ *   "unclaimable"  — RPC missing/error; Stripe must retry (500).
  */
 async function claimStripeEvent(
   sb: SbAdmin,
   eventId: string,
   eventType: string,
-): Promise<"claimed" | "processed" | "claimed-else" | "unclaimable"> {
-  const { data: existing } = await sb
-    .from("stripe_events")
-    .select("id, result, processed_at")
-    .eq("stripe_event_id", eventId)
-    .maybeSingle();
-
-  if (existing?.result === "processed") return "processed";
-
-  if (!existing) {
-    const { error } = await sb.from("stripe_events").insert({
-      stripe_event_id: eventId,
-      event_type: eventType,
-      result: "processing",
-    });
-    if (!error) return "claimed";
-    // 23505 = unique_violation — a concurrent delivery already claimed it.
-    if ((error as { code?: string }).code === "23505") return "claimed-else";
-    return "unclaimable";
+): Promise<EventClaim> {
+  const token = crypto.randomUUID();
+  const staleBefore = new Date(Date.now() - STALE_CLAIM_MS).toISOString();
+  const { data, error } = await sb.rpc("claim_stripe_event", {
+    p_stripe_event_id: eventId,
+    p_event_type: eventType,
+    p_claim_token: token,
+    p_stale_before: staleBefore,
+  });
+  if (error) {
+    console.error(
+      `[stripe.webhook] claim_stripe_event failed for ${eventId}: ${error.message}`,
+    );
+    return { status: "unclaimable" };
   }
-
-  if (existing.result === "failed") {
-    // Retryable: reclaim only if no other delivery has beaten us to it.
-    // Also refresh processed_at — otherwise this reclaim's row keeps the
-    // ORIGINAL (long-stale) timestamp, so isStaleProcessingClaim would call
-    // it stale again immediately, letting an overlapping delivery win a
-    // second concurrent claim while this one is still actively processing.
-    const { data: reclaimed } = await sb
-      .from("stripe_events")
-      .update({ result: "processing", processed_at: new Date().toISOString() })
-      .eq("id", existing.id)
-      .eq("result", "failed")
-      .select("id");
-    return reclaimed && reclaimed.length > 0 ? "claimed" : "claimed-else";
-  }
-
-  if (isStaleProcessingClaim(existing)) {
-    // Reclaim using the observed processed_at as an optimistic-concurrency
-    // token. If two deliveries race to reclaim the same stale snapshot,
-    // only the first to actually commit wins: its UPDATE moves
-    // processed_at forward, so the second's WHERE (pinned to the OLD
-    // timestamp) no longer matches and it correctly loses the claim.
-    const { data: reclaimed } = await sb
-      .from("stripe_events")
-      .update({ result: "processing", processed_at: new Date().toISOString() })
-      .eq("id", existing.id)
-      .eq("result", "processing")
-      .eq("processed_at", existing.processed_at)
-      .select("id");
-    return reclaimed && reclaimed.length > 0 ? "claimed" : "claimed-else";
-  }
-
-  // "processing" (not yet stale) — another delivery owns it.
-  return "claimed-else";
+  if (data === "owned") return { status: "claimed", token };
+  // "duplicate" | "in_progress" — another delivery owns or completed it.
+  return { status: "replayed" };
 }
 
-async function markEventProcessed(
+/**
+ * Finalize a claim we own. Returns false when the token no longer matches
+ * (claim was taken over after going stale) — the new owner will finalize.
+ */
+async function finalizeStripeEvent(
   sb: SbAdmin,
   eventId: string,
+  claimToken: string,
   result: string,
+): Promise<boolean> {
+  const { data, error } = await sb.rpc("finalize_stripe_event", {
+    p_stripe_event_id: eventId,
+    p_claim_token: claimToken,
+    p_result: result,
+  });
+  if (error) {
+    console.error(
+      `[stripe.webhook] finalize_stripe_event failed for ${eventId}: ${error.message}`,
+    );
+    return false;
+  }
+  return data === true;
+}
+
+/**
+ * Release a claim we own after a processing error: deletes the "processing"
+ * row (token-fenced) so Stripe's retry can claim it fresh. A "lost"/"absent"
+ * result means another worker owns or finished it — still safe to 500; the
+ * retry will observe duplicate/in_progress and acknowledge.
+ */
+async function releaseStripeEvent(
+  sb: SbAdmin,
+  eventId: string,
+  claimToken: string,
 ): Promise<void> {
-  await sb
-    .from("stripe_events")
-    .update({ result })
-    .eq("stripe_event_id", eventId);
+  const { error } = await sb.rpc("release_stripe_event", {
+    p_stripe_event_id: eventId,
+    p_claim_token: claimToken,
+  });
+  if (error) {
+    console.error(
+      `[stripe.webhook] release_stripe_event failed for ${eventId}: ${error.message}`,
+    );
+  }
 }
 
 /**
@@ -492,20 +492,24 @@ export async function POST(req: NextRequest) {
   }
 
   // Idempotency: atomically claim the event before processing. Concurrent
-  // deliveries of the same event cannot produce duplicate side effects.
+  // deliveries of the same event cannot produce duplicate side effects —
+  // claim_stripe_event fences the row with a per-attempt token that only
+  // the winner can finalize or release.
   // Skipped when the event delegates to a self-claiming RPC (see above) —
   // that RPC's own claim is the sole gate for those events.
+  let claimToken: string | null = null;
   if (sb && !delegatesToSelfClaimingRpc) {
     const claim = await claimStripeEvent(sb, event.id, event.type);
-    if (claim === "unclaimable") {
+    if (claim.status === "unclaimable") {
       return NextResponse.json(
         { error: "Webhook processing failed" },
         { status: 500 },
       );
     }
-    if (claim !== "claimed") {
+    if (claim.status !== "claimed") {
       return NextResponse.json({ received: true, replayed: true });
     }
+    claimToken = claim.token ?? null;
   }
 
   const result = "processed";
@@ -1062,12 +1066,13 @@ export async function POST(req: NextRequest) {
       }
     }
   } catch (_err) {
-    // Mark the claimed event failed so a Stripe retry can reclaim and
-    // reprocess it (claimStripeEvent re-claims only rows in "failed").
-    // Delegated events are skipped — their self-claiming RPC owns the row.
-    if (sb && !delegatesToSelfClaimingRpc) {
+    // Release the claim we own so Stripe's retry can claim the event fresh.
+    // Token-fenced: if our claim was taken over while we were processing,
+    // release is a no-op and the new owner's row is untouched. Delegated
+    // events are skipped — their self-claiming RPC owns the row.
+    if (sb && claimToken) {
       try {
-        await markEventProcessed(sb, event.id, "failed");
+        await releaseStripeEvent(sb, event.id, claimToken);
       } catch {
         // Non-fatal — Stripe still retries the 500.
       }
@@ -1078,10 +1083,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Mark event as processed (idempotency)
-  if (sb) {
+  // Finalize the claim we own (idempotency). Delegated events are skipped —
+  // fulfill_agent_purchase / refund_agent_purchase already recorded the
+  // terminal stripe_events row themselves. A false return means our claim
+  // was taken over after going stale; the new owner finalizes instead.
+  if (sb && claimToken) {
     try {
-      await markEventProcessed(sb, event.id, result);
+      await finalizeStripeEvent(sb, event.id, claimToken, result);
     } catch {
       // Non-fatal if we can't record the event
     }
