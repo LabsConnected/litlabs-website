@@ -108,4 +108,124 @@ describe("GET /api/studio/browser/proxy", () => {
     const res = await GET(req("?url=https://down.example.com/"));
     expect(res.status).toBe(502);
   });
+
+  // ─── Error documents: Studio-native HTML, never raw JSON ──────
+  describe("error documents", () => {
+    it("serves a styled HTML error page for policy blocks", async () => {
+      const res = await GET(req("?url=https://g00gle.com/"));
+      expect(res.status).toBe(403);
+      expect(res.headers.get("content-type")).toContain("text/html");
+      const body = await res.text();
+      expect(body).toContain("LiTT Studio Browser");
+      expect(body).toContain("can&#39;t be shown");
+      expect(body).toContain("g00gle.com");
+      expect(body).not.toContain('"error"'); // no raw JSON
+      expect(res.headers.get("content-security-policy")).toContain("sandbox");
+    });
+
+    it("serves HTML for unreachable upstreams and missing url", async () => {
+      fetchMock.mockRejectedValue(new Error("ECONNREFUSED"));
+      const down = await GET(req("?url=https://down.example.com/"));
+      expect(down.status).toBe(502);
+      expect(down.headers.get("content-type")).toContain("text/html");
+      expect(await down.text()).toContain("could not be reached");
+
+      const missing = await GET(req(""));
+      expect(missing.status).toBe(400);
+      expect(missing.headers.get("content-type")).toContain("text/html");
+    });
+
+    it("HTML-escapes the attempted URL in the error page", async () => {
+      // A policy-blocked URL containing markup must appear escaped in
+      // the error document, never as live HTML.
+      const res = await GET(
+        req(`?url=${encodeURIComponent("https://g00gle.com/<script>alert(1)</script>")}`),
+      );
+      expect(res.status).toBe(403);
+      const body = await res.text();
+      expect(body).not.toContain("<script>alert(1)</script>");
+      expect(body).toContain("&lt;script&gt;");
+    });
+  });
+
+  // ─── Redirect validation: every hop passes the URL policy ──────
+  describe("redirect handling", () => {
+    it("follows allowed redirects and serves the final document", async () => {
+      fetchMock
+        .mockResolvedValueOnce(
+          new Response(null, {
+            status: 302,
+            headers: { location: "https://example.com/final" },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response("<html><body>landed</body></html>", {
+            status: 200,
+            headers: { "content-type": "text/html" },
+          }),
+        );
+      const res = await GET(req("?url=https://example.com/start"));
+      expect(res.status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[0][0]).toBe("https://example.com/start");
+      expect(fetchMock.mock.calls[1][0]).toBe("https://example.com/final");
+      const body = await res.text();
+      expect(body).toContain("landed");
+      expect(body).toContain('<base href="https://example.com/final">');
+    });
+
+    it("blocks a redirect into a policy-denied host", async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(null, {
+          status: 302,
+          headers: { location: "http://169.254.169.254/latest/meta-data" },
+        }),
+      );
+      const res = await GET(req("?url=https://example.com/"));
+      expect(res.status).toBe(403);
+      expect(fetchMock).toHaveBeenCalledTimes(1); // blocked hop never fetched
+      const body = await res.text();
+      expect(body).toContain("security policy");
+    });
+
+    it("blocks a redirect into a phishing host", async () => {
+      fetchMock.mockResolvedValueOnce(
+        new Response(null, {
+          status: 301,
+          headers: { location: "https://g00gle.com/" },
+        }),
+      );
+      const res = await GET(req("?url=https://example.com/"));
+      expect(res.status).toBe(403);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("resolves relative redirect locations against the current URL", async () => {
+      fetchMock
+        .mockResolvedValueOnce(
+          new Response(null, { status: 307, headers: { location: "/next" } }),
+        )
+        .mockResolvedValueOnce(
+          new Response("ok", { status: 200, headers: { "content-type": "text/plain" } }),
+        );
+      const res = await GET(req("?url=https://example.com/a/b"));
+      expect(res.status).toBe(200);
+      expect(fetchMock.mock.calls[1][0]).toBe("https://example.com/next");
+    });
+
+    it("gives up after too many redirects", async () => {
+      fetchMock.mockImplementation(() =>
+        Promise.resolve(
+          new Response(null, {
+            status: 302,
+            headers: { location: "https://example.com/loop" },
+          }),
+        ),
+      );
+      const res = await GET(req("?url=https://example.com/"));
+      expect(res.status).toBe(508);
+      expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(7);
+      expect(await res.text()).toContain("Too many redirects");
+    });
+  });
 });

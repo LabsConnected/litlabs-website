@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   browserProxyUrl,
   buildProxyBootstrapScript,
+  buildProxyErrorPage,
   buildProxyResponseHeaders,
   injectProxyBootstrap,
   isHtmlContentType,
@@ -140,5 +141,54 @@ describe("buildProxyResponseHeaders", () => {
     expect(out.get("content-type")).toBe("text/html; charset=utf-8");
     expect(out.get("x-custom")).toBe("kept");
     expect(out.get("cache-control")).toBe("no-store");
+  });
+});
+
+describe("buildProxyErrorPage", () => {
+  it("renders a self-contained Studio error document", () => {
+    const html = buildProxyErrorPage({
+      title: "This address can't be shown",
+      message: "Blocked by the Studio browser's security policy: typosquat.",
+      url: "https://g00gle.com/",
+    });
+    expect(html).toContain("<!DOCTYPE html>");
+    expect(html).toContain("LiTT Studio Browser");
+    expect(html).toContain("This address can&#39;t be shown");
+    expect(html).toContain("g00gle.com");
+    expect(html).toContain('href="https://g00gle.com/"');
+    expect(html).toContain('target="_blank"');
+    // No external resources — the document must render inside the
+    // sandboxed iframe with no network fetches of its own.
+    expect(html).not.toMatch(/<script|<link|src=|@import|url\(/);
+  });
+
+  it("escapes HTML in every interpolated field", () => {
+    const html = buildProxyErrorPage({
+      title: '<img src=x onerror=alert(1)>',
+      message: '"><script>alert(2)</script>',
+      url: 'https://evil.example/"<script>',
+      hint: "<b>hint</b>",
+    });
+    expect(html).not.toContain("<img src=x");
+    expect(html).not.toContain("<script>alert");
+    expect(html).toContain("&lt;img");
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).toContain("&lt;b&gt;hint&lt;/b&gt;");
+  });
+
+  it("only renders the open-externally link for plain http(s) URLs", () => {
+    const safe = buildProxyErrorPage({
+      title: "t",
+      message: "m",
+      url: "https://example.com/",
+    });
+    expect(safe).toContain('href="https://example.com/"');
+
+    for (const bad of ["javascript:alert(1)", "data:text/html,x", "file:///etc/passwd", "not a url"]) {
+      const html = buildProxyErrorPage({ title: "t", message: "m", url: bad });
+      // Shown as inert text, never as a clickable link.
+      expect(html).not.toContain("<a ");
+      expect(html).toContain(bad);
+    }
   });
 });

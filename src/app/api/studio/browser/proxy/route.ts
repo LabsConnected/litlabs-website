@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { checkBrowserUrlPolicy } from "@/lib/litt-intelligence/browser-url-policy";
 import {
+  buildProxyErrorPage,
   buildProxyResponseHeaders,
   injectProxyBootstrap,
   isHtmlContentType,
+  PROXIED_DOCUMENT_CSP,
 } from "@/lib/studio/browser-proxy";
 
 export const runtime = "nodejs";
@@ -18,53 +20,126 @@ export const dynamic = "force-dynamic";
  * re-served with framing-refusal headers stripped and a CSP sandbox
  * forcing an opaque origin.
  *
- * GET only. Every target passes the agent browser URL policy
- * (http/https only; no localhost, link-local, cloud-metadata, or
- * credential-phishing hosts). Redirects are followed by fetch; the
- * final URL is what the injected <base> and bootstrap use.
+ * GET only. Every target — the requested URL AND every redirect hop —
+ * passes the agent browser URL policy (http/https only; no localhost,
+ * link-local, cloud-metadata, phishing, or deceptive-subdomain
+ * hosts). Redirects are followed manually so each hop is re-checked:
+ * an allowed page cannot bounce the proxy into a blocked address.
+ * Errors are served as a Studio-styled HTML document, not raw JSON,
+ * so the panel frame always shows a readable state.
  */
 
 const UPSTREAM_TIMEOUT_MS = 20_000;
 /** HTML larger than this is passed through unrewritten rather than buffered forever. */
 const MAX_HTML_REWRITE_BYTES = 5 * 1024 * 1024;
+/** Redirect hops followed per request before giving up. */
+const MAX_REDIRECT_HOPS = 5;
 
 const BROWSER_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 LiTTStudioBrowser/1.0";
 
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+function errorPage(
+  status: number,
+  title: string,
+  message: string,
+  url?: string | null,
+  hint?: string,
+): NextResponse {
+  const headers = new Headers({
+    "content-type": "text/html; charset=utf-8",
+    "content-security-policy": PROXIED_DOCUMENT_CSP,
+    "cache-control": "no-store",
+  });
+  return new NextResponse(buildProxyErrorPage({ title, message, url, hint }), {
+    status,
+    headers,
+  });
+}
+
 export async function GET(req: NextRequest) {
   const { userId } = await auth(req);
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const rawTarget = new URL(req.url).searchParams.get("url")?.trim();
-  if (!rawTarget) {
-    return NextResponse.json({ error: "url is required" }, { status: 400 });
-  }
-
-  const policy = checkBrowserUrlPolicy(rawTarget);
-  if (!policy.allowed) {
-    return NextResponse.json(
-      { error: `This address can't be shown in the Studio browser: ${policy.reason ?? "blocked by policy"}` },
-      { status: 403 },
+  if (!userId) {
+    return errorPage(
+      401,
+      "Sign in required",
+      "Your LiTT session is not active, so the Studio browser can't load pages. Sign in again and retry.",
     );
   }
 
-  let upstream: Response;
-  try {
-    upstream = await fetch(rawTarget, {
-      method: "GET",
-      redirect: "follow",
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-      headers: {
-        "user-agent": BROWSER_USER_AGENT,
-        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "accept-language": req.headers.get("accept-language") ?? "en-US,en;q=0.9",
-      },
-    });
-  } catch (err) {
-    const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
-    return NextResponse.json(
-      { error: timedOut ? "The site took too long to respond." : "The site could not be reached." },
-      { status: timedOut ? 504 : 502 },
+  const rawTarget = new URL(req.url).searchParams.get("url")?.trim();
+  if (!rawTarget) {
+    return errorPage(400, "Missing address", "No web address was provided to the Studio browser.");
+  }
+
+  // Follow redirects manually so EVERY hop passes the URL policy —
+  // fetch's built-in redirect:"follow" would let an allowed page
+  // bounce the proxy into localhost, a metadata endpoint, or a
+  // phishing host without re-checking.
+  let currentUrl = rawTarget;
+  let upstream: Response | null = null;
+  for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
+    const policy = checkBrowserUrlPolicy(currentUrl);
+    if (!policy.allowed) {
+      return errorPage(
+        403,
+        "This address can't be shown",
+        `Blocked by the Studio browser's security policy: ${policy.reason ?? "not allowed"}.`,
+        currentUrl,
+        "If you believe this is a mistake, open the address in a regular browser instead.",
+      );
+    }
+
+    let res: Response;
+    try {
+      res = await fetch(currentUrl, {
+        method: "GET",
+        redirect: "manual",
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+        headers: {
+          "user-agent": BROWSER_USER_AGENT,
+          accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+          "accept-language": req.headers.get("accept-language") ?? "en-US,en;q=0.9",
+        },
+      });
+    } catch (err) {
+      const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+      return errorPage(
+        timedOut ? 504 : 502,
+        timedOut ? "The site took too long to respond" : "The site could not be reached",
+        timedOut
+          ? "The site didn't answer within the Studio browser's time limit."
+          : "The Studio browser couldn't connect to this address. The site may be down or blocking automated access.",
+        currentUrl,
+      );
+    }
+
+    const location = res.headers.get("location");
+    if (REDIRECT_STATUSES.has(res.status) && location) {
+      try {
+        currentUrl = new URL(location, currentUrl).toString();
+      } catch {
+        return errorPage(
+          502,
+          "The site sent an invalid redirect",
+          "The site responded with a redirect the Studio browser couldn't understand.",
+          currentUrl,
+        );
+      }
+      continue;
+    }
+
+    upstream = res;
+    break;
+  }
+
+  if (!upstream) {
+    return errorPage(
+      508,
+      "Too many redirects",
+      `The site kept redirecting (more than ${MAX_REDIRECT_HOPS} hops), so the Studio browser stopped following it.`,
+      currentUrl,
     );
   }
 
@@ -81,7 +156,7 @@ export async function GET(req: NextRequest) {
       // root-relative proxy path against the target origin.
       const rewritten = injectProxyBootstrap(
         html,
-        upstream.url || rawTarget,
+        upstream.url || currentUrl,
         new URL(req.url).origin,
       );
       headers.set("content-type", "text/html; charset=utf-8");
