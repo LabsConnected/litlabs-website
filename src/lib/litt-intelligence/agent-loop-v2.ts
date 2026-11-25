@@ -73,6 +73,9 @@ import {
   type QualityLoopSnapshot,
   formatQualityVerdictBlock,
   stripQualityStageMarkers,
+  stripWrittenFileDumps,
+  userAskedToSeeFileContents,
+  type WrittenFileContent,
 } from "./quality-loop-flow";
 import type { QualityTaskScope } from "./quality-loop";
 // LiTT Tool Orchestrator (fix/litt-tool-orchestrator): goal → capability
@@ -2080,6 +2083,84 @@ function emitLoopStepMetering(input: LoopStepMetering): void {
   }
 }
 
+/**
+ * Record the exact content of a successful files.write for the
+ * reply-content guard. The guard compares the run's closing text
+ * against what the run itself wrote; the tool-call log deliberately
+ * carries no inputs, so the contents are tracked beside it, per run.
+ */
+function noteWrittenFileContent(
+  written: Map<string, string>,
+  toolId: string,
+  inputs: Record<string, unknown> | undefined,
+): void {
+  if (toolId !== "files.write" || !inputs) return;
+  const path = inputs.path;
+  const content = inputs.content;
+  if (typeof path === "string" && path && typeof content === "string") {
+    written.set(path, content);
+  }
+}
+
+function writtenFileList(
+  written: Map<string, string>,
+): WrittenFileContent[] {
+  return [...written].map(([path, content]) => ({ path, content }));
+}
+
+/**
+ * The D4 text channel, guarded. callLLMWithTools hands each step's
+ * reply text to onText as the step completes; emitting it raw would
+ * stream a file dump to the client before the loop's final-text
+ * guard ever runs. So step text is BUFFERED, never emitted on
+ * arrival:
+ *
+ * - A step that ends in tool calls is interim narration — its text
+ *   is flushed verbatim once the step settles.
+ * - A text-only step is a candidate closing reply — its text is
+ *   WITHHELD. If the loop continues anyway, the withheld text is
+ *   flushed verbatim at the next settlement (it was interim after
+ *   all). If the run finalizes, flushFinal delivers the GUARDED
+ *   closing text as the final streamed segment and the raw text is
+ *   dropped — a dump can never reach the stream.
+ */
+interface GuardedTextStream {
+  onText: (text: string) => void;
+  noteStepSettled: (hasToolCalls: boolean) => void;
+  flushFinal: (guardedText: string) => void;
+}
+
+function createGuardedTextStream(
+  emit: (text: string) => void,
+): GuardedTextStream {
+  let pending: string | null = null;
+  let withheld: string | null = null;
+  return {
+    onText: (text) => {
+      pending = text;
+    },
+    noteStepSettled: (hasToolCalls) => {
+      if (hasToolCalls) {
+        if (withheld) emit(withheld);
+        withheld = null;
+        if (pending) emit(pending);
+        pending = null;
+      } else {
+        if (withheld) emit(withheld);
+        withheld = pending;
+        pending = null;
+      }
+    },
+    flushFinal: (guardedText) => {
+      if (withheld != null) {
+        if (guardedText) emit(guardedText);
+        withheld = null;
+      }
+      pending = null;
+    },
+  };
+}
+
 export async function runAgentLoopV2(
   userMessage: string,
   transport: WorkspaceTransport,
@@ -2319,6 +2400,13 @@ async function runAgentLoopV2Inner(
   // read as "unchanged".
   let baselineCheckpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
   const toolCallLog: AgentToolCallLogEntry[] = [];
+  // Reply-content guard state: the exact contents this run writes
+  // (the closing reply is checked against them at finalize), and the
+  // guarded D4 text stream (the closing reply never streams raw).
+  const writtenFiles = new Map<string, string>();
+  const textStream = createGuardedTextStream((text) =>
+    localProgress.emit({ type: "text", text }),
+  );
   let completedDeployment: CompletedDeployment | null = null;
   // Round 14: images generated during this run, for the inline chat
   // render appended at the tail (readChatImageOutcome).
@@ -2410,14 +2498,16 @@ async function runAgentLoopV2Inner(
           allowLittPaidProviders: cfg.allowLittPaidProviders,
           allowTransientPlanRetry: true,
           onRoutePlan: recordRoutePlan,
-          // D4 text channel: stream each step's reply text to the
-          // client as it is produced, instead of the answer arriving
-          // whole inside the terminal done payload.
+          // D4 text channel (guarded): the step's reply text is
+          // buffered by the guarded text stream, not emitted raw —
+          // a closing reply that dumps a written file must never
+          // reach the client before the final-text guard runs.
           onText: (text) => {
-            localProgress.emit({ type: "text", text });
+            textStream.onText(text);
           },
         },
       );
+      textStream.noteStepSettled((llmResponse.toolCalls?.length ?? 0) > 0);
       const llmDurationMs = Date.now() - llmStartTime;
       if (llmResponse.responseShape && llmResponse.provider) {
         localProgress.emit({ type: "model_response", provider: llmResponse.provider, model: llmResponse.model, ...llmResponse.responseShape, finishReason: llmResponse.finishReason });
@@ -2744,6 +2834,7 @@ async function runAgentLoopV2Inner(
             success: true,
           }));
           toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result.result), persisted: prior.persisted });
+          noteWrittenFileContent(writtenFiles, toolCall.toolId, toolCall.inputs);
           localProgress.emit({
             type: "tool_result",
             toolId: toolCall.toolId,
@@ -3176,6 +3267,9 @@ async function runAgentLoopV2Inner(
         paths: !toolDef.readOnly ? declaredMutationPaths(toolCall.inputs, result.result) : undefined,
         persisted: mutationCheck?.verified ?? undefined,
       });
+      if (result.success) {
+        noteWrittenFileContent(writtenFiles, toolCall.toolId, toolCall.inputs);
+      }
       // Observability (Part J): record the tool call for the run record.
       recordObsToolCall(runObs, {
         toolId: toolCall.toolId,
@@ -3529,11 +3623,27 @@ async function runAgentLoopV2Inner(
   const visibleFinalText = qualitySession
     ? stripQualityStageMarkers(effectiveFinalText)
     : effectiveFinalText;
-  const userFinalText =
+  const rawUserFinalText =
     visibleFinalText ||
     (qualitySession
       ? describeSilentOutcome(toolCallLog, cancelled, cancelReason)
       : visibleFinalText);
+  // Reply-content guard (2026-11-25): the closing reply must
+  // summarize, never paste a file this run just wrote — strip any
+  // dump against the run's own written contents before the quality
+  // verdict suffix (system text, not model prose) is appended. The
+  // silent-outcome fallback is factual prose with no code spans, so
+  // it passes through untouched.
+  const userFinalText = stripWrittenFileDumps(
+    rawUserFinalText,
+    writtenFileList(writtenFiles),
+    { userAskedForContents: userAskedToSeeFileContents(userMessage) },
+  );
+  // Streaming: the final step's raw text was withheld by the guarded
+  // text stream; deliver the guarded closing text as the last
+  // streamed segment so the live bubble and the persisted message
+  // carry the same guarded copy.
+  textStream.flushFinal(userFinalText);
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok
       ? `${userFinalText}${formatQualityVerdictBlock(qualityFinale)}`
@@ -3936,6 +4046,8 @@ export interface DeferredToolBatchContext {
   transport: WorkspaceTransport;
   llmMessages: LLMMessage[];
   toolCallLog: AgentToolCallLogEntry[];
+  /** Reply-content guard: shared with the owning loop when present. */
+  writtenFiles?: Map<string, string>;
   toolCallRecords: ToolCallRecord[];
   executedMutations: Map<string, ExecutedMutation>;
   localProgress: ProgressEmitter;
@@ -4043,6 +4155,9 @@ export async function executeDeferredToolCalls(
           success: true,
         }));
         ctx.toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result.result), persisted: prior.persisted });
+        if (ctx.writtenFiles) {
+          noteWrittenFileContent(ctx.writtenFiles, toolCall.toolId, toolCall.inputs);
+        }
         ctx.localProgress.emit({
           type: "tool_result",
           toolId: toolCall.toolId,
@@ -4217,6 +4332,9 @@ export async function executeDeferredToolCalls(
       paths: !toolDef.readOnly ? declaredMutationPaths(toolCall.inputs, result.result) : undefined,
       persisted: mutationCheck?.verified ?? undefined,
     });
+    if (result.success && ctx.writtenFiles) {
+      noteWrittenFileContent(ctx.writtenFiles, toolCall.toolId, toolCall.inputs);
+    }
     state.completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? state.completedDeployment;
     const deferredChatImage = readChatImageOutcome(toolCall.toolId, result.result);
     if (deferredChatImage) state.chatImages.push(deferredChatImage);
@@ -4463,6 +4581,12 @@ async function resumeAgentLoopV2Inner(
   // persisted/complete verdict must cover the full mutation history, not
   // just what ran after the gate.
   const toolCallLog: AgentToolCallLogEntry[] = [...(resume.priorToolCalls ?? [])];
+  // Reply-content guard state — same contract as the main loop: the
+  // contents this run writes, and the guarded D4 text stream.
+  const writtenFiles = new Map<string, string>();
+  const textStream = createGuardedTextStream((text) =>
+    localProgress.emit({ type: "text", text }),
+  );
   let shellProbeAt = 0;
   let shellMutationVerified = false;
   let completedDeployment: CompletedDeployment | null = null;
@@ -4590,6 +4714,9 @@ async function resumeAgentLoopV2Inner(
       paths: !resumedReadOnly ? declaredMutationPaths(resume.inputs, result.result) : undefined,
       persisted: mutationCheck?.verified ?? undefined,
     });
+    if (result.success) {
+      noteWrittenFileContent(writtenFiles, resume.toolId, resume.inputs);
+    }
     // Observability (Part J): record the approved tool execution.
     recordObsToolCall(resumeRunObs, {
       toolId: resume.toolId,
@@ -4723,6 +4850,7 @@ async function resumeAgentLoopV2Inner(
       transport,
       llmMessages,
       toolCallLog,
+      writtenFiles,
       toolCallRecords,
       executedMutations,
       localProgress,
@@ -4903,16 +5031,18 @@ async function resumeAgentLoopV2Inner(
           allowLittPaidProviders: cfg.allowLittPaidProviders,
           allowTransientPlanRetry: true,
           onRoutePlan: recordRoutePlan,
-          // D4 text channel: same streaming as the main loop — resumed
-          // runs share the text channel instead of arriving whole.
+          // D4 text channel (guarded): same treatment as the main
+          // loop — resumed runs buffer step text through the guarded
+          // text stream instead of emitting it raw.
           onText: (text) => {
-            localProgress.emit({ type: "text", text });
+            textStream.onText(text);
           },
         },
       );
       if (llmResponse.responseShape && llmResponse.provider) {
         localProgress.emit({ type: "model_response", provider: llmResponse.provider, model: llmResponse.model, ...llmResponse.responseShape, finishReason: llmResponse.finishReason });
       }
+      textStream.noteStepSettled((llmResponse.toolCalls?.length ?? 0) > 0);
       // Canonical metering (P0): one usage+cost event per resumed step's
       // LLM call. provider/model are from the ACTUAL call; token counts
       // are chars/4 estimates — see emitLoopStepMetering.
@@ -5084,6 +5214,7 @@ async function resumeAgentLoopV2Inner(
             success: true,
           }));
           toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result.result), persisted: prior.persisted });
+          noteWrittenFileContent(writtenFiles, toolCall.toolId, toolCall.inputs);
           localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: true, summary: "skipped — already executed", durationMs: 0 });
           continue;
         }
@@ -5294,6 +5425,9 @@ async function resumeAgentLoopV2Inner(
         paths: !toolDef.readOnly ? declaredMutationPaths(toolCall.inputs, result.result) : undefined,
         persisted: mutationCheck?.verified ?? undefined,
       });
+      if (result.success) {
+        noteWrittenFileContent(writtenFiles, toolCall.toolId, toolCall.inputs);
+      }
       completedDeployment = readDeploymentOutcome(toolCall.toolId, result.result) ?? completedDeployment;
       const batchChatImage = readChatImageOutcome(toolCall.toolId, result.result);
       if (batchChatImage) chatImages.push(batchChatImage);
@@ -5553,11 +5687,23 @@ async function resumeAgentLoopV2Inner(
   const visibleFinalText = qualitySession
     ? stripQualityStageMarkers(effectiveFinalText)
     : effectiveFinalText;
-  const userFinalText =
+  const rawUserFinalText =
     visibleFinalText ||
     (qualitySession
       ? describeSilentOutcome(toolCallLog, cancelled, cancelReason)
       : visibleFinalText);
+  // Reply-content guard (2026-11-25): same contract as the initial
+  // loop — a resumed run's closing reply must not paste a file this
+  // run wrote (including the approved call and the deferred batch,
+  // whose writes are recorded in the same map).
+  const userFinalText = stripWrittenFileDumps(
+    rawUserFinalText,
+    writtenFileList(writtenFiles),
+    { userAskedForContents: userAskedToSeeFileContents(resumeUserMessage) },
+  );
+  // Streaming: deliver the guarded closing text as the last streamed
+  // segment (the raw final step text was withheld — see the main loop).
+  textStream.flushFinal(userFinalText);
   const gatedFinalText =
     qualityFinale && !qualityFinale.verdict.ok
       ? `${userFinalText}${formatQualityVerdictBlock(qualityFinale)}`

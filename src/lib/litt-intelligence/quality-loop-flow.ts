@@ -403,6 +403,249 @@ export function stripQualityStageMarkers(text: string): string {
     .replace(/\n+$/, "");
 }
 
+// ─── Reply-content guard ─────────────────────────────────────────────
+
+/** A file written during the run being finalized, with its content. */
+export interface WrittenFileContent {
+  path: string;
+  content: string;
+}
+
+/**
+ * A verbatim match must be at least this long before a reply span is
+ * treated as a file dump — shorter overlaps are ordinary snippets or
+ * quoted fragments and are always preserved.
+ */
+const FILE_DUMP_MIN_VERBATIM_CHARS = 120;
+/**
+ * A run of at least this many consecutive content lines shared with a
+ * written file marks the span as a dump, fenced or not.
+ */
+const FILE_DUMP_MIN_LINE_RUN = 8;
+/**
+ * A single fenced block longer than this in a build run's closing
+ * reply is collapsed even when it matches nothing the run wrote —
+ * closing replies summarize; they are never a code channel.
+ */
+const FILE_DUMP_MAX_FENCED_LINES = 40;
+
+/**
+ * Conservative explicit-ask detection: the guard stands down ONLY
+ * when the user's message plainly asks for file content or code to be
+ * shown in chat. Ordinary build/chat phrasing ("show me the preview",
+ * "show the hours") must not match — the patterns require a display
+ * verb tied to a content noun, or a direct "what's in the file".
+ */
+const FILE_CONTENT_ASK_PATTERNS: RegExp[] = [
+  /\b(?:show|print|display|paste|output|quote|repeat|dump)\b[^.?!]{0,60}\b(?:files?|contents?|code|html|text|source)\b/i,
+  /\bwhat(?:'s| is) in (?:the|my) files?\b/i,
+  /\blet me see the\b[^.?!]{0,30}\b(?:files?|code|contents?)\b/i,
+];
+
+export function userAskedToSeeFileContents(userText: string): boolean {
+  if (!userText) return false;
+  return FILE_CONTENT_ASK_PATTERNS.some((re) => re.test(userText));
+}
+
+function normalizeBlockText(s: string): string {
+  return s.replace(/\r\n/g, "\n").trim();
+}
+
+function fileBaseName(path: string): string {
+  return path.split("/").pop() ?? path;
+}
+
+function fileDumpReference(path: string | null): string {
+  return path
+    ? `${fileBaseName(path)} — written in this run; open it in Code to view.`
+    : "A file written in this run — open it in Code to view.";
+}
+
+interface NormalizedWrittenFile {
+  path: string;
+  normalized: string;
+  /** Non-empty trimmed lines, in order — the line-run match space. */
+  lines: string[];
+}
+
+function normalizeWrittenFile(file: WrittenFileContent): NormalizedWrittenFile {
+  const normalized = normalizeBlockText(file.content);
+  return {
+    path: file.path,
+    normalized,
+    lines: normalized
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0),
+  };
+}
+
+/** Longest contiguous run shared by two line arrays (indices into a). */
+function longestSharedLineRun(
+  a: string[],
+  b: string[],
+): { start: number; length: number } {
+  let bestStart = 0;
+  let bestLen = 0;
+  // DP over suffix matches, one row at a time.
+  let prev = new Array<number>(b.length + 1).fill(0);
+  for (let i = a.length - 1; i >= 0; i--) {
+    const cur = new Array<number>(b.length + 1).fill(0);
+    for (let j = b.length - 1; j >= 0; j--) {
+      if (a[i] === b[j]) {
+        cur[j] = prev[j + 1] + 1;
+        if (cur[j] > bestLen) {
+          bestLen = cur[j];
+          bestStart = i;
+        }
+      }
+    }
+    prev = cur;
+  }
+  return { start: bestStart, length: bestLen };
+}
+
+/**
+ * Does this text span reproduce the named file? Either a long
+ * verbatim overlap (substring, ≥ FILE_DUMP_MIN_VERBATIM_CHARS) or a
+ * run of ≥ FILE_DUMP_MIN_LINE_RUN consecutive shared content lines.
+ */
+function spanMatchesFile(
+  spanText: string,
+  file: NormalizedWrittenFile,
+): boolean {
+  const span = normalizeBlockText(spanText);
+  if (
+    span.length >= FILE_DUMP_MIN_VERBATIM_CHARS &&
+    (file.normalized.includes(span) || span.includes(file.normalized))
+  ) {
+    return true;
+  }
+  const spanLines = span
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  if (spanLines.length < FILE_DUMP_MIN_LINE_RUN) return false;
+  return (
+    longestSharedLineRun(spanLines, file.lines).length >=
+    FILE_DUMP_MIN_LINE_RUN
+  );
+}
+
+const FENCED_BLOCK_RE = /```[^\n`]*\n([\s\S]*?)\n?```/g;
+const DUMP_LEAD_IN_RE =
+  /\s*here(?:'s| is)\b[^.:\n]*\b(?:content|code|full text|entire file)\b[^.:\n]*[:.]?/i;
+
+/**
+ * Replace file dumps in a build run's closing reply with a one-line
+ * reference. A span counts as a dump when it reproduces a file THIS
+ * run wrote (see {@link spanMatchesFile}), or when it is a single
+ * fenced block longer than FILE_DUMP_MAX_FENCED_LINES. Everything
+ * else is preserved byte-for-byte: short snippets, replies from runs
+ * that wrote nothing, and — when the user explicitly asked to see
+ * file contents in chat — the whole reply.
+ *
+ * This runs at the agent loop's final-text composition, beside
+ * {@link stripQualityStageMarkers}: the guarded text is the loop's
+ * result, so the persisted message, the done payload, and any
+ * reconnect/replay of the conversation all carry the guarded copy.
+ */
+export function stripWrittenFileDumps(
+  text: string,
+  writtenFiles: ReadonlyArray<WrittenFileContent>,
+  opts?: { userAskedForContents?: boolean },
+): string {
+  if (!text || opts?.userAskedForContents) return text;
+  const files = (writtenFiles ?? [])
+    .filter((f) => f && typeof f.content === "string" && f.content.trim())
+    .map(normalizeWrittenFile);
+  if (files.length === 0) return text;
+
+  let changed = false;
+
+  // 1) Fenced blocks: verbatim dump of a written file, or any single
+  //    block past the length cap.
+  let result = text.replace(FENCED_BLOCK_RE, (whole, inner: string) => {
+    const innerText = String(inner);
+    const matched = files.find((f) => spanMatchesFile(innerText, f));
+    if (matched) {
+      changed = true;
+      return fileDumpReference(matched.path);
+    }
+    const lineCount = innerText.replace(/\n$/, "").split("\n").length;
+    if (lineCount > FILE_DUMP_MAX_FENCED_LINES) {
+      changed = true;
+      return fileDumpReference(null);
+    }
+    return whole;
+  });
+
+  // 2) A "Here's the content of the … file:" lead-in sentence that
+  //    introduced a replaced block goes with it — the reference line
+  //    now carries the meaning. Other sentences on the line stay.
+  if (changed) {
+    const lines = result.split("\n");
+    const kept: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const isReference = files.some(
+        (f) => lines[i] === fileDumpReference(f.path),
+      ) || lines[i] === fileDumpReference(null);
+      if (isReference && kept.length > 0) {
+        // The lead-in may sit a blank line above the replaced block.
+        let prevIdx = kept.length - 1;
+        while (prevIdx >= 0 && !kept[prevIdx].trim()) prevIdx--;
+        if (prevIdx >= 0 && DUMP_LEAD_IN_RE.test(kept[prevIdx])) {
+          const cleaned = kept[prevIdx].replace(DUMP_LEAD_IN_RE, "").trim();
+          if (cleaned) kept[prevIdx] = cleaned;
+          else kept.splice(prevIdx, 1);
+        }
+      }
+      kept.push(lines[i]);
+    }
+    result = kept.join("\n");
+  }
+
+  // 3) Unfenced dumps: a long line run shared with a written file.
+  //    Repeat so dumps of two different files are both caught.
+  for (let pass = 0; pass < 4; pass++) {
+    const lines = result.split("\n");
+    const replyLines = lines.map((l) => l.trim());
+    // Map non-empty reply lines to their original indices.
+    const nonEmptyIdx: number[] = [];
+    const nonEmpty: string[] = [];
+    replyLines.forEach((l, idx) => {
+      if (l) {
+        nonEmptyIdx.push(idx);
+        nonEmpty.push(l);
+      }
+    });
+    let replaced = false;
+    for (const file of files) {
+      const run = longestSharedLineRun(nonEmpty, file.lines);
+      if (run.length >= FILE_DUMP_MIN_LINE_RUN) {
+        const startLine = nonEmptyIdx[run.start];
+        const endLine = nonEmptyIdx[run.start + run.length - 1];
+        lines.splice(
+          startLine,
+          endLine - startLine + 1,
+          fileDumpReference(file.path),
+        );
+        result = lines.join("\n");
+        changed = true;
+        replaced = true;
+        break;
+      }
+    }
+    if (!replaced) break;
+  }
+
+  if (!changed) return text;
+  return result
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/^\n+/, "")
+    .replace(/\n+$/, "");
+}
+
 /** Bounded reprompts spent asking the agent to declare missing stages. */
 export const MAX_MARKER_REPROMPTS = 1;
 
