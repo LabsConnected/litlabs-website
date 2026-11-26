@@ -1304,7 +1304,9 @@ export async function POST(
         pendingApproval: result.pendingApproval
           ? {
               toolId: result.pendingApproval.toolId,
-              pausedRunId: undefined,
+              // pausedRunId is attached below once the nested gate is
+              // persisted — never write the key as undefined (the event
+              // sanitizer must not turn it into the string "undefined").
               reason: result.pendingApproval.reason,
             }
           : undefined,

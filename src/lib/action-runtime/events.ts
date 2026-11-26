@@ -17,6 +17,10 @@ function isSecretKey(key: string): boolean {
 }
 
 function sanitizeValue(value: unknown): JsonValue {
+  // JSON has no undefined — never let it stringify to the truthy
+  // literal "undefined" (which downstream handoff validation would
+  // accept as a real pausedRunId).
+  if (value === undefined) return null;
   if (value === null || typeof value === "number" || typeof value === "boolean") {
     return value;
   }
@@ -30,6 +34,7 @@ function sanitizeValue(value: unknown): JsonValue {
   if (typeof value === "object") {
     const output: Record<string, JsonValue> = {};
     for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      if (nested === undefined) continue;
       output[key] = isSecretKey(key) ? "[REDACTED]" : sanitizeValue(nested);
     }
     return output;
