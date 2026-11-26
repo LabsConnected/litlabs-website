@@ -232,3 +232,116 @@ export function buildProxyResponseHeaders(upstream: Headers): Headers {
   out.set("Cache-Control", "no-store");
   return out;
 }
+
+// ─── Proxy error documents ──────────────────────────────────────
+//
+// Policy blocks, unreachable upstreams, and redirect loops used to be
+// returned as raw JSON — which the panel iframe rendered as an
+// unstyled blob of text. The route now serves a small self-contained
+// HTML document instead: same sandboxed opaque origin as proxied
+// pages, token-neutral styling (the iframe has a white background),
+// the reason, the attempted address, and an "open externally" link
+// for cases where a real browser tab is the honest fallback.
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+export interface ProxyErrorPageOptions {
+  /** Short heading, e.g. "This address can't be shown". */
+  title: string;
+  /** Human-readable explanation of what failed and why. */
+  message: string;
+  /** The address that was attempted (displayed, escaped). */
+  url?: string | null;
+  /** Optional recovery hint, e.g. "The site took too long to respond." */
+  hint?: string;
+}
+
+/**
+ * Build the HTML document served for proxy errors. `url` is only
+ * rendered as an "open in a new tab" link when it is a plain
+ * http(s) URL — anything else is shown as text only.
+ */
+export function buildProxyErrorPage(opts: ProxyErrorPageOptions): string {
+  const title = escapeHtml(opts.title);
+  const message = escapeHtml(opts.message);
+  const hint = opts.hint ? escapeHtml(opts.hint) : null;
+  const safeUrl =
+    opts.url && /^https?:\/\//i.test(opts.url) ? opts.url : null;
+  const urlHtml = opts.url
+    ? `<p class="url">${escapeHtml(opts.url)}</p>`
+    : "";
+  const hintHtml = hint ? `<p class="hint">${hint}</p>` : "";
+  const linkHtml = safeUrl
+    ? `<p class="actions"><a id="open-external" class="btn" href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">Open in a new tab</a></p>`
+    : "";
+  // The document runs sandboxed inside the panel iframe, so a
+  // target=_blank click would open a tab that INHERITS the sandbox
+  // (opaque origin, no cookies/storage). Hand the open to the parent
+  // instead — the panel's message listener calls window.open from
+  // the unsandboxed page, exactly like proxied-page external links.
+  // The href stays as a no-JS fallback.
+  const externalScript = safeUrl
+    ? `<script>document.getElementById("open-external").addEventListener("click",function(e){e.preventDefault();try{parent.postMessage({source:${JSON.stringify(BROWSER_PROXY_MESSAGE_SOURCE)},type:"external",url:${JSON.stringify(safeUrl).replace(/</g, "\\u003c")}},"*")}catch(_){}});</script>`
+    : "";
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title} — LiTT Studio</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #ffffff; color: #1f2937;
+  }
+  .card {
+    max-width: 26rem; margin: 1.5rem; padding: 1.75rem 1.5rem;
+    border: 1px solid #e5e7eb; border-radius: 0.875rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    text-align: center;
+  }
+  .eyebrow {
+    margin: 0 0 0.5rem; font-size: 0.6875rem; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase; color: #6b7280;
+  }
+  h1 { margin: 0 0 0.625rem; font-size: 1rem; font-weight: 600; color: #111827; }
+  .message { margin: 0 0 0.75rem; font-size: 0.8125rem; line-height: 1.55; color: #4b5563; }
+  .url {
+    margin: 0 0 0.75rem; padding: 0.375rem 0.625rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.75rem; color: #374151;
+    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0.375rem;
+    overflow-wrap: anywhere;
+  }
+  .hint { margin: 0 0 0.75rem; font-size: 0.75rem; color: #6b7280; }
+  .actions { margin: 0; }
+  .btn {
+    display: inline-block; padding: 0.4375rem 0.875rem;
+    font-size: 0.75rem; font-weight: 500; text-decoration: none;
+    color: #ffffff; background: #111827; border-radius: 0.5rem;
+  }
+  .btn:hover { background: #374151; }
+</style>
+</head>
+<body>
+  <main class="card" role="alert">
+    <p class="eyebrow">LiTT Studio Browser</p>
+    <h1>${title}</h1>
+    <p class="message">${message}</p>
+    ${urlHtml}
+    ${hintHtml}
+    ${linkHtml}
+  </main>
+${externalScript}
+</body>
+</html>`;
+}

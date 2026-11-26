@@ -468,4 +468,42 @@ describe("BoardBrowserPanel tab state across remounts (layout flips)", () => {
     expect(screen.queryByTestId("board-browser-blocked")).toBeNull();
     expect(screen.getByTestId("board-browser-frame")).toBeInTheDocument();
   });
+
+  it("drops non-http(s) postMessage targets — a hostile framed page cannot drive javascript: URLs into window.open or history", () => {
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    wrap(<BoardBrowserPanel />);
+    navigateTo("example.com");
+    fireEvent.load(screen.getByTestId("board-browser-frame"));
+
+    for (const type of ["external", "navigate", "landed"]) {
+      postFromFrame({
+        source: "litt-browser",
+        type,
+        url: "javascript:alert(document.domain)",
+      });
+    }
+    postFromFrame({
+      source: "litt-browser",
+      type: "external",
+      url: "data:text/html,<script>alert(1)</script>",
+    });
+
+    expect(openSpy).not.toHaveBeenCalled();
+    // History/address bar untouched by the hostile messages.
+    const tab = useStudioBrowserStore.getState().tabs[0];
+    expect(tab.history).toEqual(["https://example.com"]);
+    expect(screen.getByTestId("board-browser-input")).toHaveValue("https://example.com");
+
+    // A legitimate external message still opens a real tab.
+    postFromFrame({
+      source: "litt-browser",
+      type: "external",
+      url: "https://example.com/help",
+    });
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://example.com/help",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
 });
