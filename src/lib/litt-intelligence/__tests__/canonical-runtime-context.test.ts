@@ -191,6 +191,15 @@ describe("buildRuntimeContextBlock", () => {
     expect(block).toContain("STYLING CONTRACT (Tailwind browser CDN)");
     expect(block).toContain("@tailwindcss/browser@4");
     expect(block).toContain("NEVER put an @import line inside");
+    // ACC-08 Defect 2a: the responsive-layout rule rides the same
+    // static contract — a wide desktop container, no phone-width cap
+    // on the page, grids that expand. Run 1 on ba16d435 collapsed at
+    // desktop width because the contract never asked for any of it.
+    expect(block).toContain("RESPONSIVE LAYOUT RULE (ACC-08)");
+    expect(block).toContain("max-w-6xl or max-w-7xl");
+    expect(block).toContain("never at phone width");
+    expect(block).toContain("below about 64rem");
+    expect(block).toContain("md:grid-cols-2 lg:grid-cols-3");
   });
 
   it("omits the Tailwind styling contract for non-static frameworks", () => {

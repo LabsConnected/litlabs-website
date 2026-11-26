@@ -32,6 +32,8 @@ import { buildPatchRecoveryMessage, existingPageOverwriteError, validateApplyPat
 import { computeWorkspaceChange, workspaceChangeFromVolumeListing, workspaceChangeFromDirectReads } from "./workspace-change-producer";
 import { checkRequestedLiteral, requestedLiteralFailureMessage, requestedLiteralRepairPrompt } from "./requested-literal";
 import { checkTextContrast, textContrastFailureMessage, textContrastRepairPrompt, textContrastUnverifiableNote } from "./text-contrast";
+import { checkRenderedLayout, renderedLayoutFailureMessage, renderedLayoutRepairPrompt } from "./rendered-layout";
+import { studioLog } from "@/lib/studio/logger";
 import { DEPLOY_ONLY_PROMPT_NOTE, deployOnlyRefusalError, isBlockedInDeployOnlyRun, isDeployOnlyInstruction } from "./deploy-intent";
 import { settleRunOutcome, type RunFailureContributor } from "./run-settlement";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
@@ -438,6 +440,14 @@ export interface AgentLoopResult {
    * is stated, never hidden. Never set on a failed run.
    */
   contrastNote?: string;
+  /**
+   * ACC-08: set when a completed run's automatic project checks
+   * could not run (or their results could not be saved). Larry's
+   * ruling (2026-11-25): the build still counts, but the fact is
+   * LOUD — this note is appended to the closing text so the missing
+   * verification is stated, never hidden. Never set on a failed run.
+   */
+  checksNote?: string;
   /**
    * Round 11: every failure observed during the run (failed tool calls,
    * unknown workspace verification, honest failure, model/route
@@ -1047,10 +1057,15 @@ const LOCAL_SITE_QUALITY_CONTRACT =
   "## Website quality contract\n" +
   "A NEW index.html MUST be a complete styled page, never a bare document:\n" +
   "- <style> block defining a design system: :root{--bg,--surface,--text,--muted,--accent,--radius:12px,--shadow},\n" +
-  "  a system font stack, body{margin:0} reset, and a max-width container.\n" +
+  "  a system font stack, body{margin:0} reset, and a WIDE max-width container (at least ~64rem, e.g. max-width:72rem)\n" +
+  "  centred with margin-inline:auto — never cap the whole page at phone width, and never use fixed pixel widths\n" +
+  "  on layout containers.\n" +
   "- Semantic structure: <header> with site name + <nav>, a hero <section> with headline, tagline and a call-to-action,\n" +
   "  at least 2 more content <section>s relevant to the request (e.g. menu/features/about), and a <footer>.\n" +
-  "- Layout: cards/items in a responsive grid (repeat(auto-fit,minmax(220px,1fr))), buttons/links with a :hover state.\n" +
+  "- Layout: cards/items in a responsive grid (repeat(auto-fit,minmax(220px,1fr))) that expands to 2-4 columns on\n" +
+  "  wide screens, buttons/links with a :hover state. Cards are laid out by the grid — never absolute positioning\n" +
+  "  or negative margins that can pull cards over each other — and the hero uses padding/min-height, never a\n" +
+  "  fixed height that truncates its heading.\n" +
   "- Real copy specific to the request — never lorem ipsum, never placeholder text like 'Add your text here'.\n" +
   "- If the request names a theme/brand, express it through the tokens (background, accent, typography).\n" +
   "A page missing the <style> block, the semantic sections, or real copy is incomplete — write it fully the first time.";
@@ -1352,30 +1367,64 @@ function successfulMutationPaths(
  * seven project checks (Build, TypeScript, Lint, Test, Security,
  * Accessibility, Performance) run before the run may settle: their
  * results are emitted as build_result events (the Jobs tab's Checks
- * section reads exactly these), persisted to project_check_runs (the
- * Checks panel reads the latest persisted set), and any FAILED check
- * settles the run honestly failed with a plain-language reason — a
- * run never reports successful completion while its checks failed or
- * were left pending.
+ * section reads these live, with the persisted set as its durable
+ * fallback), persisted to project_check_runs (the Checks panel reads
+ * the latest persisted set), and any FAILED check settles the run
+ * honestly failed with a plain-language reason — a run never reports
+ * successful completion while its checks failed.
  *
- * When the checks cannot run at all (no project context on the run,
- * project gone, workspace not ready, terminal unconfigured), the
- * build is NOT failed on their absence: no results are fabricated,
- * the panel keeps its honest not-run/on-demand state, and the run's
- * own evidence decides its outcome — the same honesty rule the
- * contrast verifier follows for unjudgeable colors.
+ * ACC-08 Defect 1 — never silent again. Acceptance Run 1 on ba16d435
+ * settled as a clean success with all seven checks at "Not run"
+ * because this function's bare `catch { return {} }` swallowed
+ * whatever threw inside the checks and left no trace anywhere. Now
+ * every exit path is logged with studioLog, and the cannot-run paths
+ * follow Larry's ruling (2026-11-25): the build still counts, but
+ * the checks' absence is persisted as an "unavailable" set (so the
+ * panel and Jobs show Unavailable with the reason, never a bare
+ * "Not run") and announced in a loud note on the run's closing text.
+ * The unavailable set is NOT streamed as build_result events: that
+ * channel's only states are passed/failed, and labelling a check
+ * that never ran as "failed" would be its own untruth — the status
+ * event, the persisted set, and the closing note carry the fact.
  */
 async function runCompletionChecks(opts: {
   cfg: AgentLoopConfig;
   localProgress: ProgressEmitter;
-}): Promise<{ failureMessage?: string }> {
+  loop: "initial" | "resume";
+}): Promise<{ failureMessage?: string; note?: string }> {
   const ctx = actionContextFrom(opts.cfg);
   const projectId = ctx?.projectId ?? opts.cfg.qualityLoop?.projectId;
   const userId = ctx?.userId ?? opts.cfg.userId ?? opts.cfg.qualityLoop?.userId;
-  if (!projectId || !userId) return {};
+  if (!projectId || !userId) {
+    studioLog(`agent-loop:completion_checks_skipped:${opts.loop}`, { errorClass: "no_project_context" });
+    return {};
+  }
+  const conversationId = ctx?.conversationId ?? opts.cfg.conversationId ?? null;
+  let checksModule: typeof import("@/lib/projects/project-checks");
   try {
-    const { runAllProjectChecks, saveProjectCheckRun, completionChecksFailureMessage } =
-      await import("@/lib/projects/project-checks");
+    checksModule = await import("@/lib/projects/project-checks");
+  } catch (error) {
+    studioLog(`agent-loop:completion_checks_threw:${opts.loop}`, {
+      projectId,
+      errorClass: error instanceof Error ? `${error.name} (import)` : "unknown (import)",
+    });
+    return {
+      note:
+        "IMPORTANT — the automatic checks did NOT run for this build: the checks module " +
+        "could not be loaded. Nothing verified the finished site, so treat this build as unchecked.",
+    };
+  }
+  const {
+    runAllProjectChecks,
+    saveProjectCheckRun,
+    completionChecksFailureMessage,
+    completionChecksUnavailableNote,
+    completionChecksNotSavedNote,
+    unavailableCheckSet,
+    unavailableCheckSetFromError,
+    ProjectChecksUnavailableError,
+  } = checksModule;
+  try {
     const outcome = await runAllProjectChecks({ projectId, userId });
     for (const check of outcome.checks) {
       opts.localProgress.emit({
@@ -1385,20 +1434,58 @@ async function runCompletionChecks(opts: {
         ...(check.status === "failed" ? { errorCount: 1 } : {}),
       });
     }
-    await saveProjectCheckRun({
+    const persisted = await saveProjectCheckRun({
       projectId,
       userId,
-      conversationId: ctx?.conversationId ?? opts.cfg.conversationId ?? null,
+      conversationId,
       checks: outcome.checks,
       summary: outcome.summary,
+    });
+    if (!persisted) {
+      studioLog(`agent-loop:completion_checks_persist_failed:${opts.loop}`, { projectId });
+      return { note: completionChecksNotSavedNote() };
+    }
+    studioLog(`agent-loop:completion_checks_completed:${opts.loop}`, {
+      projectId,
+      latencyMs: outcome.totalDurationMs,
+      errorClass: `passed=${outcome.summary.passed} failed=${outcome.summary.failed}`,
     });
     const failed = outcome.checks.filter((c) => c.status === "failed");
     if (failed.length > 0) {
       return { failureMessage: completionChecksFailureMessage(failed) };
     }
     return {};
-  } catch {
-    return {};
+  } catch (error) {
+    const isUnavailable = error instanceof ProjectChecksUnavailableError;
+    const reason = error instanceof Error ? error.message : "the checks stopped before they could run";
+    studioLog(
+      isUnavailable
+        ? `agent-loop:completion_checks_unavailable:${opts.loop}`
+        : `agent-loop:completion_checks_threw:${opts.loop}`,
+      {
+        projectId,
+        errorClass: error instanceof Error ? `${error.name}: ${reason}` : "unknown",
+      },
+    );
+    const set = isUnavailable ? unavailableCheckSetFromError(error) : unavailableCheckSet(reason);
+    const persisted = await saveProjectCheckRun({
+      projectId,
+      userId,
+      conversationId,
+      checks: set.checks,
+      summary: set.summary,
+    }).catch(() => false);
+    if (!persisted) {
+      studioLog(`agent-loop:completion_checks_persist_failed:${opts.loop}`, {
+        projectId,
+        errorClass: "unavailable_set",
+      });
+    }
+    opts.localProgress.emit({
+      type: "status",
+      summary: `The automatic checks could not run for this build: ${reason}`,
+    });
+    return { note: completionChecksUnavailableNote(reason) };
   }
 }
 
@@ -2621,6 +2708,9 @@ async function runAgentLoopV2Inner(
   // ACC-02 Defect A: same one-shot discipline for the invisible-text
   // (contrast) repair feedback.
   let contrastRepairFeedbackGiven = false;
+  // ACC-08 Defect 2b: same one-shot discipline for the desktop-layout
+  // (rendered-layout) repair feedback.
+  let layoutRepairFeedbackGiven = false;
   // True once the model has emitted at least one tool call this run. An
   // execution-required run (requireToolCallOnFirstStep) holds the
   // "required" tool choice until this flips — a provider that drops the
@@ -3725,6 +3815,36 @@ async function runAgentLoopV2Inner(
       // churn; the tail check records a pass-with-note instead.
     }
 
+    // ACC-08 Defect 2b: after a mutation batch, judge the page's
+    // declared layout for the desktop-collapse shape — a page-level
+    // wrapper capped at phone width (Run 1 on ba16d435 rendered in a
+    // ~230px column at desktop width while looking right on a phone).
+    // On a proven cap, feed the fix back ONCE so the model can repair
+    // its own HTML before finishing; the tail check has the final word.
+    if (
+      batchHasMutation &&
+      !layoutRepairFeedbackGiven &&
+      !cancelled &&
+      !modelFailed &&
+      !failedHonestly
+    ) {
+      const layoutCheck = await checkRenderedLayout({
+        candidatePaths: successfulMutationPaths(toolCallLog),
+        readFile: (path) => transport.readFile(path),
+      });
+      if (layoutCheck.applies && layoutCheck.violations.length > 0) {
+        layoutRepairFeedbackGiven = true;
+        llmMessages.push({
+          role: "user",
+          content: renderedLayoutRepairPrompt(layoutCheck.violations),
+        });
+        localProgress.emit({
+          type: "status",
+          summary: "The page layout would collapse into a narrow column on desktop — asking for a fix before this can be called done.",
+        });
+      }
+    }
+
     // Per-step timing: total step duration + cumulative elapsed, so the work log
     // can show exactly where the minutes went on a slow build.
     localProgress.emit({
@@ -3812,10 +3932,38 @@ async function runAgentLoopV2Inner(
     }
   }
 
+  // ACC-08 Defect 2b — the final word on desktop layout: if a page
+  // the run wrote wraps its whole content in a wrapper capped at
+  // phone width, the site collapses into a narrow column on every
+  // desktop screen — settle honestly failed, exactly like a contrast
+  // violation. The verdict streams as a "Layout" build_result so
+  // Jobs shows it beside the project checks.
+  if (!cancelled && !modelFailed && !failedHonestly) {
+    const layoutCheck = await checkRenderedLayout({
+      candidatePaths: successfulMutationPaths(toolCallLog),
+      readFile: (path) => transport.readFile(path),
+    });
+    if (layoutCheck.applies) {
+      localProgress.emit({
+        type: "build_result",
+        check: "Layout",
+        passed: layoutCheck.violations.length === 0,
+        ...(layoutCheck.violations.length > 0 ? { errorCount: layoutCheck.violations.length } : {}),
+      });
+      if (layoutCheck.violations.length > 0) {
+        failedHonestly = renderedLayoutFailureMessage(layoutCheck.violations);
+        finalText = failedHonestly;
+      }
+    }
+  }
+
   // ACC-07 Item 2 — automatic checks: a build that landed mutations
   // runs all seven project checks before it may settle (see
   // runCompletionChecks). A failed check settles the run honestly
-  // failed, exactly like a contrast violation.
+  // failed, exactly like a contrast violation. ACC-08: checks that
+  // could not run settle the run completed with a LOUD note (Larry's
+  // ruling) — checksNote rides the closing text below.
+  let checksNote: string | undefined;
   if (
     !cancelled &&
     !modelFailed &&
@@ -3823,10 +3971,13 @@ async function runAgentLoopV2Inner(
     hasInterveningMutation &&
     toolCallLog.some((t) => t.success && t.mutating)
   ) {
-    const completionChecks = await runCompletionChecks({ cfg, localProgress });
+    const completionChecks = await runCompletionChecks({ cfg, localProgress, loop: "initial" });
     if (completionChecks.failureMessage) {
       failedHonestly = completionChecks.failureMessage;
       finalText = failedHonestly;
+    }
+    if (completionChecks.note) {
+      checksNote = completionChecks.note;
     }
   }
 
@@ -3962,6 +4113,13 @@ async function runAgentLoopV2Inner(
     settlement.outcome === "completed" && contrastNote
       ? `${finalTextWithChatImages}\n\n${contrastNote}`
       : finalTextWithChatImages;
+  // ACC-08: a completed run whose automatic checks could not run
+  // carries the loud checks note in its closing text — the build
+  // counts (Larry's ruling), the missing verification is stated.
+  const finalTextWithChecksNote =
+    settlement.outcome === "completed" && checksNote
+      ? `${finalTextWithContrastNote}\n\n${checksNote}`
+      : finalTextWithContrastNote;
   // Round 14: "finished" is emitted BEFORE the after-run checkpoint,
   // and the checkpoint is time-bounded — settlement must never wait
   // on a sandbox transport operation (createAfterRunCheckpointBounded).
@@ -4015,7 +4173,7 @@ async function runAgentLoopV2Inner(
   }
 
   return {
-    finalText: finalTextWithContrastNote,
+    finalText: finalTextWithChecksNote,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -4030,6 +4188,7 @@ async function runAgentLoopV2Inner(
     modelFailureText,
     failedHonestly,
     contrastNote,
+    checksNote,
     completedWithWarning: settlement.completedWithWarning,
     failureContributors: settlement.failureContributors,
     baselineCheckpoint,
@@ -4928,6 +5087,9 @@ async function resumeAgentLoopV2Inner(
   // ACC-02 Defect A: same one-shot discipline for the invisible-text
   // (contrast) repair feedback.
   let contrastRepairFeedbackGiven = false;
+  // ACC-08 Defect 2b: same one-shot discipline for the desktop-layout
+  // (rendered-layout) repair feedback.
+  let layoutRepairFeedbackGiven = false;
   // A paused run exists BECAUSE the model emitted an approval-gated tool
   // call — the required-first-call contract was satisfied pre-pause, so
   // the resumed loop runs under "auto" tool choice throughout.
@@ -5296,6 +5458,34 @@ async function resumeAgentLoopV2Inner(
     // ACC-06a item 1: runtime-decided colors get NO repair offer —
     // the checker cannot judge them; the tail check records a
     // pass-with-note instead of pressuring a rewrite.
+  }
+
+  // ACC-08 Defect 2b: the same up-front repair offer for the
+  // desktop-collapse shape — the approved mutation executed above
+  // never passes a mutation batch inside this loop, so without this
+  // the continuation could settle failed at the tail without the one
+  // repair attempt.
+  if (
+    resume.decision === "approved" &&
+    !layoutRepairFeedbackGiven &&
+    !cancelled &&
+    !failedHonestly
+  ) {
+    const layoutCheck = await checkRenderedLayout({
+      candidatePaths: successfulMutationPaths(toolCallLog),
+      readFile: (path) => transport.readFile(path),
+    });
+    if (layoutCheck.applies && layoutCheck.violations.length > 0) {
+      layoutRepairFeedbackGiven = true;
+      llmMessages.push({
+        role: "user",
+        content: renderedLayoutRepairPrompt(layoutCheck.violations),
+      });
+      localProgress.emit({
+        type: "status",
+        summary: "The page layout would collapse into a narrow column on desktop — asking for a fix before this can be called done.",
+      });
+    }
   }
 
   // Route honesty: record the resumed run's first route plan too —
@@ -5856,6 +6046,32 @@ async function resumeAgentLoopV2Inner(
       // ACC-06a item 1: runtime-decided colors get NO repair feedback
       // (see the initial loop) — pass-with-note at the tail check.
     }
+    // ACC-08 Defect 2b: same desktop-collapse feedback as the initial
+    // loop — after a mutation batch, a proven page-level narrow cap
+    // earns ONE repair attempt before the tail check's final word.
+    if (
+      batchHasMutation &&
+      !layoutRepairFeedbackGiven &&
+      !cancelled &&
+      !modelFailed &&
+      !failedHonestly
+    ) {
+      const layoutCheck = await checkRenderedLayout({
+        candidatePaths: successfulMutationPaths(toolCallLog),
+        readFile: (path) => transport.readFile(path),
+      });
+      if (layoutCheck.applies && layoutCheck.violations.length > 0) {
+        layoutRepairFeedbackGiven = true;
+        llmMessages.push({
+          role: "user",
+          content: renderedLayoutRepairPrompt(layoutCheck.violations),
+        });
+        localProgress.emit({
+          type: "status",
+          summary: "The page layout would collapse into a narrow column on desktop — asking for a fix before this can be called done.",
+        });
+      }
+    }
     if (!batchHasMutation) mutationBatchPending = false;
   }
 
@@ -5922,10 +6138,35 @@ async function resumeAgentLoopV2Inner(
     }
   }
 
+  // ACC-08 Defect 2b — the final word on desktop layout, identical
+  // to the initial loop: a proven page-level narrow cap settles the
+  // resumed run honestly failed; the verdict streams as a "Layout"
+  // build_result so Jobs shows it.
+  if (!cancelled && !modelFailed && !failedHonestly) {
+    const layoutCheck = await checkRenderedLayout({
+      candidatePaths: successfulMutationPaths(toolCallLog),
+      readFile: (path) => transport.readFile(path),
+    });
+    if (layoutCheck.applies) {
+      localProgress.emit({
+        type: "build_result",
+        check: "Layout",
+        passed: layoutCheck.violations.length === 0,
+        ...(layoutCheck.violations.length > 0 ? { errorCount: layoutCheck.violations.length } : {}),
+      });
+      if (layoutCheck.violations.length > 0) {
+        failedHonestly = renderedLayoutFailureMessage(layoutCheck.violations);
+        finalText = failedHonestly;
+      }
+    }
+  }
+
   // ACC-07 Item 2 — automatic checks, identical to the initial loop:
   // a resumed build that landed mutations runs all seven project
   // checks before it may settle; a failed check settles it honestly
-  // failed.
+  // failed. ACC-08: checks that could not run settle completed with
+  // a LOUD note (Larry's ruling) — checksNote rides the closing text.
+  let checksNote: string | undefined;
   if (
     !cancelled &&
     !modelFailed &&
@@ -5933,10 +6174,13 @@ async function resumeAgentLoopV2Inner(
     hasInterveningMutation &&
     toolCallLog.some((t) => t.success && t.mutating)
   ) {
-    const completionChecks = await runCompletionChecks({ cfg, localProgress });
+    const completionChecks = await runCompletionChecks({ cfg, localProgress, loop: "resume" });
     if (completionChecks.failureMessage) {
       failedHonestly = completionChecks.failureMessage;
       finalText = failedHonestly;
+    }
+    if (completionChecks.note) {
+      checksNote = completionChecks.note;
     }
   }
 
@@ -6099,6 +6343,13 @@ async function resumeAgentLoopV2Inner(
     settlement.outcome === "completed" && contrastNote
       ? `${finalTextWithChatImages}\n\n${contrastNote}`
       : finalTextWithChatImages;
+  // ACC-08: same loud-note composition as the initial loop — a
+  // completed resumed run whose checks could not run carries the
+  // checks note in its closing text (Larry's ruling).
+  const finalTextWithChecksNote =
+    settlement.outcome === "completed" && checksNote
+      ? `${finalTextWithContrastNote}\n\n${checksNote}`
+      : finalTextWithContrastNote;
   // Round 14: "finished" before the bounded after-run checkpoint —
   // identical to the initial loop's tail (see there).
   localProgress.emit({
@@ -6125,7 +6376,7 @@ async function resumeAgentLoopV2Inner(
   );
 
   return {
-    finalText: finalTextWithContrastNote,
+    finalText: finalTextWithChecksNote,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -6140,6 +6391,7 @@ async function resumeAgentLoopV2Inner(
     modelFailureText,
     failedHonestly,
     contrastNote,
+    checksNote,
     completedWithWarning: settlement.completedWithWarning,
     failureContributors: settlement.failureContributors,
     baselineCheckpoint,

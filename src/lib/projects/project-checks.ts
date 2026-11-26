@@ -253,10 +253,28 @@ export async function runAllProjectChecks(input: {
     }
   }
 
-  const [approvals, checkpoints] = await Promise.all([
-    listPendingApprovals(projectId, userId),
-    listCheckpoints(projectId, userId),
-  ]);
+  // ACC-08 Defect 1: the approvals/checkpoints reads are garnish for
+  // the panel — they must never be able to discard the seven completed
+  // check results. Before this isolation, a throw from either missions
+  // read (after every check had run) propagated out of
+  // runAllProjectChecks and the caller's silent catch threw the whole
+  // outcome away: the run settled as a clean success with "Not run"
+  // everywhere (Acceptance Run 1 on ba16d435).
+  let approvals: ProjectCheckRunOutcome["pendingApprovals"] = [];
+  let checkpoints: ProjectCheckRunOutcome["checkpoints"] = [];
+  try {
+    const [pendingApprovals, projectCheckpoints] = await Promise.all([
+      listPendingApprovals(projectId, userId),
+      listCheckpoints(projectId, userId),
+    ]);
+    approvals = pendingApprovals;
+    checkpoints = projectCheckpoints.slice(0, 20);
+  } catch (garnishError) {
+    studioLog("project-checks:garnish_failed", {
+      projectId,
+      errorClass: garnishError instanceof Error ? garnishError.message : "unknown",
+    });
+  }
 
   const passed = results.filter((r) => r.status === "passed").length;
   const failed = results.filter((r) => r.status === "failed").length;
@@ -266,7 +284,7 @@ export async function runAllProjectChecks(input: {
     checks: results,
     changedFiles,
     pendingApprovals: approvals,
-    checkpoints: checkpoints.slice(0, 20),
+    checkpoints,
     summary: {
       total: results.length,
       passed,
@@ -370,5 +388,82 @@ export function completionChecksFailureMessage(failed: ProjectCheckResult[]): st
     `The build finished and the files are saved, but the automatic checks did not all pass — ` +
     `${names} failed. The full results are in the Checks panel. ` +
     `I can't call this build successful until those checks pass.`
+  );
+}
+
+/**
+ * ACC-08 Defect 1 — the full seven-check "unavailable" set for a run
+ * whose checks could not run at all. When the failure is a
+ * ProjectChecksUnavailableError whose body already carries the set
+ * (the workspace-not-ready 422), those entries are used verbatim;
+ * otherwise the set is synthesized from the reason, so EVERY
+ * cannot-run path has a truthful, persistable result — the panel and
+ * Jobs show "Unavailable" with the reason instead of a reasonless
+ * "Not run" that is indistinguishable from checks never attempted.
+ */
+export function unavailableCheckSet(reason: string, carried?: unknown): {
+  checks: ProjectCheckResult[];
+  summary: ProjectCheckSummary;
+} {
+  const now = new Date().toISOString();
+  const carriedById = new Map<string, Record<string, unknown>>();
+  if (Array.isArray(carried)) {
+    for (const entry of carried) {
+      if (entry && typeof entry === "object" && typeof (entry as { id?: unknown }).id === "string") {
+        carriedById.set((entry as { id: string }).id, entry as Record<string, unknown>);
+      }
+    }
+  }
+  const checks: ProjectCheckResult[] = PROJECT_CHECK_IDS.map((id) => {
+    const entry = carriedById.get(id);
+    return {
+      id,
+      label: checkLabelFor(id),
+      status: "unavailable",
+      source: typeof entry?.source === "string" ? entry.source : "Active project workspace",
+      timestamp: typeof entry?.timestamp === "string" ? entry.timestamp : now,
+      output: null,
+      error: typeof entry?.error === "string" ? entry.error : reason,
+    };
+  });
+  return {
+    checks,
+    summary: { total: checks.length, passed: 0, failed: 0, notConfigured: 0, changedFileCount: 0 },
+  };
+}
+
+/** The unavailable set carried by a ProjectChecksUnavailableError. */
+export function unavailableCheckSetFromError(error: ProjectChecksUnavailableError): {
+  checks: ProjectCheckResult[];
+  summary: ProjectCheckSummary;
+} {
+  return unavailableCheckSet(error.message, error.body?.checks);
+}
+
+/**
+ * ACC-08 — Larry's ruling (2026-11-25): when the checks genuinely
+ * cannot run, the build still counts, but the fact must be LOUD —
+ * never the silent success Acceptance Run 1 on ba16d435 shipped.
+ * This note rides the run's closing text on a completed settlement.
+ */
+export function completionChecksUnavailableNote(reason: string): string {
+  return (
+    `IMPORTANT — the automatic checks did NOT run for this build: ${reason}. ` +
+    `Nothing verified the finished site, so treat this build as unchecked: the Checks panel ` +
+    `shows the checks as unavailable rather than passed, and they can be run from there ` +
+    `once the workspace is reachable.`
+  );
+}
+
+/**
+ * ACC-08 — the checks ran and were reported live, but persisting
+ * their results failed, so the Checks panel cannot show them. The
+ * run still counts; the gap is stated, never hidden.
+ */
+export function completionChecksNotSavedNote(): string {
+  return (
+    `Note: the automatic checks ran for this build and their results are in this run's ` +
+    `Jobs tab, but the results could not be saved — the Checks panel may still show ` +
+    `them as not run.`
   );
 }
