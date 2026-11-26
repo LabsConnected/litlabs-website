@@ -18,10 +18,14 @@
 
 begin;
 
+-- Postgres refuses ALTER COLUMN TYPE while a policy depends on the
+-- column (0A000), so drop the owner-select policy first and recreate it
+-- against the new text type below.
+drop policy if exists project_check_runs_owner_select on public.project_check_runs;
+
 alter table public.project_check_runs
   alter column user_id type text using user_id::text;
 
-drop policy if exists project_check_runs_owner_select on public.project_check_runs;
 create policy project_check_runs_owner_select
   on public.project_check_runs
   for select
