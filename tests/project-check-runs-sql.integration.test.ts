@@ -33,7 +33,8 @@ const STRANGER_ID = "55555555-5555-4555-8555-555555555555";
 
 const MIGRATIONS = {
   acc07: "supabase/migrations/20261125140000_create_project_check_runs.sql",
-  acc09: "supabase/migrations/20261125150000_fix_project_check_runs_user_id.sql",
+  typefix: "supabase/migrations/20261126120000_project_check_runs_user_id_text.sql",
+  ownerinsert: "supabase/migrations/20261126130000_project_check_runs_owner_insert.sql",
 } as const;
 
 function dbUrl(base: string, dbName: string): string {
@@ -109,7 +110,8 @@ describeSql("project_check_runs schema contract (ACC-09)", () => {
     await after.connect();
     await scaffold(after);
     await after.query(await migrationSql(MIGRATIONS.acc07));
-    await after.query(await migrationSql(MIGRATIONS.acc09));
+    await after.query(await migrationSql(MIGRATIONS.typefix));
+    await after.query(await migrationSql(MIGRATIONS.ownerinsert));
     await grantTable(after);
   }, 60_000);
 

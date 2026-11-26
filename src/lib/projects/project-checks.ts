@@ -21,7 +21,8 @@
  * other ownership column in this codebase. The ACC-07 migration
  * created it as uuid, so every save and every read-back failed with
  * 22P02 for every real user while the unit tests (mocked client)
- * stayed green — migration 20261125150000 aligns the column. Do not
+ * stayed green — migrations 20261126120000/20261126130000 align the
+ * column and the owner policies. Do not
  * "fix" callers to pass a UUID instead: there is no UUID identity
  * anywhere in this app.
  */
