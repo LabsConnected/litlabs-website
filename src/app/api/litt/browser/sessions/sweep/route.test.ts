@@ -17,7 +17,9 @@ vi.mock("@/lib/litt-intelligence/browser-session-manager", () => ({
 import { GET, POST } from "./route";
 
 const SECRET = "cron-secret-for-tests";
+const INTERNAL = "internal-key-for-tests";
 const savedSecret = process.env.CRON_SECRET;
+const savedInternal = process.env.INTERNAL_API_KEY;
 
 const SWEEP_RESULT = {
   inspected: 3,
@@ -43,6 +45,7 @@ describe("/api/litt/browser/sessions/sweep auth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.CRON_SECRET = SECRET;
+    delete process.env.INTERNAL_API_KEY;
     mocks.auth.mockResolvedValue({ userId: null });
     mocks.isOwnerClerkId.mockReturnValue(false);
     mocks.sweepIdleBrowserSessions.mockResolvedValue(SWEEP_RESULT);
@@ -51,6 +54,8 @@ describe("/api/litt/browser/sessions/sweep auth", () => {
   afterEach(() => {
     if (savedSecret === undefined) delete process.env.CRON_SECRET;
     else process.env.CRON_SECRET = savedSecret;
+    if (savedInternal === undefined) delete process.env.INTERNAL_API_KEY;
+    else process.env.INTERNAL_API_KEY = savedInternal;
   });
 
   it("rejects an unauthenticated non-owner caller", async () => {
@@ -105,6 +110,24 @@ describe("/api/litt/browser/sessions/sweep auth", () => {
     mocks.isOwnerClerkId.mockReturnValue(false);
 
     const response = await POST(request("POST", { "x-cron-secret": SECRET }));
+    expect(response.status).toBe(401);
+    expect(mocks.sweepIdleBrowserSessions).not.toHaveBeenCalled();
+  });
+
+  it("accepts X-Internal-Api-Key when CRON_SECRET is unset (GH Actions cron path)", async () => {
+    delete process.env.CRON_SECRET;
+    process.env.INTERNAL_API_KEY = INTERNAL;
+
+    const response = await POST(request("POST", { "x-internal-api-key": INTERNAL }));
+    expect(response.status).toBe(200);
+    expect(mocks.sweepIdleBrowserSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a wrong X-Internal-Api-Key", async () => {
+    delete process.env.CRON_SECRET;
+    process.env.INTERNAL_API_KEY = INTERNAL;
+
+    const response = await POST(request("POST", { "x-internal-api-key": "wrong" }));
     expect(response.status).toBe(401);
     expect(mocks.sweepIdleBrowserSessions).not.toHaveBeenCalled();
   });
