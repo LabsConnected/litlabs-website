@@ -10,7 +10,11 @@
  *    landing (hub) is never rendered.
  *  - Any deep link (?project=, ?tool=, ?prompt=…) renders the
  *    CommandStudio workspace exactly as before.
- *  - Users with NO projects keep the first-run welcome.
+ *  - Users with NO projects land in the same workspace (Larry's
+ *    direct order, 2026-11-25): the first-run welcome screen is
+ *    retired — there is no project-count gate. A first chat send
+ *    from a zero-project account is provisioned a starter project
+ *    server-side by the conversations POST.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
@@ -60,12 +64,6 @@ vi.mock("@/app/(app)/studio/components/CommandStudio", () => ({
   default: () =>
     React.createElement("div", { "data-testid": "command-studio-mounted" }, "Studio ready"),
 }));
-vi.mock("@/app/(app)/studio/components/FirstRunWelcome", () => ({
-  __esModule: true,
-  default: () =>
-    React.createElement("div", { "data-testid": "first-run-welcome" }, "Welcome"),
-}));
-
 describe("Studio one-chat entry gate", () => {
   beforeEach(() => {
     nav.searchParams = new URLSearchParams();
@@ -75,8 +73,8 @@ describe("Studio one-chat entry gate", () => {
       userId: "user_1",
       getToken: async () => null,
     });
-    // No backend in jsdom: the project check fetch fails, and StudioHub
-    // treats a failed check as "has projects" (never blocks real users).
+    // No backend in jsdom. StudioHub no longer fetches the project
+    // list at all — there is no gate that could block a user on it.
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
   });
   afterEach(() => {
@@ -116,5 +114,50 @@ describe("Studio one-chat entry gate", () => {
     });
     expect(screen.getByTestId("command-studio-mounted")).toBeTruthy();
     expect(screen.queryByTestId("studio-prime-landing")).toBeNull();
+  });
+
+  it("a zero-project account renders the workspace — no first-run welcome gate", async () => {
+    // The project list comes back EMPTY: under the retired gate this
+    // account was trapped on the FirstRunWelcome screen. Now the
+    // Studio shell renders regardless of project count.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ projects: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    const mod = await import("@/app/(app)/studio/page");
+    await act(async () => {
+      render(React.createElement(mod.default));
+    });
+    expect(screen.getByTestId("command-studio-mounted")).toBeTruthy();
+    expect(screen.queryByTestId("first-run-welcome")).toBeNull();
+    expect(screen.queryByTestId("first-run-form")).toBeNull();
+  });
+
+  it("a ?prompt= handoff for a zero-project account lands in the workspace chat", async () => {
+    // Dashboard "Ask LiTT" (?tool=chat&prompt=…): CommandStudio
+    // consumes ?prompt= itself (takeFirstRunPrompt), so the handoff
+    // reaches the chat composer for fresh users exactly as it does
+    // for existing users — no welcome screen intercepts it.
+    nav.searchParams = new URLSearchParams("tool=chat&prompt=A%20website%20for%20my%20bakery");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ projects: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    const mod = await import("@/app/(app)/studio/page");
+    await act(async () => {
+      render(React.createElement(mod.default));
+    });
+    expect(screen.getByTestId("command-studio-mounted")).toBeTruthy();
+    expect(screen.queryByTestId("first-run-welcome")).toBeNull();
   });
 });
