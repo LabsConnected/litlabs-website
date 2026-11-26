@@ -424,7 +424,7 @@ describe("AgentLoop", () => {
     expect(result.failureStep).toBeNull();
   });
 
-  it("routes conversation intent to direct inference", async () => {
+  it("routes conversation intent to direct inference, which fails explicitly (no fabricated success)", async () => {
     const loop = createLoop(session);
     const result = await loop.run([{ 
       index: 0, 
@@ -433,8 +433,10 @@ describe("AgentLoop", () => {
       args: ["hello"] 
     }]);
     
-    expect(result.steps[0].result.message).toContain("Direct response: hello");
-    expect(result.status).toBe("success");
+    expect(result.steps[0].result.success).toBe(false);
+    expect(result.steps[0].result.message).toContain("not available");
+    expect(result.status).toBe("failed");
+    expect(result.failureStep).not.toBeNull();
   });
 
   // ─── getRunId ─────────────────────────────────────────────────
