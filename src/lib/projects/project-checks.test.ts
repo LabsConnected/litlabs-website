@@ -65,6 +65,8 @@ vi.mock("@/lib/terminal-config", () => ({
 import {
   ProjectChecksUnavailableError,
   completionChecksFailureMessage,
+  completionChecksNotSavedNote,
+  completionChecksUnavailableNotSavedNote,
   completionChecksUnavailableNote,
   getLatestProjectCheckRun,
   runAllProjectChecks,
@@ -265,5 +267,64 @@ describe("project check persistence (ACC-07 Item 2)", () => {
     expect(message).toContain("TypeScript, Test failed");
     expect(message).toContain("Checks panel");
     expect(message).toContain("can't call this build successful");
+  });
+
+  // ACC-09: every identity in this app is a Clerk user ID string
+  // (studio_projects.user_id is text). The save path must pass the
+  // ID through verbatim — the ACC-07 migration created the column
+  // as uuid, so Postgres rejected every real user's save with
+  // 22P02 while this mocked suite stayed green. The SQL-level
+  // contract is pinned in tests/project-check-runs-sql.integration
+  // .test.ts; this pins the code-level half: no ID mangling, and a
+  // Clerk-shaped ID round-trips save → latest.
+  it("round-trips a Clerk-shaped user ID verbatim (ACC-09 identity contract)", async () => {
+    const clerkUserId = "user_3ACC09ClerkIdString";
+    const checks = [
+      {
+        id: "build" as const,
+        label: "Build",
+        status: "passed" as const,
+        source: "Workspace · pnpm run build",
+        timestamp: new Date().toISOString(),
+        durationMs: 42,
+      },
+    ];
+    const summary = { total: 7, passed: 1, failed: 0, notConfigured: 2, changedFileCount: 1 };
+    await expect(
+      saveProjectCheckRun({
+        projectId: "78ca9e96-1111-4111-8111-111111111111",
+        userId: clerkUserId,
+        conversationId: "conv-acc09",
+        checks,
+        summary,
+      }),
+    ).resolves.toBe(true);
+    expect(insertCalls[0]).toMatchObject({ user_id: clerkUserId });
+
+    const latest = await getLatestProjectCheckRun("78ca9e96-1111-4111-8111-111111111111", clerkUserId);
+    expect(latest?.checks).toEqual(checks);
+    expect(latest?.summary).toEqual(summary);
+    expect(latest?.conversationId).toBe("conv-acc09");
+  });
+});
+
+describe("checks note truthfulness (ACC-09)", () => {
+  it("the not-saved note never claims the results are in the Jobs tab", () => {
+    const note = completionChecksNotSavedNote();
+    expect(note).toContain("could not be saved");
+    expect(note).toContain("not run");
+    // The ACC-08 wording claimed Jobs held the results; Jobs'
+    // durable source is the same persisted set that just failed.
+    expect(note).not.toContain("are in this run's Jobs tab");
+    expect(note).not.toContain("results are in");
+  });
+
+  it("the unavailable-and-not-recorded note says the panel shows Not run, not unavailable", () => {
+    const note = completionChecksUnavailableNotSavedNote("Project workspace is not ready");
+    expect(note).toContain("did NOT run");
+    expect(note).toContain("Project workspace is not ready");
+    expect(note).toContain("could not be recorded");
+    expect(note).toContain("as not run");
+    expect(note).not.toContain("shows the checks as unavailable");
   });
 });

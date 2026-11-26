@@ -15,6 +15,16 @@
  * them — instead of resetting to "Not run" on every load. Persistence
  * is best-effort: a missing table (migration not yet applied) degrades
  * to the pre-ACC-07 behavior, never to a failed build.
+ *
+ * IDENTITY CONTRACT (ACC-09): project_check_runs.user_id stores the
+ * Clerk user ID as TEXT, like studio_projects.user_id and every
+ * other ownership column in this codebase. The ACC-07 migration
+ * created it as uuid, so every save and every read-back failed with
+ * 22P02 for every real user while the unit tests (mocked client)
+ * stayed green — migrations 20261126120000/20261126130000 align the
+ * column and the owner policies. Do not
+ * "fix" callers to pass a UUID instead: there is no UUID identity
+ * anywhere in this app.
  */
 
 import { supabaseAdmin } from "@/lib/supabase";
@@ -321,7 +331,17 @@ export async function saveProjectCheckRun(input: {
   checks: ProjectCheckResult[];
   summary: ProjectCheckSummary;
 }): Promise<boolean> {
-  if (!supabaseAdmin) return false;
+  if (!supabaseAdmin) {
+    // ACC-09: this path used to return false with no trace at all.
+    // A persistence failure must always leave evidence — the caller
+    // turns the false into a loud note, and this log is how the next
+    // failure gets diagnosed instead of guessed at.
+    studioLog("project-checks:persist_failed", {
+      projectId: input.projectId,
+      errorClass: "supabase_admin_unavailable",
+    });
+    return false;
+  }
   try {
     const { error } = await supabaseAdmin.from("project_check_runs").insert({
       project_id: input.projectId,
@@ -331,7 +351,14 @@ export async function saveProjectCheckRun(input: {
       summary: input.summary,
     });
     if (error) {
-      studioLog("project-checks:persist_failed", { projectId: input.projectId, errorClass: error.message });
+      studioLog("project-checks:persist_failed", {
+        projectId: input.projectId,
+        // ACC-09: carry the Postgres error code alongside the
+        // message — "invalid input syntax for type uuid" (22P02)
+        // would have named this defect class from the first log
+        // line instead of the third repair round.
+        errorClass: `${error.code ?? "unknown"}: ${error.message}`,
+      });
       return false;
     }
     return true;
@@ -459,11 +486,35 @@ export function completionChecksUnavailableNote(reason: string): string {
  * ACC-08 — the checks ran and were reported live, but persisting
  * their results failed, so the Checks panel cannot show them. The
  * run still counts; the gap is stated, never hidden.
+ *
+ * ACC-09 — truthfulness: the ACC-08 wording claimed the results
+ * "are in this run's Jobs tab". The Jobs tab's durable source is
+ * the persisted set (both panels read the same GET /checks
+ * payload), so when the save failed, Jobs showed nothing durable
+ * either — Acceptance Run 1 on aedb2b05 proved the claim false.
+ * A note may only point at a surface that actually holds the
+ * results; this one states the gap and the remedy instead.
  */
 export function completionChecksNotSavedNote(): string {
   return (
-    `Note: the automatic checks ran for this build and their results are in this run's ` +
-    `Jobs tab, but the results could not be saved — the Checks panel may still show ` +
-    `them as not run.`
+    `Note: the automatic checks ran for this build, but their results could not be ` +
+    `saved — the Checks panel and the Jobs tab will show them as not run. You can ` +
+    `run the checks again from the Checks panel.`
+  );
+}
+
+/**
+ * ACC-09 — the checks could not run AND the "unavailable" set that
+ * records that fact could not be persisted either. The plain
+ * unavailable note claims the panel shows the checks as
+ * unavailable; when nothing was recorded, the panel shows "Not
+ * run", and the note must say exactly that.
+ */
+export function completionChecksUnavailableNotSavedNote(reason: string): string {
+  return (
+    `IMPORTANT — the automatic checks did NOT run for this build: ${reason}. ` +
+    `Nothing verified the finished site, so treat this build as unchecked — and ` +
+    `this could not be recorded either, so the Checks panel will show the checks ` +
+    `as not run. They can be run from the Checks panel once the workspace is reachable.`
   );
 }

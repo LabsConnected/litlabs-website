@@ -76,9 +76,14 @@ vi.mock("@/lib/projects/project-checks", () => {
       `shows the checks as unavailable rather than passed, and they can be run from there ` +
       `once the workspace is reachable.`,
     completionChecksNotSavedNote: () =>
-      `Note: the automatic checks ran for this build and their results are in this run's ` +
-      `Jobs tab, but the results could not be saved — the Checks panel may still show ` +
-      `them as not run.`,
+      `Note: the automatic checks ran for this build, but their results could not be ` +
+      `saved — the Checks panel and the Jobs tab will show them as not run. You can ` +
+      `run the checks again from the Checks panel.`,
+    completionChecksUnavailableNotSavedNote: (reason: string) =>
+      `IMPORTANT — the automatic checks did NOT run for this build: ${reason}. ` +
+      `Nothing verified the finished site, so treat this build as unchecked — and ` +
+      `this could not be recorded either, so the Checks panel will show the checks ` +
+      `as not run. They can be run from the Checks panel once the workspace is reachable.`,
     unavailableCheckSet,
     unavailableCheckSetFromError: (error: InstanceType<typeof ProjectChecksUnavailableError>) =>
       unavailableCheckSet(error.message, error.body?.checks),
@@ -396,5 +401,79 @@ describe("ACC-07 Item 2 — automatic checks at build completion", () => {
     expect(result.checksNote).toBeTruthy();
     expect(result.checksNote).toContain("could not be saved");
     expect(result.finalText).toContain("could not be saved");
+    // ACC-09 truthfulness: the note must not claim the results live
+    // in the Jobs tab — Jobs' durable source is the same persisted
+    // set whose save just failed (Acceptance Run 1 on aedb2b05
+    // found Jobs empty under the old wording).
+    expect(result.checksNote).not.toContain("are in this run's Jobs tab");
+    expect(result.checksNote).toContain("will show them as not run");
+    expect(result.finalText).toContain("will show them as not run");
+  });
+
+  it("when the unavailable set ALSO cannot be saved, the note admits nothing was recorded (ACC-09)", async () => {
+    const { transport } = memoryTransport();
+    runAllProjectChecksMock.mockRejectedValue(new Error("workspace not ready"));
+    saveProjectCheckRunMock.mockResolvedValueOnce(false);
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(
+        toolCallReply("tc-1", "files.write", { projectId: "p-test", path: "index.html", content: PAGE }),
+      )
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2(
+      "Build a one-page website for a bakery called Sunny Crust Bakery",
+      transport,
+      config,
+    );
+
+    expect(result.failedHonestly).toBeUndefined();
+    // The fallback save was attempted…
+    expect(saveProjectCheckRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        checks: expect.arrayContaining([
+          expect.objectContaining({ id: "build", status: "unavailable" }),
+        ]),
+      }),
+    );
+    // …and because it failed, the note must NOT claim the panel
+    // shows the checks as unavailable — it shows them as not run.
+    expect(result.checksNote).toContain("automatic checks did NOT run");
+    expect(result.checksNote).toContain("could not be recorded");
+    expect(result.checksNote).not.toContain("shows the checks as unavailable");
+    expect(result.finalText).toContain("could not be recorded");
+  });
+
+  it("a run without project context is not a project build: checks skip silently, no note (ACC-09 narrowed)", async () => {
+    const { transport } = memoryTransport();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(
+        toolCallReply("tc-1", "files.write", { projectId: "p-test", path: "index.html", content: PAGE }),
+      )
+      .mockResolvedValueOnce(doneReply);
+
+    // Same run, but the action context carries no project: the run
+    // is not a project build, so it has no Checks panel and nothing
+    // to persist against. The checks skip (logged server-side) and
+    // the closing text carries no checks note — the loud-note rule
+    // covers project builds whose checks could not run or save.
+    const noProjectContextConfig = {
+      ...config,
+      actionContext: {
+        actionRunId: "run-1",
+        userId: "u-test",
+        conversationId: "conv-1",
+      },
+    };
+    const result = await runAgentLoopV2(
+      "Build a one-page website for a bakery called Sunny Crust Bakery",
+      transport,
+      noProjectContextConfig,
+    );
+
+    expect(result.failedHonestly).toBeUndefined();
+    expect(runAllProjectChecksMock).not.toHaveBeenCalled();
+    expect(saveProjectCheckRunMock).not.toHaveBeenCalled();
+    expect(result.checksNote).toBeUndefined();
+    expect(result.finalText).not.toContain("automatic checks");
   });
 });
