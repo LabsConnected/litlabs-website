@@ -434,14 +434,21 @@ export default function StudioHealthPanel({
           </div>
         </div>
         <div className="flex items-center gap-1.5">
+          {/* ACC-08 Defect 1: "Run all" is disabled only while a run is
+              in flight. It used to also require runtime.phase ===
+              "ready", which never happens where host execution is
+              disabled (staging, F4) — the button was permanently dead
+              even though the run-all route has its own honest errors
+              for exactly that state. Those errors now surface in the
+              panel's error area below instead of being pre-hidden. */}
           <button
             type="button"
             onClick={() => void runAllChecks()}
-            disabled={runningAll || runtime.phase !== "ready"}
+            disabled={runningAll}
             className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[9px] font-bold transition-colors hover:opacity-80 disabled:opacity-30"
             style={{ backgroundColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", color: "var(--litt-primary)", border: "1px solid color-mix(in srgb, var(--color-accent) 25%, transparent)" }}
             aria-label="Run all checks"
-            title="Run TypeScript, lint, tests, build, and security audit"
+            title="Run TypeScript, lint, tests, build, and security audit — if the workspace can't run them, the reason shows in this panel"
           >
             {runningAll ? <Loader2 size={11} className="animate-spin" /> : <Zap size={11} />}
             Run all

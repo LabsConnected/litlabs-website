@@ -283,6 +283,13 @@ export function buildRuntimeContextBlock(ctx: CanonicalRuntimeContext): string {
         "Load Google Fonts with <link>, never with @import. " +
         "LAYOUT RULE: a fixed/sticky header (fixed top-0) MUST be paired with matching top padding on the following content " +
         "(e.g. pt-16/pt-20 on the first section or main) — never let fixed navigation overlap the hero or headings. " +
+        "RESPONSIVE LAYOUT RULE (ACC-08): page content lives in a full-width shell; sections centre their content in a " +
+        "WIDE container (w-full max-w-6xl or max-w-7xl, mx-auto, px-4 or px-6) — the container caps at desktop content " +
+        "width, never at phone width. No top-level wrapper may cap the page below about 64rem, and no layout container " +
+        "may use a fixed pixel width. Card and item grids must expand with the screen: 1 column on phones, 2 to 4 " +
+        "columns at md/lg (e.g. grid md:grid-cols-2 lg:grid-cols-3). Lay cards out with normal flow or grid — never " +
+        "absolute positioning or negative margins that can pull cards over each other — and give the hero padding " +
+        "and min-height, never a fixed height that truncates its heading. " +
         "DESIGN QUALITY (LiTT Black Label): default to a premium dark aesthetic — near-black background, ONE accent color, " +
         "generous whitespace, restrained borders (white/5-white/10), soft glass surfaces, consistent spacing rhythm, " +
         "responsive stacking below md. Avoid template-looking centered walls of text; use real headings, hierarchy, and section padding. " +

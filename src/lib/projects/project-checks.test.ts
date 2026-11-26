@@ -50,9 +50,11 @@ vi.mock("@/lib/projects/project-repository", () => ({
   verifyProjectWorkspace: (...args: unknown[]) => verifyProjectWorkspaceMock(...args),
 }));
 
+const listPendingApprovalsMock = vi.fn(async (..._args: unknown[]) => [] as unknown[]);
+const listCheckpointsMock = vi.fn(async (..._args: unknown[]) => [] as unknown[]);
 vi.mock("@/lib/missions/mission-repository", () => ({
-  listPendingApprovals: vi.fn(async () => []),
-  listCheckpoints: vi.fn(async () => []),
+  listPendingApprovals: (...args: unknown[]) => listPendingApprovalsMock(...args),
+  listCheckpoints: (...args: unknown[]) => listCheckpointsMock(...args),
 }));
 
 vi.mock("@/lib/terminal-config", () => ({
@@ -63,9 +65,12 @@ vi.mock("@/lib/terminal-config", () => ({
 import {
   ProjectChecksUnavailableError,
   completionChecksFailureMessage,
+  completionChecksUnavailableNote,
   getLatestProjectCheckRun,
   runAllProjectChecks,
   saveProjectCheckRun,
+  unavailableCheckSet,
+  unavailableCheckSetFromError,
 } from "./project-checks";
 
 const execResponses = new Map<string, { exitCode: number; stdout?: string; durationMs?: number }>();
@@ -93,6 +98,10 @@ describe("runAllProjectChecks (ACC-07 Item 2)", () => {
     execResponses.clear();
     getProjectMock.mockReset();
     verifyProjectWorkspaceMock.mockReset();
+    listPendingApprovalsMock.mockReset();
+    listPendingApprovalsMock.mockResolvedValue([]);
+    listCheckpointsMock.mockReset();
+    listCheckpointsMock.mockResolvedValue([]);
     getProjectMock.mockResolvedValue({
       id: "proj-1",
       name: "Bakery",
@@ -156,6 +165,66 @@ describe("runAllProjectChecks (ACC-07 Item 2)", () => {
     expect(err.status).toBe(422);
     expect(err.body.checks).toHaveLength(7);
     expect(err.body.checks[0].status).toBe("unavailable");
+  });
+
+  // ACC-08 Defect 1: the garnish reads (pending approvals /
+  // checkpoints) run AFTER the seven checks. Their failure used to
+  // propagate out and discard the completed results entirely — one
+  // of the ranked throw points behind Run 1 on ba16d435's silent
+  // "Not run" panel.
+  it("still returns the seven completed results when the garnish reads throw", async () => {
+    listCheckpointsMock.mockRejectedValue(new Error("missions db unavailable"));
+    const outcome = await runAllProjectChecks({ projectId: "proj-1", userId: "user-1" });
+    expect(outcome.checks).toHaveLength(7);
+    expect(outcome.summary).toMatchObject({ total: 7, passed: 5, failed: 0, notConfigured: 2 });
+    expect(outcome.pendingApprovals).toEqual([]);
+    expect(outcome.checkpoints).toEqual([]);
+  });
+
+  it("still returns the seven completed results when the approvals read throws", async () => {
+    listPendingApprovalsMock.mockRejectedValue(new Error("missions db unavailable"));
+    const outcome = await runAllProjectChecks({ projectId: "proj-1", userId: "user-1" });
+    expect(outcome.checks).toHaveLength(7);
+    expect(outcome.summary.failed).toBe(0);
+  });
+});
+
+describe("unavailable check sets and notes (ACC-08 Defect 1)", () => {
+  it("builds the full seven-check unavailable set from a bare reason", () => {
+    const { checks, summary } = unavailableCheckSet("terminal not configured");
+    expect(checks).toHaveLength(7);
+    expect(checks.every((c) => c.status === "unavailable")).toBe(true);
+    expect(checks.every((c) => c.error === "terminal not configured")).toBe(true);
+    expect(summary).toEqual({ total: 7, passed: 0, failed: 0, notConfigured: 0, changedFileCount: 0 });
+  });
+
+  it("prefers the set carried by a ProjectChecksUnavailableError", () => {
+    const carried = [
+      {
+        id: "build",
+        label: "Build",
+        status: "unavailable",
+        source: "Active project workspace",
+        timestamp: "2026-11-25T19:45:00.000Z",
+        output: null,
+        error: "Project workspace is not ready",
+      },
+    ];
+    const error = new ProjectChecksUnavailableError(422, {
+      error: "Project workspace is not ready",
+      checks: carried,
+    });
+    const { checks } = unavailableCheckSetFromError(error);
+    expect(checks).toHaveLength(7);
+    expect(checks[0]).toMatchObject({ id: "build", error: "Project workspace is not ready" });
+    expect(checks[1].error).toBe("Project workspace is not ready");
+  });
+
+  it("the unavailable note is loud and plain (Larry's ruling)", () => {
+    const note = completionChecksUnavailableNote("Project workspace is not ready");
+    expect(note).toContain("did NOT run");
+    expect(note).toContain("Project workspace is not ready");
+    expect(note).toContain("unavailable rather than passed");
   });
 });
 
