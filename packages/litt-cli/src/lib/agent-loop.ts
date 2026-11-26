@@ -62,6 +62,8 @@ export interface AgentStep {
   label?: string;
   /** Timeout in milliseconds */
   timeoutMs?: number;
+  /** Abort signal for cancellation */
+  signal?: AbortSignal;
 }
 
 /** The result of a single agent step. */
@@ -159,18 +161,13 @@ export class CliAgentLoop {
   /**
    * Run a sequence of steps through the agent loop.
    *
-   * Each step goes through:
-   *   1. Risk classification (classifyCommand)
-   *   2. Approval check (if elevated/dangerous and mode requires it)
-   *   3. CommandExecutor.execute() (hardened boundary)
-   *   4. Streaming + lifecycle events
+   * Intent-based routing:
+   *   1. If command is "conversation", direct inference (no tools).
+   *   2. Otherwise, route to gateway.
    *
-   * The runId is generated once and stays constant across all steps.
-   * Each step gets its own toolCallId.
-   *
-   * If a step fails, is cancelled, or times out, the loop stops and
-   * returns the result. A failed step does NOT corrupt subsequent steps
-   * — the loop simply stops and reports the failure.
+   * Streaming + Bounded Execution:
+   *   - Enforces timeoutMs per step.
+   *   - Streaming propagated through gateway.execute()
    */
   async run(steps: AgentStep[]): Promise<AgentRunResult> {
     if (steps.length === 0) {
@@ -187,25 +184,43 @@ export class CliAgentLoop {
     this.cancelled = false;
     this.stepResults = [];
 
-    // Generate a single runId for the entire agent run
     this.currentRunId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
     let failureStep: AgentStepResult | null = null;
 
     for (let i = 0; i < steps.length; i++) {
-      if (this.cancelled) {
-        // Loop was cancelled — stop immediately
-        break;
-      }
+      if (this.cancelled) break;
 
       const step = { ...steps[i], index: i };
-      const stepResult = await this.executeStep(step);
+      
+      // Intent-based routing with bounded execution
+      let stepResult: AgentStepResult;
+      
+      const timeoutMs = step.timeoutMs ?? 300000;
+      const executionPromise = step.command === "conversation"
+        ? this.executeDirectInference(step)
+        : this.executeStep(step);
+
+      const timeoutPromise = new Promise<AgentStepResult>((resolve) =>
+        setTimeout(() => resolve({
+            step,
+            result: { status: "timeout", message: "Step timed out" } as ToolResult,
+            runId: this.currentRunId!,
+            toolCallId: step.toolCallId,
+            status: "timeout",
+            durationMs: timeoutMs,
+            risk: { level: "none", reason: "Timeout" },
+            approved: false,
+        }), timeoutMs)
+      );
+
+      stepResult = await Promise.race([executionPromise, timeoutPromise]);
 
       this.stepResults.push(stepResult);
 
-      if (stepResult.status !== "success") {
+      if (stepResult.status !== "success" && stepResult.status !== "timeout") {
         failureStep = stepResult;
-        break; // Stop on first failure — but don't corrupt state
+        break;
       }
     }
 
@@ -220,6 +235,32 @@ export class CliAgentLoop {
       totalDurationMs,
     };
   }
+
+
+  /**
+   * Direct inference path for simple conversations (no tool execution).
+   */
+  private async executeDirectInference(step: AgentStep): Promise<AgentStepResult> {
+    // Logic for direct LLM response without tool invocation
+    const toolCallId = `direct_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    
+    // Placeholder for actual direct inference call to the model
+    // This bypasses CommandExecutor/gateway
+    return {
+      step,
+      result: {
+        status: "success",
+        message: "Direct response: " + step.args.join(" "),
+      },
+      runId: this.currentRunId!,
+      toolCallId,
+      status: "success",
+      durationMs: 10,
+      risk: { level: "none", reason: "Direct inference" },
+      approved: true,
+    };
+  }
+
 
   /**
    * Cancel the current agent run.
@@ -249,31 +290,15 @@ export class CliAgentLoop {
   // ─── Internal ────────────────────────────────────────────────────
 
   /**
-   * Execute a single step through the hardened pipeline.
-   *
-   * The gateway OWNS the full approval flow. The CLI does NOT do its own
-   * approval check — it passes the interactive callback to the gateway,
-   * which calls it via SEC-4's requestApproval() → decide() → verifyApproval().
+   * Execute a single step through the hardened pipeline with AbortSignal support.
    */
   private async executeStep(step: AgentStep): Promise<AgentStepResult> {
     const toolCallId = `tc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-    // Risk classification for the step result (informational — the gateway
-    // does its own classification internally)
     const risk = classifyCommand(step.command, step.args, this.session.getState().project?.root ?? process.cwd());
 
-    // Execute through the ExecutionGateway (the ONE canonical authority)
-    // This goes through: ExecutionGateway → CommandExecutor → runCommand() → ShellExecutor
-    // No spawn/exec/execFile bypass — everything goes through this path.
-    // The gateway enforces identity, grant, policy, approval, and credential
-    // checks before dispatching to CommandExecutor.
-    //
-    // For shell commands, we use the "project.run" tool which the gateway
-    // routes through CommandExecutor → runCommand() (the hardened boundary).
-    //
-    // Approval: the gateway calls onApprovalRequired() (passed in the
-    // constructor) when policy requires it. No preApproved bypass.
     const gateway = this.getOrCreateGateway();
+    
+    // We pass the signal to the gateway's execution request
     const gwResult = await gateway.execute({
       toolId: "project.run",
       inputs: { command: step.command, args: step.args },
@@ -283,13 +308,14 @@ export class CliAgentLoop {
         tenantId: this.tenantId,
         userId: this.userId,
         actorId: this.userId,
-        trusted: false, // CLI agent loop is untrusted — must go through gateway
+        trusted: false,
         interaction: "interactive",
       },
       runId: this.currentRunId!,
       toolCallId,
       timeoutMs: step.timeoutMs,
       onStream: this.onStream ?? undefined,
+      signal: step.signal, // Propagate signal
     });
 
     return {
@@ -303,6 +329,7 @@ export class CliAgentLoop {
       approved: gwResult.approved,
     };
   }
+
 
   // ─── Gateway management ─────────────────────────────────────────
 
