@@ -89,8 +89,9 @@ describe("Studio initialization labels", () => {
   it("first paint while auth loads is the layout skeleton shell — no phase-label interstitial", async () => {
     // Entry truth (Studio entry fix, Larry 2026-11-18): while Clerk
     // auth is loading, the loading state is the chosen layout's
-    // shell skeleton (StudioShell) — the board's panel geometry with
-    // the chat placeholder in its real panel slot. INIT_STEPS and
+    // shell skeleton (StudioShell) — Regular's column geometry by
+    // default (Board is the Settings opt-in, Larry 2026-11-25) with
+    // the chat placeholder in its real column slot. INIT_STEPS and
     // its "Authenticating" label were retired with the centered
     // spinner: the skeleton shows no text labels at all, so there is
     // nothing fake to cycle and nothing that disappears. The later
@@ -103,13 +104,13 @@ describe("Studio initialization labels", () => {
       render(React.createElement(mod.default));
     });
 
-    // The loading state is mounted and shows the board shell with
-    // its panels — the real first paint, in the real geometry.
+    // The loading state is mounted and shows the Regular shell —
+    // the real first paint, in the real geometry.
     expect(screen.getByTestId("studio-loading")).toBeTruthy();
-    expect(screen.getByTestId("studio-shell-board")).toBeTruthy();
-    expect(screen.getByTestId("studio-shell-panel-preview")).toBeTruthy();
-    expect(screen.getByTestId("studio-shell-panel-files")).toBeTruthy();
+    expect(screen.getByTestId("studio-shell-classic")).toBeTruthy();
+    expect(screen.getByTestId("studio-shell-workspace")).toBeTruthy();
     expect(screen.getByTestId("studio-shell-chat")).toBeTruthy();
+    expect(screen.queryByTestId("studio-shell-board")).toBeNull();
     // The retired "Authenticating" interstitial must NOT appear.
     expect(screen.queryByText("Authenticating")).toBeNull();
   });
@@ -231,7 +232,7 @@ describe("Studio Retry restarts the failed initialization", () => {
     // proving the initialization restarted, not just the animation.
     expect(screen.queryByTestId("studio-timeout")).toBeNull();
     expect(screen.getByTestId("studio-loading")).toBeTruthy();
-    expect(screen.getByTestId("studio-shell-board")).toBeTruthy();
+    expect(screen.getByTestId("studio-shell-classic")).toBeTruthy();
     expect(screen.queryByText("Authenticating")).toBeNull();
   });
 });

@@ -28,8 +28,9 @@ const INIT_TIMEOUT_MS = 8_000;
 function StudioLoadingState({ onRetry }: { onRetry: () => void }) {
   const { tokens } = useTheme();
   // The chosen layout's shell is the first paint (Studio entry fix,
-  // Larry 2026-11-18): board by default, Regular when that is the
-  // persisted choice — never a centered spinner / welcome screen.
+  // Larry 2026-11-18): Regular by default, Board when the user has
+  // enabled the advanced workspace — never a centered spinner /
+  // welcome screen.
   const { layoutMode } = useStudioLayoutMode();
   const [elapsed, setElapsed] = useState(false);
 

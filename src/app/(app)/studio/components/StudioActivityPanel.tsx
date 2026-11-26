@@ -185,8 +185,8 @@ export function StudioActivityPanel({
       </div>
       {missionContent}
       {busy && (
-        <div className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[10px]" style={{ borderColor: "rgba(167,139,250,0.25)", backgroundColor: "rgba(167,139,250,0.06)", color: "#c4b5fd" }}>
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400" aria-hidden />
+        <div className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[10px]" style={{ borderColor: "rgba(47,191,90,0.25)", backgroundColor: "rgba(47,191,90,0.06)", color: "#5AD67E" }}>
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: "#2FBF5A" }} aria-hidden />
           Agent working in the active conversation
         </div>
       )}
