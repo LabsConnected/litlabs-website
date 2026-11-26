@@ -204,12 +204,12 @@ export class CliAgentLoop {
       const timeoutPromise = new Promise<AgentStepResult>((resolve) =>
         setTimeout(() => resolve({
             step,
-            result: { status: "timeout", message: "Step timed out" } as ToolResult,
+            result: { status: "timeout", message: "Step timed out", success: false, data: {} } as ToolResult,
             runId: this.currentRunId!,
             toolCallId: step.toolCallId,
             status: "timeout",
             durationMs: timeoutMs,
-            risk: { level: "none", reason: "Timeout" },
+            risk: { level: "safe", capability: "read_only", reason: "Timeout", mutating: false },
             approved: false,
         }), timeoutMs)
       );
@@ -251,12 +251,14 @@ export class CliAgentLoop {
       result: {
         status: "success",
         message: "Direct response: " + step.args.join(" "),
+        success: true,
+        data: {},
       },
       runId: this.currentRunId!,
       toolCallId,
       status: "success",
       durationMs: 10,
-      risk: { level: "none", reason: "Direct inference" },
+      risk: { level: "safe", capability: "read_only", reason: "Direct inference", mutating: false },
       approved: true,
     };
   }

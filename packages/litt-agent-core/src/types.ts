@@ -59,6 +59,11 @@ export interface ShellExecuteOptions {
    * Only used when explicitly provided (e.g. `git commit --file=-`).
    */
   stdin?: string;
+  /**
+   * Optional AbortSignal — when aborted, the spawned process tree is
+   * killed and the result resolves with status: "cancelled".
+   */
+  signal?: AbortSignal;
 }
 
 // ─── Tools ────────────────────────────────────────────────────────
@@ -133,6 +138,12 @@ export interface ToolContext {
   projectId: string | null;
   userId: string | null;
   shell: ShellExecutor;
+  /**
+   * Optional AbortSignal propagated from ExecutionRequest.signal.
+   * Tool handlers should check ctx.signal?.aborted and stop early;
+   * handlers that spawn work should forward it to cancellable APIs.
+   */
+  signal?: AbortSignal | null;
 }
 
 export interface ToolMetadata {

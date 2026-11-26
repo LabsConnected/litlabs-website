@@ -120,6 +120,13 @@ export interface ExecutionRequest {
   timeoutMs?: number;
   /** Optional stream callback */
   onStream?: (chunk: StreamChunk) => void;
+  /**
+   * Optional AbortSignal — when aborted, in-flight execution is
+   * cancelled (shell commands kill the process tree; tool handlers
+   * receive the signal via ToolContext.signal) and the result
+   * resolves with status "cancelled".
+   */
+  signal?: AbortSignal;
 }
 
 /** The result of a gateway execution. */
@@ -350,6 +357,12 @@ export class ExecutionGateway {
       return this.deny(runId, toolCallId, t0, reason, risk, false, grantVerified);
     }
 
+    // ─── 4c. Cancellation: an already-aborted signal short-circuits
+    // before any approval prompt or dispatch ─────────────────────
+    if (request.signal?.aborted) {
+      return this.cancelled(runId, toolCallId, t0, risk, false, grantVerified, policyEffect);
+    }
+
     // ─── 4b. Identity trust enforcement (allow path) ──────────
     // An untrusted identity (model/agent) cannot claim elevated or
     // destructive capabilities without a verified grant. This check
@@ -376,7 +389,23 @@ export class ExecutionGateway {
     let verifiedApproval: VerifiedApproval | null = null;
 
     if (policyEffect === "require_approval") {
-      const approvalResult = await this.requestApproval(request, runId, toolCallId, risk, metadata);
+      // Race the approval wait against the abort signal so a cancelled
+      // request does not block forever waiting for a human decision.
+      const approvalResult = request.signal
+        ? await Promise.race([
+            this.requestApproval(request, runId, toolCallId, risk, metadata),
+            new Promise<null>((resolve) => {
+              const sig = request.signal!;
+              if (sig.aborted) resolve(null);
+              else sig.addEventListener("abort", () => resolve(null), { once: true });
+            }),
+          ])
+        : await this.requestApproval(request, runId, toolCallId, risk, metadata);
+      // Abort during the approval wait resolves the race as null —
+      // report cancelled, not denied.
+      if (request.signal?.aborted) {
+        return this.cancelled(runId, toolCallId, t0, risk, false, grantVerified, policyEffect);
+      }
       if (!approvalResult) {
         return this.deny(
           runId, toolCallId, t0,
@@ -492,6 +521,13 @@ export class ExecutionGateway {
       }
     }
 
+    // ─── 5d. Cancellation re-check before dispatch ─────────────
+    // Covers aborts that arrived during approval or credential
+    // lease resolution.
+    if (request.signal?.aborted) {
+      return this.cancelled(runId, toolCallId, t0, risk, approved, grantVerified, policyEffect);
+    }
+
     // ─── 6. Create GatewayExecutionCapsule ────────────────────
     // The capsule binds all authority references. It contains NO raw
     // credential material — only lease references.
@@ -555,6 +591,7 @@ export class ExecutionGateway {
         // Restore stdin plumbing (e.g. `git commit --file=-`): the exec
         // endpoint passes inputs.stdin, but nothing downstream consumed it.
         stdin: typeof request.inputs.stdin === "string" ? request.inputs.stdin : undefined,
+        signal: request.signal,
       };
 
       const execResult = await this._executor.execute(command, args, execOptions);
@@ -566,6 +603,7 @@ export class ExecutionGateway {
         projectId: this._projectId,
         userId: request.identity.userId,
         shell: this._shell,
+        signal: request.signal ?? null,
       };
 
       try {
@@ -1034,6 +1072,50 @@ export class ExecutionGateway {
       toolCallId,
       durationMs,
       denialReason: reason,
+      capsule: null,
+    };
+  }
+
+  /**
+   * Build a cancelled GatewayResult — the request was aborted via its
+   * AbortSignal. Not a policy denial: policyEffect reports the decision
+   * that was reached before cancellation.
+   */
+  private cancelled(
+    runId: string,
+    toolCallId: string,
+    t0: number,
+    risk: RiskAssessment | null,
+    approved: boolean,
+    grantVerified: boolean,
+    policyEffect: PolicyEffect,
+  ): GatewayResult {
+    const durationMs = Date.now() - t0;
+
+    this.emit({
+      type: "litt_event",
+      subtype: "gateway_cancelled",
+      ts: Date.now(),
+      runId,
+      toolCallId,
+      data: { risk: risk?.level ?? null },
+    });
+
+    return {
+      result: {
+        status: "cancelled",
+        success: false,
+        message: "Execution cancelled",
+        data: { cancelled: true },
+      },
+      policyEffect,
+      risk,
+      approved,
+      grantVerified,
+      runId,
+      toolCallId,
+      durationMs,
+      denialReason: null,
       capsule: null,
     };
   }
