@@ -332,37 +332,21 @@ test("Studio live acceptance — full generate/modify/persist flow", async ({ pa
   evidence.auth = { userId: clerkUserId, email };
   console.log(`[auth] signed in as ${email} (${clerkUserId})`);
 
-  // ── 2-5. Open Studio → first-run form OR project create → build ──
-  // Fresh accounts land on the FirstRunWelcome screen ("What do you want
-  // to build?") — that form IS the real entry: one submit creates the
-  // project and starts the build. When the account already has projects,
-  // /studio opens the workspace composer directly.
+  // ── 2-5. Open Studio → project create → build ──
+  // Every account — fresh or existing — opens straight into the
+  // workspace composer: the first-run welcome screen was retired
+  // (Larry's direct order, 2026-11-25), so there is no project-count
+  // gate. (A real first chat send from a zero-project account is
+  // provisioned a starter project server-side by the conversations
+  // POST; this spec drives by project id, so it creates the project
+  // through the API and navigates to it.)
   await page.goto(`${BASE}/studio`, { waitUntil: "domcontentloaded" });
-  const firstRun = page.getByTestId("first-run-form");
   const composer = page.getByTestId("studio-command-input");
-  // Wait for whichever surface this account gets — zero-project accounts
-  // get the welcome form, existing accounts the composer.
-  await expect(firstRun.or(composer)).toBeVisible({ timeout: 300_000 });
+  await expect(composer).toBeVisible({ timeout: 300_000 });
   let projectId: string | undefined;
   let r1: { status: string; approvals: number; content?: string };
-  if (await firstRun.isVisible().catch(() => false)) {
-    evidence.entry = "first-run-form";
-    await shot(page, "01-studio-loaded");
-    await firstRun.locator("textarea").fill(PROMPT_BUILD);
-    await firstRun.getByRole("button", { name: /start building/i }).click();
-    console.log("[send] first-run form submit");
-    // Project creation + generation can take a while under CPU inference.
-    await expect(composer).toBeVisible({ timeout: 300_000 });
-    await shot(page, "02-project-open");
-    // The parent creates + selects the project — read its id from the URL.
-    await page.waitForFunction(() => /[?&]project=/.test(location.search), undefined, { timeout: 60_000 });
-    projectId = new URL(page.url()).searchParams.get("project") ?? undefined;
-    evidence.projectId = projectId;
-    console.log(`[project] created via first-run ${projectId}`);
-    r1 = await driveRun(page, request);
-  } else {
+  {
     evidence.entry = "composer";
-    await expect(composer).toBeVisible({ timeout: 300_000 });
     await shot(page, "01-studio-loaded");
     const create = await request.post(`${BASE}/api/studio-projects`, {
       headers: await bearer(page),
