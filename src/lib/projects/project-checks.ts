@@ -517,19 +517,3 @@ export function completionChecksUnavailableNotSavedNote(reason: string): string 
     `as not run. They can be run from the Checks panel once the workspace is reachable.`
   );
 }
-
-/**
- * ACC-09 — the run landed mutations (both call sites gate on that)
- * but finished without the project context the checks need, so the
- * checks never ran and nothing was recorded. ACC-08's never-silent
- * rule had this hole: the skip returned no note at all, so a
- * completed build looked identical to a fully verified one.
- */
-export function completionChecksNoContextNote(): string {
-  return (
-    `IMPORTANT — the automatic checks did NOT run for this build: the run finished ` +
-    `without the project context the checks need. Nothing verified the finished ` +
-    `site and nothing was recorded, so the Checks panel will show the checks as ` +
-    `not run. They can be run from the Checks panel.`
-  );
-}

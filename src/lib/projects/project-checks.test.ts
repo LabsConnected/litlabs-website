@@ -65,7 +65,6 @@ vi.mock("@/lib/terminal-config", () => ({
 import {
   ProjectChecksUnavailableError,
   completionChecksFailureMessage,
-  completionChecksNoContextNote,
   completionChecksNotSavedNote,
   completionChecksUnavailableNotSavedNote,
   completionChecksUnavailableNote,
@@ -327,12 +326,5 @@ describe("checks note truthfulness (ACC-09)", () => {
     expect(note).toContain("could not be recorded");
     expect(note).toContain("as not run");
     expect(note).not.toContain("shows the checks as unavailable");
-  });
-
-  it("the no-context note is loud and admits nothing was recorded", () => {
-    const note = completionChecksNoContextNote();
-    expect(note).toContain("did NOT run");
-    expect(note).toContain("nothing was recorded");
-    expect(note).toContain("as not run");
   });
 });

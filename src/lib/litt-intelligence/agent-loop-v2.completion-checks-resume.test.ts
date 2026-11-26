@@ -90,11 +90,6 @@ vi.mock("@/lib/projects/project-checks", () => {
       `Nothing verified the finished site, so treat this build as unchecked — and ` +
       `this could not be recorded either, so the Checks panel will show the checks ` +
       `as not run. They can be run from the Checks panel once the workspace is reachable.`,
-    completionChecksNoContextNote: () =>
-      `IMPORTANT — the automatic checks did NOT run for this build: the run finished ` +
-      `without the project context the checks need. Nothing verified the finished ` +
-      `site and nothing was recorded, so the Checks panel will show the checks as ` +
-      `not run. They can be run from the Checks panel.`,
     unavailableCheckSet,
     unavailableCheckSetFromError: (error: InstanceType<typeof ProjectChecksUnavailableError>) =>
       unavailableCheckSet(error.message, error.body?.checks),

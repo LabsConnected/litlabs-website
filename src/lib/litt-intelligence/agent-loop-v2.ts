@@ -1389,14 +1389,13 @@ function successfulMutationPaths(
  *
  * ACC-09 — persistence itself was broken (project_check_runs.user_id
  * was uuid; every identity here is a Clerk ID string, so every save
- * and read-back failed with 22P02 — see project-checks.ts) and two
- * note paths could still mislead: the not-saved note claimed the
- * results were in the Jobs tab (Jobs' durable source is the same
- * persisted set, so it was empty too), and the no-context skip
- * returned no note at all. Now: notes only claim what was actually
- * persisted, and every exit path — ran, could-not-run,
- * could-not-save, no-context — leaves a truthful note or a
- * persisted set.
+ * and read-back failed with 22P02 — see project-checks.ts) and the
+ * not-saved note could still mislead: it claimed the results were in
+ * the Jobs tab (Jobs' durable source is the same persisted set, so
+ * it was empty too). Now notes only claim what was actually
+ * persisted. The no-context skip stays note-free by design: a run
+ * without project context is not a project build — it has no Checks
+ * panel and nothing to persist against — so the skip is only logged.
  */
 async function runCompletionChecks(opts: {
   cfg: AgentLoopConfig;
@@ -1427,7 +1426,6 @@ async function runCompletionChecks(opts: {
     completionChecksFailureMessage,
     completionChecksUnavailableNote,
     completionChecksUnavailableNotSavedNote,
-    completionChecksNoContextNote,
     completionChecksNotSavedNote,
     unavailableCheckSet,
     unavailableCheckSetFromError,
@@ -1435,13 +1433,12 @@ async function runCompletionChecks(opts: {
   } = checksModule;
   if (!projectId || !userId) {
     studioLog(`agent-loop:completion_checks_skipped:${opts.loop}`, { errorClass: "no_project_context" });
-    // ACC-09: both call sites invoke this only after the
-    // landed-mutation gate passed, so a context-less skip is a
-    // build whose checks silently never ran — ACC-08's
-    // never-silent rule covers it. The closing message carries the
-    // loud note; nothing is persisted (there is no project to tie
-    // a persisted set to), and the note says so.
-    return { note: completionChecksNoContextNote() };
+    // No project context: this run is not a project build, so there
+    // is no Checks panel or Jobs tab for it and nothing to persist
+    // against. The skip stays logged (ACC-08 observability) but
+    // carries no closing note — the loud-note rule covers project
+    // builds whose checks could not run or could not be saved.
+    return {};
   }
   try {
     const outcome = await runAllProjectChecks({ projectId, userId });

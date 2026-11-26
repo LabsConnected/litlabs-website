@@ -84,11 +84,6 @@ vi.mock("@/lib/projects/project-checks", () => {
       `Nothing verified the finished site, so treat this build as unchecked — and ` +
       `this could not be recorded either, so the Checks panel will show the checks ` +
       `as not run. They can be run from the Checks panel once the workspace is reachable.`,
-    completionChecksNoContextNote: () =>
-      `IMPORTANT — the automatic checks did NOT run for this build: the run finished ` +
-      `without the project context the checks need. Nothing verified the finished ` +
-      `site and nothing was recorded, so the Checks panel will show the checks as ` +
-      `not run. They can be run from the Checks panel.`,
     unavailableCheckSet,
     unavailableCheckSetFromError: (error: InstanceType<typeof ProjectChecksUnavailableError>) =>
       unavailableCheckSet(error.message, error.body?.checks),
@@ -448,7 +443,7 @@ describe("ACC-07 Item 2 — automatic checks at build completion", () => {
     expect(result.finalText).toContain("could not be recorded");
   });
 
-  it("a build that lands mutations without project context still carries the loud note (ACC-09)", async () => {
+  it("a run without project context is not a project build: checks skip silently, no note (ACC-09 narrowed)", async () => {
     const { transport } = memoryTransport();
     vi.mocked(callLLMWithTools)
       .mockResolvedValueOnce(
@@ -456,10 +451,11 @@ describe("ACC-07 Item 2 — automatic checks at build completion", () => {
       )
       .mockResolvedValueOnce(doneReply);
 
-    // Same run, but the action context carries no project: the
-    // checks cannot run and nothing can be persisted — before
-    // ACC-09 this skip returned no note at all and the completed
-    // build was indistinguishable from a verified one.
+    // Same run, but the action context carries no project: the run
+    // is not a project build, so it has no Checks panel and nothing
+    // to persist against. The checks skip (logged server-side) and
+    // the closing text carries no checks note — the loud-note rule
+    // covers project builds whose checks could not run or save.
     const noProjectContextConfig = {
       ...config,
       actionContext: {
@@ -477,8 +473,7 @@ describe("ACC-07 Item 2 — automatic checks at build completion", () => {
     expect(result.failedHonestly).toBeUndefined();
     expect(runAllProjectChecksMock).not.toHaveBeenCalled();
     expect(saveProjectCheckRunMock).not.toHaveBeenCalled();
-    expect(result.checksNote).toContain("automatic checks did NOT run");
-    expect(result.checksNote).toContain("without the project context");
-    expect(result.finalText).toContain("without the project context");
+    expect(result.checksNote).toBeUndefined();
+    expect(result.finalText).not.toContain("automatic checks");
   });
 });
