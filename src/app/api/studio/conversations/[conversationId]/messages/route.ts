@@ -1589,6 +1589,12 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               // read-backs) — without it the resumed run's verdict would
               // only see post-resume claims.
               priorToolCalls: v2Result.pendingApproval.priorToolCalls,
+              // ACC-07 build scope: whether approving this gate grants
+              // the build scope, and whether the run already held it.
+              buildScope: {
+                grants: v2Result.pendingApproval.grantsBuildScope === true,
+                authorized: v2Result.pendingApproval.buildScopeApproved === true,
+              },
             });
             pausedRunId = pausedRun.id;
             if (actionContext) {

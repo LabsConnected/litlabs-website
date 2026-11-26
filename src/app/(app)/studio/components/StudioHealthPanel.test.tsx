@@ -148,7 +148,7 @@ describe("StudioHealthPanel checks — not-run checks carry their reason (ACC-06
     render(<StudioHealthPanel mode="checks" projectId="proj-1" />);
 
     // All seven checks state the on-demand reason, not just "Not run".
-    const reasons = await screen.findAllByText(/run on demand from the Checks panel/);
+    const reasons = await screen.findAllByText(/run automatically when a build completes/);
     expect(reasons.length).toBeGreaterThanOrEqual(7);
     expect(screen.getAllByText("Not run").length).toBeGreaterThanOrEqual(7);
   });

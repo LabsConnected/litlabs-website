@@ -119,9 +119,23 @@ describe("findContrastViolations — pages that must pass", () => {
     expect(findContrastViolations(page).violations).toEqual([]);
   });
 
-  it("passes muted gray text that is low-contrast but readable", () => {
-    // #999999 on white is ~2.85:1 — under WCAG AA, but it is ordinary
-    // muted styling, not invisible text. The guard must not fire.
+  it("passes muted gray text that meets WCAG AA", () => {
+    // ACC-07: the bar is WCAG AA (4.5:1 for normal text). #767676 on
+    // white is ~4.54:1 — the lightest gray that still passes AA, and
+    // ordinary muted styling. The guard must not fire.
+    const page = [
+      "<!DOCTYPE html><html><head><style>",
+      "  .muted { color: #767676; }",
+      "</style></head><body>",
+      '  <p class="muted">Prices include tax.</p>',
+      "</body></html>",
+    ].join("\n");
+    expect(findContrastViolations(page).violations).toEqual([]);
+  });
+
+  it("flags muted gray text below WCAG AA (ACC-07)", () => {
+    // #999999 on white is ~2.85:1 — visible, but under the AA bar
+    // Larry set. Before ACC-07 the 2:1 floor let it pass; AA does not.
     const page = [
       "<!DOCTYPE html><html><head><style>",
       "  .muted { color: #999999; }",
@@ -129,7 +143,9 @@ describe("findContrastViolations — pages that must pass", () => {
       '  <p class="muted">Prices include tax.</p>',
       "</body></html>",
     ].join("\n");
-    expect(findContrastViolations(page).violations).toEqual([]);
+    const result = findContrastViolations(page);
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0].requiredRatio).toBe(4.5);
   });
 
   it("passes a var()-themed page whose tokens pair correctly", () => {
@@ -1015,5 +1031,146 @@ describe("checkTextContrast — read-back evidence rules", () => {
   it("does not apply when the run mutated no HTML", async () => {
     const result = await checkTextContrast({ candidatePaths: ["src/app.ts"], readFile });
     expect(result.applies).toBe(false);
+  });
+});
+
+describe("ACC-07 — Run 1 on c15099b4 regressions", () => {
+  const CDN = '<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>';
+
+  it("flags lime prices delivered via a plain-CSS :root variable (the Run 1 shape)", () => {
+    // Run 1's page defined --color-primary in a regular <style> block
+    // (NOT @theme) and priced in text-[var(--color-primary)]. The
+    // browser resolves the variable from the plain cascade, so the
+    // color was always decidable — the pre-ACC-07 judge only looked
+    // in @theme, called the page unverifiable, and it shipped.
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      CDN,
+      "<style>",
+      "  :root { --color-primary: #a8ff2f; }",
+      "  body { background-color: #fdfaf6; color: #2c2c2c; }",
+      "</style></head><body>",
+      "  <h1>Acceptance Run 1 Bakery</h1>",
+      '  <ul><li>Croissant <span class="text-[var(--color-primary)]">$3.50</span></li></ul>',
+      "</body></html>",
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]).toMatchObject({
+      color: "#a8ff2f",
+      background: "#fdfaf6",
+      requiredRatio: 4.5,
+    });
+    expect(result.violations[0].ratio).toBeLessThan(2);
+  });
+
+  it("flags lime prices delivered via an @theme variable", () => {
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      CDN,
+      '<style type="text/tailwindcss">',
+      "  @theme { --color-primary: #a8ff2f; }",
+      "</style>",
+      "<style>body { background-color: #fdfaf6; color: #2c2c2c; }</style>",
+      "</head><body>",
+      "  <h1>Acceptance Run 1 Bakery</h1>",
+      '  <ul><li>Croissant <span class="text-[var(--color-primary)]">$3.50</span></li></ul>',
+      "</body></html>",
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0].color).toBe("#a8ff2f");
+  });
+
+  it("passes a resolvable-variable page whose variable color meets AA", () => {
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      CDN,
+      "<style>",
+      "  :root { --color-primary: #1a7f37; }",
+      "  body { background-color: #fdfaf6; color: #2c2c2c; }",
+      "</style></head><body>",
+      "  <h1>Acceptance Run 1 Bakery</h1>",
+      '  <ul><li>Croissant <span class="text-[var(--color-primary)]">$3.50</span></li></ul>',
+      "</body></html>",
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations).toEqual([]);
+  });
+
+  it("stays unjudged when a variable is defined differently in @theme and plain CSS", () => {
+    // Genuinely ambiguous: cascade order between the document's
+    // stylesheet and the compiler's generated one decides. The
+    // honesty rule wins — unverifiable, never a guessed verdict.
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      CDN,
+      '<style type="text/tailwindcss">',
+      "  @theme { --color-primary: #1a7f37; }",
+      "</style>",
+      "<style>",
+      "  :root { --color-primary: #a8ff2f; }",
+      "  body { background-color: #fdfaf6; color: #2c2c2c; }",
+      "</style></head><body>",
+      "  <h1>Acceptance Run 1 Bakery</h1>",
+      '  <ul><li>Croissant <span class="text-[var(--color-primary)]">$3.50</span></li></ul>',
+      "</body></html>",
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(false);
+    expect(result.unreasonedReason).toBe("tailwind-runtime");
+    expect(result.violations).toEqual([]);
+  });
+
+  it("flags text faded below AA by an ancestor's opacity", () => {
+    const page = [
+      "<!DOCTYPE html><html><head><style>",
+      "  body { background-color: #ffffff; color: #111111; }",
+      "  .dim { opacity: 0.25; }",
+      "</style></head><body>",
+      '  <p class="dim">Faint caption text here</p>',
+      "</body></html>",
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0].element).toBe("p.dim");
+  });
+
+  it("applies the 3:1 large-text bar and the 4.5:1 normal bar to the same color", () => {
+    // #8a8a8a on white is ~3.45:1 — passes as large bold text,
+    // fails as normal text.
+    const page = [
+      "<!DOCTYPE html><html><head><style>",
+      "  body { background-color: #ffffff; color: #111111; }",
+      "  .big { color: #8a8a8a; font-size: 30px; font-weight: 700; }",
+      "  .small { color: #8a8a8a; }",
+      "</style></head><body>",
+      '  <h2 class="big">Big heading words</h2>',
+      '  <p class="small">Small caption words</p>',
+      "</body></html>",
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0].element).toBe("p.small");
+    expect(result.violations[0].requiredRatio).toBe(4.5);
+  });
+
+  it("treats a Tailwind text-2xl bold heading as large text", () => {
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      CDN,
+      "<style>body { background-color: #ffffff; color: #111111; }</style>",
+      "</head><body>",
+      '  <h2 class="text-2xl font-bold text-[#8a8a8a]">Big heading words</h2>',
+      '  <p class="text-[#8a8a8a]">Small caption words</p>',
+      "</body></html>",
+    ].join("\n");
+    const result = findContrastViolations(page);
+    expect(result.reasoned).toBe(true);
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0].element).toBe("p.text-[#8a8a8a]");
   });
 });

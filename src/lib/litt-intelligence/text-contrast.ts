@@ -56,6 +56,38 @@
  *   - Intentionally hidden text (display:none, visibility:hidden,
  *     opacity:0, the hidden attribute) and gradient-clipped text
  *     (background-clip:text) are not defects and are skipped.
+ *
+ * ACC-07 (Acceptance Run 1 on c15099b4, 2026-11-25): three extensions
+ * under Larry's ruling, each still bounded by the decidability rule
+ * above — nothing is judged on evidence the document does not itself
+ * supply:
+ *
+ *   - The bar is now WCAG AA: 4.5:1 for normal text, 3:1 for large
+ *     text (>= 24px, or >= 18.66px at weight >= 700), replacing the
+ *     old 2:1 "effectively vanishes" floor. Font size and weight are
+ *     resolved through the same cascade (plus UA defaults for
+ *     heading/bold elements and Tailwind size/weight utilities), so
+ *     the large-text allowance is itself decidable evidence, never
+ *     a guess. The Run 1 page's prices were 1.19:1 — invisible under
+ *     any bar — but muted text between 2:1 and AA is now also
+ *     reported, because Larry's rule is "fix unreadable content
+ *     before reporting build success", and AA is the readability
+ *     standard he named.
+ *   - The Tailwind narrow judgment resolves var() references against
+ *     the document's PLAIN-CSS custom properties as well as @theme:
+ *     the Run 1 page defined --color-primary: #a8ff2f in a regular
+ *     <style> :root block and used it via text-[var(--color-primary)].
+ *     The browser resolves that variable from the plain cascade, so
+ *     the color was always statically decidable — the judge simply
+ *     never looked outside @theme, called the page unverifiable, and
+ *     ACC-06a's pass-with-note let it ship. A variable defined in
+ *     BOTH places with different values is genuinely ambiguous and
+ *     stays unjudged.
+ *   - Element opacity is composed into the painted colors: an
+ *     ancestor's opacity: 0.5 halves the alpha of everything under
+ *     it, text and background layers alike. An opacity declaration
+ *     that cannot be resolved makes the element unjudgeable, never
+ *     failed.
  */
 
 import { parse } from "parse5";
@@ -75,6 +107,9 @@ export interface ContrastViolation {
   background: string;
   /** WCAG contrast ratio of color on background, 2 decimal places. */
   ratio: number;
+  /** The WCAG AA ratio this text had to meet (ACC-07): 4.5 for
+   *  normal text, 3 for large text. */
+  requiredRatio: number;
 }
 
 export interface TextContrastCheck {
@@ -776,10 +811,201 @@ function resolveVars(value: string, scope: Map<string, string>): string | null {
 
 // ─── The check itself ────────────────────────────────────────────────
 
-/** Only ratios below this are called invisible — far under the WCAG
- *  AA floor (4.5) and under ordinary muted-gray styling (~2.8), so
- *  the check fires exclusively on text that effectively vanishes. */
-const INVISIBLE_RATIO = 2.0;
+/** ACC-07: the verdict bar is WCAG AA — 4.5:1 for normal text,
+ *  3:1 for large text. (The pre-ACC-07 floor was 2:1, "effectively
+ *  vanishes"; Larry's ruling replaced it with the AA standard.) */
+const AA_RATIO_NORMAL = 4.5;
+const AA_RATIO_LARGE = 3.0;
+
+// ─── Font metrics (ACC-07) ───────────────────────────────────────────
+// The large-text allowance needs the element's computed font size and
+// weight. Both resolve through the same cascade as colors: a winning
+// declaration resolved in its own scope, inherited down the chain,
+// with UA defaults for the elements browsers size/embolden by default.
+// A declared value that cannot be resolved (an unresolvable var(), a
+// clamp() the checker does not evaluate) falls back to the inherited
+// value — an approximation, documented here, that never invents a
+// LARGER size than the evidence supports for the element itself: the
+// element's own UA default applies only when no node in its chain
+// declares a size at all.
+
+const UA_FONT_SIZE_EM: Record<string, number> = {
+  h1: 2, h2: 1.5, h3: 1.17, h4: 1, h5: 0.83, h6: 0.67,
+};
+const UA_BOLD_TAGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6", "b", "strong", "th"]);
+const FONT_SIZE_KEYWORDS: Record<string, number> = {
+  "xx-small": 9, "x-small": 10, small: 13, medium: 16, large: 18,
+  "x-large": 24, "xx-large": 32, "xxx-large": 48,
+};
+
+function parseFontSizePx(raw: string, parentPx: number, rootPx: number): number | null {
+  const value = raw.trim().toLowerCase();
+  if (FONT_SIZE_KEYWORDS[value] !== undefined) return FONT_SIZE_KEYWORDS[value];
+  const m = /^(\d+(?:\.\d+)?)(px|pt|em|rem|%)$/.exec(value);
+  if (!m) return null;
+  const n = Number(m[1]);
+  switch (m[2]) {
+    case "px": return n;
+    case "pt": return (n * 96) / 72;
+    case "em": return n * parentPx;
+    case "rem": return n * rootPx;
+    case "%": return (n / 100) * parentPx;
+    default: return null;
+  }
+}
+
+interface FontMetrics {
+  sizePx: number;
+  weight: number;
+}
+
+/** Computed font size (px) and weight for the last element of the
+ *  chain, from plain CSS alone. */
+function plainFontMetrics(
+  chain: P5Node[],
+  rules: CssRule[],
+  inlineStyles: Map<P5Node, Map<string, CssDeclaration>>,
+  scopes: Array<Map<string, string>>,
+): FontMetrics {
+  // Size: compute top-down, each node's declared size resolving
+  // against its parent's computed size.
+  const sizes: number[] = [];
+  let rootPx = 16;
+  let anyDeclared = false;
+  for (let i = 0; i < chain.length; i += 1) {
+    const parentPx = i === 0 ? 16 : sizes[i - 1];
+    const winner = winningDeclaration(chain[i], rules, inlineStyles, "font-size");
+    let size = parentPx;
+    if (winner) {
+      const resolved = resolveVars(winner.value, scopes[i]);
+      const keyword = resolved?.trim().toLowerCase();
+      if (keyword === "initial") size = 16;
+      else if (keyword && keyword !== "inherit" && keyword !== "unset") {
+        const parsed = parseFontSizePx(keyword, parentPx, rootPx);
+        if (parsed !== null) {
+          size = parsed;
+          anyDeclared = true;
+        }
+      } else if (keyword) anyDeclared = true;
+    }
+    sizes.push(size);
+    if (i === 0) rootPx = size;
+  }
+  let sizePx = sizes[sizes.length - 1];
+  const el = chain[chain.length - 1];
+  if (!anyDeclared && el.tagName && UA_FONT_SIZE_EM[el.tagName] !== undefined) {
+    const parentPx = chain.length > 1 ? sizes[sizes.length - 2] : 16;
+    sizePx = UA_FONT_SIZE_EM[el.tagName] * parentPx;
+  }
+  // Weight: nearest declaration walking up; UA-bold elements embolden
+  // their subtree when nothing declares a weight.
+  let weight = 400;
+  let weightDecided = false;
+  for (let i = chain.length - 1; i >= 0; i -= 1) {
+    const winner = winningDeclaration(chain[i], rules, inlineStyles, "font-weight");
+    if (winner) {
+      const resolved = resolveVars(winner.value, scopes[i]);
+      const keyword = resolved?.trim().toLowerCase() ?? "";
+      if (/^\d+$/.test(keyword)) { weight = Number(keyword); weightDecided = true; break; }
+      if (keyword === "bold" || keyword === "bolder") { weight = 700; weightDecided = true; break; }
+      if (keyword === "normal" || keyword === "lighter") { weight = 400; weightDecided = true; break; }
+      if (keyword === "inherit" || keyword === "unset") continue;
+      // Unresolvable weight declaration: fall through to the
+      // inherited/UA answer rather than guessing.
+      continue;
+    }
+    const chainTag = chain[i].tagName;
+    if (chainTag && UA_BOLD_TAGS.has(chainTag)) {
+      weight = 700;
+      weightDecided = true;
+      break;
+    }
+  }
+  void weightDecided;
+  return { sizePx, weight };
+}
+
+const TW_TEXT_SIZES: Record<string, number> = {
+  xs: 12, sm: 14, base: 16, lg: 18, xl: 20, "2xl": 24, "3xl": 30,
+  "4xl": 36, "5xl": 48, "6xl": 60, "7xl": 72, "8xl": 96, "9xl": 128,
+};
+const TW_FONT_WEIGHTS: Record<string, number> = {
+  thin: 100, extralight: 200, light: 300, normal: 400, medium: 500,
+  semibold: 600, bold: 700, extrabold: 800, black: 900,
+};
+
+/** Font size/weight declared by Tailwind utilities on the element or
+ *  its ancestors (nearest wins — utilities inherit like CSS). Only
+ *  the parts actually found are returned. */
+function tailwindFontMetrics(chain: P5Node[]): { sizePx?: number; weight?: number } {
+  let sizePx: number | undefined;
+  let weight: number | undefined;
+  for (let i = chain.length - 1; i >= 0 && (sizePx === undefined || weight === undefined); i -= 1) {
+    for (const cls of classListOf(chain[i])) {
+      const token = stripVariantPrefixes(cls);
+      if (sizePx === undefined) {
+        const sizeToken = /^text-(.+)$/.exec(token);
+        if (sizeToken) {
+          const body = sizeToken[1];
+          if (TW_TEXT_SIZES[body] !== undefined) sizePx = TW_TEXT_SIZES[body];
+          else if (body.startsWith("[") && body.endsWith("]")) {
+            const parsed = parseFontSizePx(body.slice(1, -1), 16, 16);
+            if (parsed !== null) sizePx = parsed;
+          }
+        }
+      }
+      if (weight === undefined) {
+        const weightToken = /^font-(.+)$/.exec(token);
+        if (weightToken && TW_FONT_WEIGHTS[weightToken[1]] !== undefined) {
+          weight = TW_FONT_WEIGHTS[weightToken[1]];
+        }
+      }
+    }
+  }
+  return { sizePx, weight };
+}
+
+/** WCAG large text: >= 24px, or >= 18.66px (14pt) at weight >= 700. */
+function isLargeText(metrics: FontMetrics): boolean {
+  return metrics.sizePx >= 24 || (metrics.sizePx >= 18.66 && metrics.weight >= 700);
+}
+
+function requiredRatioFor(metrics: FontMetrics): number {
+  return isLargeText(metrics) ? AA_RATIO_LARGE : AA_RATIO_NORMAL;
+}
+
+// ─── Opacity (ACC-07) ────────────────────────────────────────────────
+
+/** Cumulative opacity at each node of the chain (the product of the
+ *  node's own opacity and every ancestor's). Returns null when any
+ *  DECLARED opacity cannot be resolved to a number — the element is
+ *  then unjudgeable, never failed on a guess. */
+function chainOpacity(
+  chain: P5Node[],
+  rules: CssRule[],
+  inlineStyles: Map<P5Node, Map<string, CssDeclaration>>,
+  scopes: Array<Map<string, string>>,
+): number[] | null {
+  const cumulative: number[] = [];
+  let product = 1;
+  for (let i = 0; i < chain.length; i += 1) {
+    const winner = winningDeclaration(chain[i], rules, inlineStyles, "opacity");
+    if (winner) {
+      const resolved = resolveVars(winner.value, scopes[i]);
+      if (resolved === null) return null;
+      const keyword = resolved.trim().toLowerCase();
+      if (keyword !== "inherit" && keyword !== "unset") {
+        const parsed = keyword.endsWith("%")
+          ? Number(keyword.slice(0, -1)) / 100
+          : Number(keyword);
+        if (!Number.isFinite(parsed)) return null;
+        product *= Math.min(1, Math.max(0, parsed));
+      }
+    }
+    cumulative.push(product);
+  }
+  return cumulative;
+}
 
 const MAX_CHECKED_FILES = 8;
 const MAX_VIOLATIONS_PER_FILE = 10;
@@ -923,13 +1149,20 @@ function effectiveBackground(
   inlineStyles: Map<P5Node, Map<string, CssDeclaration>>,
   scopes: Array<Map<string, string>>,
 ): Resolved<Rgba> {
+  // ACC-07: an ancestor's opacity composites the whole subtree, so
+  // each background layer's painted alpha is scaled by the cumulative
+  // opacity at the node that painted it. An unresolvable opacity
+  // declaration makes the background unjudgeable, never guessed.
+  const opacity = chainOpacity(chain, rules, inlineStyles, scopes);
+  if (opacity === null) return { kind: "unknown" };
   const layers: Rgba[] = [];
   for (let i = chain.length - 1; i >= 0; i -= 1) {
     const own = ownBackground(chain[i], rules, inlineStyles, scopes[i]);
     if (own.kind === "unknown") return { kind: "unknown" };
     if (own.kind === "value") {
-      layers.push(own.value);
-      if (own.value.a >= 1) break;
+      const painted = { ...own.value, a: own.value.a * opacity[i] };
+      layers.push(painted);
+      if (painted.a >= 1) break;
     }
   }
   let result: Rgba = { r: 255, g: 255, b: 255, a: 1 }; // the default canvas
@@ -981,6 +1214,33 @@ function directText(el: P5Node): string {
     if (child.nodeName === "#text") text += child.value ?? "";
   }
   return text.replace(/\s+/g, " ").trim();
+}
+
+/** ACC-07: the custom properties the document's PLAIN CSS puts in
+ *  force at the root — the scope computed for the body element's
+ *  ancestor chain (html → body), including those elements' inline
+ *  styles. Utilities compiled by the Tailwind browser runtime
+ *  resolve var() against these values at runtime, so the narrow
+ *  judgment merges them into its variable scope. */
+function plainRootVariableScope(doc: P5Node, rules: CssRule[]): Map<string, string> {
+  let target: P5Node | null = null;
+  const find = (node: P5Node, tag: string): P5Node | null => {
+    for (const child of node.childNodes ?? []) {
+      if ((child.tagName ?? "").toLowerCase() === tag) return child;
+      const nested = find(child, tag);
+      if (nested) return nested;
+    }
+    return null;
+  };
+  target = find(doc, "body") ?? find(doc, "html");
+  if (!target) return new Map();
+  const chain = ancestorChain(target);
+  const inline = new Map<P5Node, Map<string, CssDeclaration>>();
+  for (const node of chain) {
+    const styleAttr = attrOf(node, "style");
+    if (styleAttr) inline.set(node, parseDeclarations(styleAttr, { next: 0 }));
+  }
+  return customPropertyScope(chain, rules, inline);
 }
 
 export interface DocumentContrastResult {
@@ -1064,6 +1324,13 @@ export function findContrastViolations(html: string): DocumentContrastResult {
   const { rules, opaque } = parseStylesheet(allCss);
   if (opaque) return { violations: [], reasoned: false };
 
+  // ACC-07: the document's plain-CSS custom properties in force at
+  // the root (the scope computed for the body element's chain). The
+  // browser resolves a utility's var() against exactly these (plus
+  // @theme, which the compiler emits to :root), so the narrow
+  // runtime judgment resolves against them too.
+  const plainRootVars = plainRootVariableScope(doc, rules);
+
   // ACC-03: when the Tailwind runtime is present it can recolor any
   // element whose ancestor chain carries color utilities or a
   // modeled @apply class, and root-level runtime colors or
@@ -1072,7 +1339,7 @@ export function findContrastViolations(html: string): DocumentContrastResult {
   // runtime cannot recolor; the rest are decided after the visit
   // (narrow judgment or unverifiable), never by the plain cascade
   // alone.
-  const tailwindModel = tailwindRuntime ? parseTailwindTheme(tailwindTexts) : null;
+  const tailwindModel = tailwindRuntime ? parseTailwindTheme(tailwindTexts, plainRootVars) : null;
   const runtimeRootColors =
     tailwindModel !== null &&
     (tailwindModel.root.bg.kind !== "none" || tailwindModel.root.color.kind !== "none");
@@ -1127,21 +1394,32 @@ export function findContrastViolations(html: string): DocumentContrastResult {
           if (fg.kind === "value" && fg.value.a > 0) {
             const bg = effectiveBackground(chain, rules, inlineStyles, scopes);
             if (bg.kind === "value") {
-              const painted = fg.value.a >= 1 ? fg.value : compositeOver(fg.value, bg.value);
-              const ratio = contrastRatio(painted, bg.value);
-              if (ratio < INVISIBLE_RATIO) {
-                const element = describeElement(el);
-                const key = `${element}|${toHex(painted)}|${toHex(bg.value)}`;
-                if (!seen.has(key)) {
-                  seen.add(key);
-                  violations.push({
-                    element,
-                    text: text.length > 60 ? `${text.slice(0, 57)}...` : text,
-                    color: toHex(painted),
-                    background: toHex(bg.value),
-                    ratio: Math.round(ratio * 100) / 100,
-                    runtimeAffected: chainRuntimeAffected,
-                  });
+              // ACC-07: the element's painted alpha includes the
+              // cumulative opacity of its chain (an unresolvable
+              // opacity already made the background unknown above).
+              const opacity = chainOpacity(chain, rules, inlineStyles, scopes);
+              const paintedFg = opacity === null
+                ? fg.value
+                : { ...fg.value, a: fg.value.a * opacity[opacity.length - 1] };
+              if (paintedFg.a > 0) {
+                const painted = paintedFg.a >= 1 ? paintedFg : compositeOver(paintedFg, bg.value);
+                const ratio = contrastRatio(painted, bg.value);
+                const requiredRatio = requiredRatioFor(plainFontMetrics(chain, rules, inlineStyles, scopes));
+                if (ratio < requiredRatio) {
+                  const element = describeElement(el);
+                  const key = `${element}|${toHex(painted)}|${toHex(bg.value)}`;
+                  if (!seen.has(key)) {
+                    seen.add(key);
+                    violations.push({
+                      element,
+                      text: text.length > 60 ? `${text.slice(0, 57)}...` : text,
+                      color: toHex(painted),
+                      background: toHex(bg.value),
+                      ratio: Math.round(ratio * 100) / 100,
+                      requiredRatio,
+                      runtimeAffected: chainRuntimeAffected,
+                    });
+                  }
                 }
               }
             }
@@ -1642,7 +1920,10 @@ function ruleHasColorContent(ruleBody: string): boolean {
 }
 
 /** Parse the text/tailwindcss blocks into the narrow theme model. */
-function parseTailwindTheme(tailwindTexts: string[]): TailwindThemeModel {
+function parseTailwindTheme(
+  tailwindTexts: string[],
+  plainRootVars?: Map<string, string>,
+): TailwindThemeModel {
   const css = tailwindTexts.join("\n");
   const themeVars = new Map<string, string>();
   const themeRe = /@theme\b[^{]*\{([^}]*)\}/g;
@@ -1654,6 +1935,22 @@ function parseTailwindTheme(tailwindTexts: string[]): TailwindThemeModel {
       const name = decl.slice(0, idx).trim();
       const value = decl.slice(idx + 1).trim();
       if (name.startsWith("--") && value) themeVars.set(name, value);
+    }
+  }
+  // ACC-07: merge the document's plain-CSS root variables — the
+  // browser resolves var() in compiled utilities against them just
+  // as it does against @theme's emitted :root declarations (Run 1 on
+  // c15099b4 defined --color-primary in a plain <style> block only,
+  // and the judge called the page unverifiable). A name defined in
+  // both places with DIFFERENT values is genuinely ambiguous —
+  // cascade order between the document's stylesheet and the
+  // compiler's generated one decides it — so it is removed, leaving
+  // references to it unresolvable and therefore unjudged.
+  if (plainRootVars) {
+    for (const [name, value] of plainRootVars) {
+      const existing = themeVars.get(name);
+      if (existing === undefined) themeVars.set(name, value);
+      else if (existing !== value) themeVars.delete(name);
     }
   }
 
@@ -1835,10 +2132,19 @@ function judgeTailwindRuntimeColors(
         }
         if (!fgSkipped && fg === null) fg = { r: 0, g: 0, b: 0, a: 1 };
 
+        // ACC-07: cumulative opacity scales every painted layer,
+        // runtime and plain alike. Unresolvable opacity leaves the
+        // element unjudged (skipped), never guessed at.
+        const opacity = chainOpacity(chain, rules, inlineStyles, scopes);
+        let bgSkipped = false;
+        if (opacity === null) {
+          fgSkipped = true;
+          bgSkipped = true;
+        }
+
         // Background: per-node layers composited to opacity.
         let bgStack: Rgba | null = null;
         let bgUnknown = false;
-        let bgSkipped = false;
         for (let i = chain.length - 1; i >= 0; i -= 1) {
           if (bgStack !== null && bgStack.a >= 1) break;
           const rt = nodeWriters[i].bg;
@@ -1852,7 +2158,10 @@ function judgeTailwindRuntimeColors(
             if (own.kind === "value") layer = own.value;
           }
           if (layer !== null) {
-            bgStack = bgStack === null ? layer : compositeOver(bgStack, layer);
+            const paintedLayer = opacity === null
+              ? layer
+              : { ...layer, a: layer.a * opacity[i] };
+            bgStack = bgStack === null ? paintedLayer : compositeOver(bgStack, paintedLayer);
           }
         }
         if (bgUnknown) {
@@ -1864,20 +2173,35 @@ function judgeTailwindRuntimeColors(
           : compositeOver(bgStack, { r: 255, g: 255, b: 255, a: 1 });
 
         if (!fgSkipped && !bgSkipped && fg !== null && fg.a > 0) {
-          const painted = fg.a >= 1 ? fg : compositeOver(fg, bg);
-          const ratio = contrastRatio(painted, bg);
-          if (ratio < INVISIBLE_RATIO) {
-            const element = describeElement(el);
-            const key = `${element}|${toHex(painted)}|${toHex(bg)}`;
-            if (!seen.has(key)) {
-              seen.add(key);
-              violations.push({
-                element,
-                text: text.length > 60 ? `${text.slice(0, 57)}...` : text,
-                color: toHex(painted),
-                background: toHex(bg),
-                ratio: Math.round(ratio * 100) / 100,
-              });
+          const paintedFg = opacity === null
+            ? fg
+            : { ...fg, a: fg.a * opacity[opacity.length - 1] };
+          if (paintedFg.a > 0) {
+            const painted = paintedFg.a >= 1 ? paintedFg : compositeOver(paintedFg, bg);
+            const ratio = contrastRatio(painted, bg);
+            // ACC-07: WCAG AA bar; size/weight come from utilities
+            // where the runtime declares them, else the plain
+            // cascade and UA defaults.
+            const plainMetrics = plainFontMetrics(chain, rules, inlineStyles, scopes);
+            const twMetrics = tailwindFontMetrics(chain);
+            const requiredRatio = requiredRatioFor({
+              sizePx: twMetrics.sizePx ?? plainMetrics.sizePx,
+              weight: twMetrics.weight ?? plainMetrics.weight,
+            });
+            if (ratio < requiredRatio) {
+              const element = describeElement(el);
+              const key = `${element}|${toHex(painted)}|${toHex(bg)}`;
+              if (!seen.has(key)) {
+                seen.add(key);
+                violations.push({
+                  element,
+                  text: text.length > 60 ? `${text.slice(0, 57)}...` : text,
+                  color: toHex(painted),
+                  background: toHex(bg),
+                  ratio: Math.round(ratio * 100) / 100,
+                  requiredRatio,
+                });
+              }
             }
           }
         }
@@ -1957,7 +2281,8 @@ export function textContrastFailureMessage(violations: ContrastViolation[]): str
   const more = violations.length > 1 ? ` (and ${violations.length - 1} more like it)` : "";
   return (
     `I wrote the page, but some of its text would be invisible — "${first.text}" in ${first.path} ` +
-    `is ${first.color} text on a ${first.background} background${more}. ` +
+    `is ${first.color} text on a ${first.background} background (contrast ${first.ratio}:1; ` +
+    `readable text needs at least ${first.requiredRatio}:1)${more}. ` +
     `Words a visitor cannot read are not a finished page, so I can't confirm this build landed as intended. ` +
     `Please try again.`
   );
@@ -1969,18 +2294,20 @@ export function textContrastRepairPrompt(violations: ContrastViolation[]): strin
     .slice(0, 5)
     .map(
       (v) =>
-        `- ${v.path}: <${v.element}> "${v.text}" — text color ${v.color} on background ${v.background} (contrast ${v.ratio}:1)`,
+        `- ${v.path}: <${v.element}> "${v.text}" — text color ${v.color} on background ${v.background} (contrast ${v.ratio}:1, needs at least ${v.requiredRatio}:1)`,
     )
     .join("\n");
   return (
     `Verification failed: some text in the page you just wrote would be INVISIBLE — ` +
-    `its declared text color has almost no contrast with the background declared behind it:\n${lines}\n` +
+    `its declared text color does not meet the WCAG AA contrast bar against the background declared behind it:\n${lines}\n` +
     `This is the light-text-on-light-background failure: the CSS was written for a dark theme, ` +
     `but the dark background was never actually declared in the document (or the text colors were ` +
     `written for a background the document does not have). Fix the file now: either declare the dark ` +
     `background the design intends — on body or on the section behind the text — or change the text ` +
-    `colors so every text element contrasts strongly with the background actually declared behind it. ` +
-    `Then finish.`
+    `colors so every text element meets the required contrast against the background actually declared behind it. ` +
+    `A bright accent color (a theme primary like a lime or yellow) must not carry small text — prices, ` +
+    `captions, links, body copy — on a light background; use it for large headings or decoration, and ` +
+    `give small text a color that passes. Then finish.`
   );
 }
 

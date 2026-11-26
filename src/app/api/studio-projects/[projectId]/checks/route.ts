@@ -4,6 +4,11 @@ import { getProject, verifyProjectWorkspace } from "@/lib/projects/project-repos
 import { listCheckpoints } from "@/lib/missions/mission-repository";
 import { listPendingApprovals } from "@/lib/missions/mission-repository";
 import { requireTerminalBaseUrl, terminalNotConfiguredResponse } from "@/lib/terminal-config";
+import {
+  getLatestProjectCheckRun,
+  saveProjectCheckRun,
+  type ProjectCheckResult,
+} from "@/lib/projects/project-checks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,15 +29,17 @@ interface CheckResult {
 }
 
 /**
- * ACC-06a item 2: a not_run check must carry its reason. Project
- * checks run on demand from the Checks panel — a completed build
- * does not run them automatically — so after a build the honest
- * record is "not run, because on-demand", never a bare "Not run"
- * (production proof on 8cd7728c showed all seven checks reasonless).
- * StudioHealthPanel uses the same sentence for its fallback shape.
+ * ACC-06a item 2: a not_run check must carry its reason, never a bare
+ * "Not run" (production proof on 8cd7728c showed all seven checks
+ * reasonless). ACC-07 Item 2 supersedes the on-demand-only world the
+ * ACC-06a sentence described: a completed build now runs all seven
+ * checks automatically and the results persist (project_check_runs),
+ * so this reason remains only for a project no build or check run
+ * has covered yet. StudioHealthPanel uses the same sentence for its
+ * fallback shape.
  */
 const NOT_RUN_REASON =
-  "Not run yet — project checks run on demand from the Checks panel; a completed build does not run them automatically.";
+  "Not run yet — checks run automatically when a build completes, or on demand from the Checks panel.";
 
 function emptyChecks(reason: string): CheckResult[] {
   return CHECK_IDS.map((id) => ({
@@ -159,6 +166,27 @@ export async function GET(
   const { projectId } = await params;
   const payload = await baseResponse(projectId, userId);
   if (!payload) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  // ACC-07 Item 2: when a check run has been persisted for this
+  // project (automatic at build completion, or on demand), the panel
+  // shows THOSE results — tied to the run that produced them —
+  // instead of the not_run placeholder set.
+  if (payload.project.workspaceStatus === "ready") {
+    const persisted = await getLatestProjectCheckRun(projectId, userId);
+    if (persisted) {
+      return NextResponse.json(
+        {
+          ...payload,
+          checks: persisted.checks,
+          summary: persisted.summary,
+          checkRun: {
+            conversationId: persisted.conversationId,
+            createdAt: persisted.createdAt,
+          },
+        },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+  }
   return NextResponse.json(payload, { headers: { "Cache-Control": "no-store" } });
 }
 
@@ -217,29 +245,70 @@ export async function POST(
   try {
     const result = await runWorkspaceCommand(workspaceId, userId, command);
     const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+    const checkResult = {
+      id: checkId,
+      label: check === "typecheck" ? "TypeScript" : check[0].toUpperCase() + check.slice(1),
+      status: result.exitCode === 0 ? "passed" : "failed",
+      source: `Active project workspace · ${command}`,
+      timestamp,
+      durationMs: result.durationMs ?? null,
+      output: output.slice(0, 100000),
+      error: result.exitCode === 0 ? null : `Command exited with code ${result.exitCode ?? 1}`,
+    } satisfies CheckResult;
+    await persistSingleCheck(projectId, userId, checkResult);
     return NextResponse.json({
-      check: {
-        id: checkId,
-        label: check === "typecheck" ? "TypeScript" : check[0].toUpperCase() + check.slice(1),
-        status: result.exitCode === 0 ? "passed" : "failed",
-        source: `Active project workspace · ${command}`,
-        timestamp,
-        durationMs: result.durationMs ?? null,
-        output: output.slice(0, 100000),
-        error: result.exitCode === 0 ? null : `Command exited with code ${result.exitCode ?? 1}`,
-      } satisfies CheckResult,
+      check: checkResult,
     }, { status: result.exitCode === 0 ? 200 : 422 });
   } catch (error) {
+    const checkResult = {
+      id: checkId,
+      label: check === "typecheck" ? "TypeScript" : check[0].toUpperCase() + check.slice(1),
+      status: "failed",
+      source: `Active project workspace · ${command}`,
+      timestamp,
+      output: null,
+      error: error instanceof Error ? error.message : "Check failed",
+    } satisfies CheckResult;
+    await persistSingleCheck(projectId, userId, checkResult);
     return NextResponse.json({
-      check: {
-        id: checkId,
-        label: check === "typecheck" ? "TypeScript" : check[0].toUpperCase() + check.slice(1),
-        status: "failed",
-        source: `Active project workspace · ${command}`,
-        timestamp,
-        output: null,
-        error: error instanceof Error ? error.message : "Check failed",
-      } satisfies CheckResult,
+      check: checkResult,
     }, { status: 422 });
   }
+}
+
+/**
+ * ACC-07 Item 2: an on-demand single check updates the persisted set
+ * (merged over the latest run's results), so the panel's record stays
+ * the whole seven — one fresh result never erases the other six.
+ * Best-effort: persistence failure never changes the response.
+ */
+async function persistSingleCheck(
+  projectId: string,
+  userId: string,
+  check: CheckResult,
+): Promise<void> {
+  const latest = await getLatestProjectCheckRun(projectId, userId);
+  const base: ProjectCheckResult[] = latest?.checks ?? CHECK_IDS.map((id) => ({
+    id,
+    label: id === "typecheck" ? "TypeScript" : id[0].toUpperCase() + id.slice(1),
+    status: "not_run" as const,
+    source: "Active project workspace",
+    timestamp: null,
+    output: null,
+    error: NOT_RUN_REASON,
+  }));
+  const merged = base.map((c) => (c.id === check.id ? (check as unknown as ProjectCheckResult) : c));
+  await saveProjectCheckRun({
+    projectId,
+    userId,
+    conversationId: latest?.conversationId ?? null,
+    checks: merged,
+    summary: {
+      total: merged.length,
+      passed: merged.filter((c) => c.status === "passed").length,
+      failed: merged.filter((c) => c.status === "failed").length,
+      notConfigured: merged.filter((c) => c.status === "not_configured").length,
+      changedFileCount: latest?.summary.changedFileCount ?? 0,
+    },
+  });
 }

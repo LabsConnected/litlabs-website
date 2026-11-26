@@ -290,6 +290,11 @@ export function buildRuntimeContextBlock(ctx: CanonicalRuntimeContext): string {
         "light text is allowed ONLY where the element itself, a section ancestor, or body declares a dark background in the same CSS; " +
         "if that dark background is not declared, the text must be dark. Describing a dark theme in your reply does not make it so: " +
         "a page whose words cannot be read on its own declared colors is a failed build. " +
+        "ACCENT RULE (ACC-07): every text color must meet WCAG AA against its declared background — at least 4.5:1 for " +
+        "normal text, 3:1 for large text (24px+, or 18.66px+ bold). A bright theme primary/accent (a lime, yellow, or neon) " +
+        "almost never meets that bar on a light background: never use the primary/accent for small text — prices, captions, " +
+        "links, labels, body copy — on a background it fails against. Accents are for large headings, buttons with their own " +
+        "passing pairing, borders, and decoration; small text gets a color that passes on the background behind it. " +
         "PLAIN-CSS FLOOR (ACC-03): the page's core presentation must not depend on the runtime compiler — " +
         "ALWAYS also declare the body's background and text colors as plain CSS in a regular <style> block " +
         "(e.g. <style>body { background-color: #03050a; color: #f5f5f4; }</style>), so the page renders its theme " +

@@ -1000,6 +1000,13 @@ export async function POST(
       // (resolveAvailableCapabilities), so the approved tool cannot fail
       // closed as "incapable" after the user approved it.
       availableCapabilities: resolveAvailableCapabilities({ transport }),
+      // ACC-07 build scope: the resumed run holds the authorization
+      // when the run already held it at pause time, or when THIS
+      // decision approves a scope-granting gate. A rejection grants
+      // nothing.
+      buildScopeApproved:
+        resolved.buildScope?.authorized === true ||
+        (body.decision === "approved" && resolved.buildScope?.grants === true),
     },
     transport,
     runProgress,
@@ -1391,6 +1398,12 @@ export async function POST(
             // omitting it writes prior_tool_calls: null, so the next
             // resume would lose every mutation proven across THIS gate.
             priorToolCalls: result.pendingApproval.priorToolCalls,
+            // ACC-07 build scope, carried across the nested gate the
+            // same way — omitting it would silently drop the scope.
+            buildScope: {
+              grants: result.pendingApproval.grantsBuildScope === true,
+              authorized: result.pendingApproval.buildScopeApproved === true,
+            },
           });
           nestedPausedRunId = nested?.id ?? null;
         } catch (nestedErr) {
