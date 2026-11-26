@@ -505,13 +505,16 @@ describe("CommandStudioHeader — failed run must not sit under a green Ready pi
   });
 });
 
-describe("CommandStudioHeader — crossbreed layout switch (Amendment 8)", () => {
+describe("CommandStudioHeader — Board demotion (Larry, 2026-11-22)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockProviderHealth = {};
   });
 
-  it("renders no switch when the layout props are absent", () => {
+  // The header carries NO layout switch: Regular is the default and
+  // the Board is opt-in only, enabled from Settings as "Enable
+  // advanced workspace" — never an equal segmented control here.
+  it("renders no layout switch in the header", () => {
     render(
       <CommandStudioHeader
         onPreviewAction={vi.fn()}
@@ -521,41 +524,7 @@ describe("CommandStudioHeader — crossbreed layout switch (Amendment 8)", () =>
       />,
     );
     expect(screen.queryByTestId("studio-layout-switch")).toBeNull();
-  });
-
-  it("shows Board selected in board mode and reports a flip to Regular", () => {
-    const onLayoutModeChange = vi.fn();
-    render(
-      <CommandStudioHeader
-        onPreviewAction={vi.fn()}
-        runtime={noProjectRuntime}
-        runtimeLoading={false}
-        capabilities={mockCapabilities}
-        layoutMode="board"
-        onLayoutModeChange={onLayoutModeChange}
-      />,
-    );
-    expect(screen.getByTestId("studio-layout-switch")).toBeTruthy();
-    expect(screen.getByTestId("studio-layout-mode-board").getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByTestId("studio-layout-mode-classic").getAttribute("aria-selected")).toBe("false");
-    fireEvent.click(screen.getByTestId("studio-layout-mode-classic"));
-    expect(onLayoutModeChange).toHaveBeenCalledWith("classic");
-  });
-
-  it("shows Regular selected in classic mode and reports a flip back to Board", () => {
-    const onLayoutModeChange = vi.fn();
-    render(
-      <CommandStudioHeader
-        onPreviewAction={vi.fn()}
-        runtime={noProjectRuntime}
-        runtimeLoading={false}
-        capabilities={mockCapabilities}
-        layoutMode="classic"
-        onLayoutModeChange={onLayoutModeChange}
-      />,
-    );
-    expect(screen.getByTestId("studio-layout-mode-classic").getAttribute("aria-selected")).toBe("true");
-    fireEvent.click(screen.getByTestId("studio-layout-mode-board"));
-    expect(onLayoutModeChange).toHaveBeenCalledWith("board");
+    expect(screen.queryByTestId("studio-layout-mode-board")).toBeNull();
+    expect(screen.queryByTestId("studio-layout-mode-classic")).toBeNull();
   });
 });

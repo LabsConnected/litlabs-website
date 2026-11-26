@@ -4,7 +4,7 @@ import { terminalHealthOf } from "@/lib/studio/terminal-health";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
-import { Image as ImageIcon, LoaderCircle, Music, RefreshCw, Trash2, Video, X } from "lucide-react";
+import { Image as ImageIcon, LoaderCircle, MessageSquare, Music, RefreshCw, Trash2, Video, X } from "lucide-react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
@@ -105,6 +105,9 @@ import { useBoardProjectType } from "./board/useBoardProjectType";
 import { boardScopeKey, type BoardPanelId } from "./board/board-types";
 import { useBoardLayoutStore } from "../stores/useBoardLayoutStore";
 import { useStudioLayoutMode } from "../stores/useStudioLayoutMode";
+import { popupsAllowed, usePopupAreaStore } from "../stores/usePopupAreaStore";
+import { PopupAreaChrome, PopupAreaRestoreTab } from "./PopupAreaControls";
+import BrowserPeekCard from "./BrowserPeekCard";
 import ContextInspector from "./shell/ContextInspector";
 import ResizeHandle from "./shell/ResizeHandle";
 import StudioDeploySurface from "./shell/StudioDeploySurface";
@@ -522,16 +525,17 @@ function CommandStudioContent() {
   const viewportTier = useViewportTier();
   const isMobileLitt = viewportTier === "mobile";
 
-  // The crossbreed layout switch (Amendment 8, Larry 2026-11-17):
-  // Studio offers BOTH layouts — the board (flagship default) and the
-  // regular (classic) layout, which is also the mobile/non-studio
-  // body — behind a real, visible toggle in the header and in Board
-  // Settings. The effective mode resolves in useStudioLayoutMode
+  // The layout choice (Amendment 8, Larry 2026-11-17; default
+  // superseded by Larry's 2026-11-22 ruling): Studio offers BOTH
+  // layouts — Regular (classic), the default landing layout and also
+  // the mobile/non-studio body, and the Board, opt-in only via
+  // Settings ("Enable advanced workspace") or the Board Settings
+  // menu. The effective mode resolves in useStudioLayoutMode
   // (explicit persisted choice → the pre-switch escape-hatch key
-  // `litt:studio:layout-mode` → board) and is reactive: flipping the
-  // switch swaps the body branch in place, so the conversation,
+  // `litt:studio:layout-mode` → classic) and is reactive: flipping
+  // the choice swaps the body branch in place, so the conversation,
   // project, and preview session this component owns never unmount.
-  const { layoutMode, setLayoutMode } = useStudioLayoutMode();
+  const { layoutMode } = useStudioLayoutMode();
   const classicOverride = layoutMode === "classic";
 
   const studioShellActive =
@@ -632,6 +636,17 @@ function CommandStudioContent() {
   // Browser side dock's state: on-demand (never a permanent rail),
   // right side by default, side + width persisted across sessions.
   const [browserDockOpen, setBrowserDockOpen] = useState(false);
+  // The right-side pop-up area's visibility (Larry, 2026-11-25): the
+  // Browser dock lives in that area when docked right or free. The
+  // area's own switches (hide + Auto pop-ups) live in
+  // usePopupAreaStore; intent-driven opens consult popupsAllowed().
+  const popupAreaVisible = usePopupAreaStore((s) => s.areaVisible);
+  // Two-stage pop-outs (Larry, 2026-11-25): a LiTT-driven Browser
+  // open lands in PEEK — a small card in the pop-up area that never
+  // auto-expands. Only the user's click (the card's Open button, or
+  // a direct launcher) promotes it to the full dock. User-initiated
+  // opens skip the peek: asking for the browser IS asking for it.
+  const [browserDockPeek, setBrowserDockPeek] = useState(false);
   const [browserDockSide, setBrowserDockSide] = useState<BrowserDockSide>(() => {
     if (typeof window === "undefined") return "right";
     try {
@@ -678,7 +693,17 @@ function CommandStudioContent() {
         // opens the Browser side dock (the stage browser surface is
         // not rendered by the classic body, so the intent used to
         // land nowhere visible). Mobile keeps its existing routing.
-        else if (!isMobileLitt) setBrowserDockOpen(true);
+        // Pop-up area rule (Larry, 2026-11-25): this is a LiTT-driven
+        // open — with Auto pop-ups off or the area hidden, nothing
+        // appears uninvited; the user opens the Browser manually.
+        // When it does open, it opens as the small peek (stage one),
+        // never the full dock.
+        else if (!isMobileLitt) {
+          if (popupsAllowed()) {
+            setBrowserDockPeek(true);
+            setBrowserDockOpen(true);
+          }
+        }
         else openStageSurface("browser");
         return;
       }
@@ -782,7 +807,7 @@ function CommandStudioContent() {
     }
     setDockOpen((v) => !v);
   }, [studioShellActive]);
-  const handleOpenDockTab = useCallback((tab: StudioDockTab) => {
+  const handleOpenDockTab = useCallback((tab: StudioDockTab, opts?: { userInitiated?: boolean }) => {
     if (studioShellActive) {
       // Board-only: dock tabs are board panels now — summon the panel.
       const panelByTab: Record<StudioDockTab, BoardPanelId> = {
@@ -798,9 +823,21 @@ function CommandStudioContent() {
       return;
     }
     // Rail consolidation: in Regular the Browser is the side dock,
-    // not a bottom-dock pane — open it directly.
+    // not a bottom-dock pane — open it directly. Drawer intents reach
+    // here from chat routing too, so the pop-up area rule applies:
+    // LiTT-driven opens are held while Auto pop-ups are off or the
+    // area is hidden. A direct user click (the header menu passes
+    // userInitiated) always opens — asking is asking — and brings
+    // the pop-up area back if it was hidden.
     if (tab === "browser" && !isMobileLitt) {
-      setBrowserDockOpen(true);
+      if (opts?.userInitiated) {
+        usePopupAreaStore.getState().setAreaVisible(true);
+        setBrowserDockPeek(false);
+        setBrowserDockOpen(true);
+      } else if (popupsAllowed()) {
+        setBrowserDockPeek(true);
+        setBrowserDockOpen(true);
+      }
       return;
     }
     setDockTab(tab);
@@ -1039,6 +1076,31 @@ function CommandStudioContent() {
       // ignore
     }
   }, [littCollapsed]);
+
+  // Hideable chat (Larry's ruling, 2026-11-25): beyond collapse, the
+  // chat panel can fold away ENTIRELY so the workspace (Code) takes
+  // the full width for focused editing; a slim Chat tab on the left
+  // edge brings it back. Same session-scoped persistence as collapse:
+  // a manual hide sticks for the session, a fresh visit always starts
+  // with chat showing — chat is the front door, hiding is a view
+  // choice, never a removal (the panel stays mounted, display:none,
+  // so the conversation, SSE streams, and drafts survive).
+  const LITT_HIDDEN_KEY = "littree:studio:litt-hidden";
+  const [littHidden, setLittHidden] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return sessionStorage.getItem(LITT_HIDDEN_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(LITT_HIDDEN_KEY, String(littHidden));
+    } catch {
+      // ignore
+    }
+  }, [littHidden]);
 
   // Chat lives in exactly ONE place: the left LiTT panel (Larry's rule,
   // 2026-11-12). The bottom command layer and the left/bottom dock
@@ -1881,6 +1943,15 @@ function CommandStudioContent() {
   const createStudioTask = useCallback(async () => {
     const task = await studioTasks.createTask({ title: "New conversation", taskType: "general" });
     if (!task?.conversationId) return;
+    // Duplicate-row guard (Larry's photographed duplicate "New
+    // conversation" rows, 2026-11-25): this task already owns the
+    // conversation, so mark it seeded BEFORE selecting — otherwise
+    // the adoption effect above can fire for the same conversation
+    // in a render where the task list has not caught up yet and
+    // issue a second createTask POST for it. The server adoption is
+    // idempotent and the list dedupes by conversation, but the
+    // client must not ask twice in the first place.
+    taskSeededRef.current = task.conversationId;
     conversation.selectConversation(task.conversationId);
     await conversation.loadMessages(task.conversationId);
   }, [conversation, studioTasks]);
@@ -4205,6 +4276,7 @@ function CommandStudioContent() {
       onClose={() => {
         setBrowserDockOpen(false);
         setBrowserDockFree(false);
+        setBrowserDockPeek(false);
       }}
     >
       <BoardBrowserPanel />
@@ -4300,7 +4372,10 @@ function CommandStudioContent() {
         <CommandStudioHeader
           onPreviewAction={handlePreview}
           onToggleDockAction={studioShellActive ? undefined : handleToggleDock}
-          onOpenDockTabAction={handleOpenDockTab}
+          // Header menu items are direct user clicks — they carry
+          // userInitiated so the pop-up area's Auto pop-ups gate
+          // never blocks the user opening a surface manually.
+          onOpenDockTabAction={(tab) => handleOpenDockTab(tab, { userInitiated: true })}
           dockOpen={dockOpen}
           onProjectSelectAction={handleSelectProject}
           onCreateProjectAction={openProjectNameDialog}
@@ -4336,19 +4411,11 @@ function CommandStudioContent() {
           executionMode={executionMode}
           onExecutionModeChange={setExecutionMode}
           onOpenSelectorAction={openSelector}
-          // The crossbreed switch shows only where the choice exists:
-          // the desktop Studio destination (mobile keeps its sheet/nav
-          // model; other destinations have no layout to switch).
-          layoutMode={
-            destination === "studio" && viewportTier !== null && !isMobileLitt
-              ? layoutMode
-              : undefined
-          }
-          onLayoutModeChange={
-            destination === "studio" && viewportTier !== null && !isMobileLitt
-              ? setLayoutMode
-              : undefined
-          }
+          // No layout props for the header: the Board demotion
+          // (Larry, 2026-11-22) removed the header's layout switch —
+          // the Board is enabled from Settings ("Enable advanced
+          // workspace"), and this component keeps owning the choice
+          // through useStudioLayoutMode above.
           onReconnectWorkspaceAction={handlePrepareWorkspace}
         />
         )}
@@ -4404,8 +4471,8 @@ function CommandStudioContent() {
         {viewportTier === null && destination === "studio" ? (
           // First paint before the viewport tier resolves (Studio
           // entry fix, Larry 2026-11-18): render the CHOSEN layout's
-          // skeleton in place — board-shaped by default, classic when
-          // Regular is the persisted choice — instead of falling
+          // skeleton in place — classic-shaped by default, board when
+          // the advanced workspace is enabled — instead of falling
           // through to the classic body (whose chat column is gated
           // on a resolved tier, which is what produced the brief
           // centered-chat flash before the real layout took over).
@@ -4465,6 +4532,32 @@ function CommandStudioContent() {
               drafts survive the toggle. Below 1024px, LiTT is NOT
               rendered here at all — it is accessed via the mobile
               trigger + overlay sheet below (Phase C2.1). */}
+          {/* Hideable chat (Larry, 2026-11-25): while chat is hidden,
+              this slim tab is its only footprint on the left edge —
+              one click brings the panel back, content untouched. */}
+          {viewportTier !== null && !isMobileLitt && littHidden && (
+            <button
+              type="button"
+              onClick={() => setLittHidden(false)}
+              className="flex w-9 shrink-0 flex-col items-center gap-2 border-r py-3 transition-colors hover:bg-black/5"
+              style={{
+                borderColor: "var(--studio-border)",
+                backgroundColor: "var(--studio-surface)",
+                color: "var(--text-secondary)",
+              }}
+              aria-label="Show chat"
+              title="Show chat"
+              data-testid="litt-chat-restore-tab"
+            >
+              <MessageSquare size={15} className="pointer-events-none" />
+              <span
+                className="text-[10px] font-black uppercase tracking-[0.18em]"
+                style={{ writingMode: "vertical-rl" }}
+              >
+                Chat
+              </span>
+            </button>
+          )}
           {viewportTier !== null && !isMobileLitt && (
             <LiTTPanel
               // Integrated, never a detached pop-out (Larry's ruling,
@@ -4476,6 +4569,8 @@ function CommandStudioContent() {
               collapsed={littCollapsed}
               onCollapse={() => setLittCollapsed(true)}
               onExpand={() => setLittCollapsed(false)}
+              hidden={littHidden}
+              onHide={() => setLittHidden(true)}
               activeTab={littActiveTab}
               onTabChange={setLittActiveTab}
               voiceConnected={liveSession.isLive}
@@ -4902,7 +4997,17 @@ function CommandStudioContent() {
                   : () => { setDockOpen(false); requestCodeView("run", "approvals"); }
               }
               onBrowserLaunch={
-                isMobileLitt ? undefined : () => setBrowserDockOpen(true)
+                isMobileLitt
+                  ? undefined
+                  : () => {
+                      // A direct launcher click always opens the
+                      // Browser (asking is asking) and brings the
+                      // pop-up area back if it was hidden. It opens
+                      // the full dock — no peek for an explicit ask.
+                      usePopupAreaStore.getState().setAreaVisible(true);
+                      setBrowserDockPeek(false);
+                      setBrowserDockOpen(true);
+                    }
               }
               browserActive={!isMobileLitt && browserDockOpen}
               browserContent={<BoardBrowserPanel />}
@@ -4920,7 +5025,45 @@ function CommandStudioContent() {
               which docks here on demand — side-by-side with the
               workspace — and closes away again. Desktop-only and
               non-shell only; the board has its own Browser panel. */}
-          {viewportTier !== null && !isMobileLitt && (browserDockFree || browserDockSide === "right") && browserSideDockElement}
+          {/* The pop-up area's hidden state (Larry, 2026-11-25): a
+              slim right-edge tab is the area's only footprint — one
+              click brings the area and its open surface back. */}
+          {viewportTier !== null && !isMobileLitt && !popupAreaVisible && (
+            <PopupAreaRestoreTab />
+          )}
+          {/* Two-stage pop-outs, stage one (Larry, 2026-11-25): a
+              LiTT-driven Browser open shows ONLY this small peek card
+              in the area — it never auto-expands. The full dock below
+              replaces it when the user clicks Open. */}
+          {viewportTier !== null && !isMobileLitt && popupAreaVisible && browserDockOpen && browserDockPeek && !browserDockFree && browserDockSide === "right" && (
+            <div className="flex shrink-0 flex-col" data-testid="popup-area">
+              <PopupAreaChrome />
+              <BrowserPeekCard
+                conversationId={conversation.selectedConversationId}
+                onExpand={() => setBrowserDockPeek(false)}
+                onClose={() => {
+                  setBrowserDockOpen(false);
+                  setBrowserDockPeek(false);
+                }}
+              />
+            </div>
+          )}
+          {viewportTier !== null && !isMobileLitt && popupAreaVisible && !browserDockPeek && (browserDockFree || browserDockSide === "right") && browserSideDockElement && (
+            browserDockFree ? (
+              // Free pop-out: the panel floats with its own header
+              // chrome; the area gate above still applies (hiding the
+              // area hides the pop-out; the tab brings it back).
+              browserSideDockElement
+            ) : (
+              // Docked right: the area carries its own chrome — the
+              // "Auto pop-ups" switch and the Hide control live ON
+              // the area, never in Settings (Larry, 2026-11-25).
+              <div className="flex shrink-0 flex-col" data-testid="popup-area">
+                <PopupAreaChrome />
+                {browserSideDockElement}
+              </div>
+            )
+          )}
 
           {/* Mobile Context Drawer — right-side fixed overlay (unchanged).
               On mobile, the ContextDrawer is NOT repositioned to the left;

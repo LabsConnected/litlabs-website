@@ -58,7 +58,7 @@ const DEVICE_DIMENSIONS: Record<DeviceMode, { w: number; h: number; label: strin
 
 /** Runtime status indicator color by state. */
 const STATUS_DOT_COLOR: Record<PreviewState, string> = {
-  loading: "#8b5cf6",
+  loading: "var(--color-accent)",
   starting: "#e3b341",
   restarting: "#e3b341",
   ready: "#48EE38",

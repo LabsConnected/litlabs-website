@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useBoardSettingsStore } from "../stores/useBoardSettingsStore";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
@@ -469,6 +470,10 @@ async function settle() {
 
 describe("CommandStudio — ?tool=images lands on the board's Media panel (board-only)", () => {
   beforeEach(() => {
+    // Board-only contract: Board is the Settings opt-in now (Regular is
+    // the default), so this suite enables the advanced workspace
+    // explicitly instead of relying on the old board-by-default entry.
+    useBoardSettingsStore.getState().setLayoutMode("board");
     vi.clearAllMocks();
     sendMock.mockResolvedValue({ accepted: true });
     capState.projectId = "project-1";
@@ -487,6 +492,10 @@ describe("CommandStudio — ?tool=images lands on the board's Media panel (board
       },
       configurable: true,
     });
+  });
+
+  afterEach(() => {
+    useBoardSettingsStore.getState().resetBoardSettings();
   });
 
   it("opens the board with the Media panel — the Images station and its stage are retired", async () => {

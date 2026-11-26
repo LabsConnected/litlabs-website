@@ -1,5 +1,10 @@
-// Amendment 8 (Larry, 2026-11-17) — the crossbreed switch and the
-// smarter regular-layout right side. Same mock harness as
+// Amendment 8 (Larry, 2026-11-17) introduced the crossbreed switch;
+// Larry's 2026-11-22 ruling superseded its default and presentation:
+// Regular is the default layout, the Board is opt-in via Settings
+// ("Enable advanced workspace"), and the header carries no layout
+// switch. These tests drive the choice through the settings store —
+// the same write the Settings toggle makes — and assert the body
+// branch swaps in place. Same mock harness as
 // CommandStudio.preview-singleton.test.tsx, with the preview stub
 // recording its refreshKey prop and the two Jobs feed components
 // stubbed so the wiring assertions stay exact.
@@ -475,7 +480,7 @@ async function settle() {
   });
 }
 
-describe("CommandStudio — crossbreed layout switch (Amendment 8)", () => {
+describe("CommandStudio — layout choice (Regular default, Board opt-in)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sendMock.mockResolvedValue({ accepted: true });
@@ -510,13 +515,15 @@ describe("CommandStudio — crossbreed layout switch (Amendment 8)", () => {
     execState.state.isRunning = false;
   });
 
-  it("defaults to the board layout, with the switch showing Board selected", async () => {
+  it("defaults to the Regular layout, with no layout switch in the header", async () => {
     await renderCommandStudio();
     await settle();
-    expect(screen.getByTestId("studio-board-shell")).toBeTruthy();
-    expect(screen.queryByTestId("studio-dock")).toBeNull();
-    expect(screen.getByTestId("studio-layout-mode-board").getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByTestId("studio-layout-mode-classic").getAttribute("aria-selected")).toBe("false");
+    // Regular (classic) body: LiTT panel + workspace + dock, no board.
+    expect(screen.queryByTestId("studio-board-shell")).toBeNull();
+    expect(screen.getByTestId("studio-dock")).toBeTruthy();
+    // Board demotion: the header carries no equal layout switch.
+    expect(screen.queryByTestId("studio-layout-switch")).toBeNull();
+    expect(useBoardSettingsStore.getState().layoutMode).toBeNull();
   });
 
   it("the legacy escape hatch still lands in the regular layout", async () => {
@@ -525,50 +532,55 @@ describe("CommandStudio — crossbreed layout switch (Amendment 8)", () => {
     await settle();
     expect(screen.queryByTestId("studio-board-shell")).toBeNull();
     expect(screen.getByTestId("studio-dock")).toBeTruthy();
-    expect(screen.getByTestId("studio-layout-mode-classic").getAttribute("aria-selected")).toBe("true");
   });
 
-  it("flips Board → Regular → Board in place; the choice persists and the composer never leaves", async () => {
+  it("flips Regular → Board → Regular in place; the choice persists and the composer never leaves", async () => {
     capState.projectId = "project-1";
     capState.projectName = "Test Project";
-    const { user } = await renderCommandStudio();
+    await renderCommandStudio();
     await settle();
-    expect(screen.getByTestId("studio-board-shell")).toBeTruthy();
+    expect(screen.queryByTestId("studio-board-shell")).toBeNull();
     expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
 
-    await user.click(screen.getByTestId("studio-layout-mode-classic"));
+    // The Settings "Enable advanced workspace" toggle writes the
+    // settings store — the same write path the Board Settings menu
+    // uses. Drive the flip through it.
+    act(() => {
+      useBoardSettingsStore.getState().setLayoutMode("board");
+    });
     await settle();
-    // Regular layout: the classic body (LiTT panel + workspace + dock).
-    expect(screen.queryByTestId("studio-board-shell")).toBeNull();
-    expect(screen.getByTestId("studio-dock")).toBeTruthy();
+    expect(screen.getByTestId("studio-board-shell")).toBeTruthy();
     // The conversation surface (same composer element tree) is still
     // mounted — CommandStudio never unmounted, so the open
     // conversation and project survive the flip.
     expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
-    expect(useBoardSettingsStore.getState().layoutMode).toBe("classic");
-    expect(localStorage.getItem("litt:studio:layout-mode")).toBe("classic");
-
-    await user.click(screen.getByTestId("studio-layout-mode-board"));
-    await settle();
-    expect(screen.getByTestId("studio-board-shell")).toBeTruthy();
-    expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
     expect(useBoardSettingsStore.getState().layoutMode).toBe("board");
-    expect(localStorage.getItem("litt:studio:layout-mode")).toBeNull();
+
+    act(() => {
+      useBoardSettingsStore.getState().setLayoutMode("classic");
+    });
+    await settle();
+    expect(screen.queryByTestId("studio-board-shell")).toBeNull();
+    expect(screen.getByTestId("studio-dock")).toBeTruthy();
+    expect(screen.getByTestId("studio-command-composer")).toBeTruthy();
+    expect(useBoardSettingsStore.getState().layoutMode).toBe("classic");
   });
 
-  it("a persisted choice survives a remount without the legacy key", async () => {
+  it("a persisted Board choice survives a remount without the legacy key", async () => {
     const first = await renderCommandStudio();
     await settle();
-    await first.user.click(screen.getByTestId("studio-layout-mode-classic"));
+    act(() => {
+      useBoardSettingsStore.getState().setLayoutMode("board");
+    });
     await settle();
-    expect(useBoardSettingsStore.getState().layoutMode).toBe("classic");
+    expect(useBoardSettingsStore.getState().layoutMode).toBe("board");
     first.unmount();
     // Remove the legacy key: the settings store alone must carry it.
     localStorage.removeItem("litt:studio:layout-mode");
     await renderCommandStudio();
     await settle();
-    expect(screen.queryByTestId("studio-board-shell")).toBeNull();
-    expect(screen.getByTestId("studio-dock")).toBeTruthy();
+    // Saved Board users keep their Board.
+    expect(screen.getByTestId("studio-board-shell")).toBeTruthy();
   });
 });
 

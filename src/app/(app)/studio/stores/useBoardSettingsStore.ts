@@ -81,14 +81,17 @@ export const BOARD_ZOOM_LEVELS = [50, 75, 100, 125, 150] as const;
 export type BoardZoomLevel = (typeof BOARD_ZOOM_LEVELS)[number];
 
 /**
- * The Studio layout the user picked (spec Amendment 8 — the
- * "crossbreed" switch, Larry 2026-11-17): the board stays the flagship
- * default, and the regular (classic) layout stays one flip away for
- * anyone who prefers it. `null` means the user has never used the
- * switch — the effective mode then falls back to the pre-switch
- * escape-hatch key (`litt:studio:layout-mode`) and finally to "board".
- * The resolution lives in useStudioLayoutMode; this field is only the
- * persisted explicit choice.
+ * The Studio layout the user picked. Introduced by spec Amendment 8
+ * (the "crossbreed" switch, Larry 2026-11-17); the default changed
+ * under Larry's 2026-11-22 ruling: Regular (classic) is the default
+ * landing layout and the Board is opt-in via Settings ("Enable
+ * advanced workspace"). `null` means the user has never made the
+ * choice — the effective mode then resolves to "classic" (the
+ * pre-switch escape-hatch key `litt:studio:layout-mode` also points
+ * at classic). A persisted "board" choice always wins, so users who
+ * enabled the Board keep it. The resolution lives in
+ * useStudioLayoutMode; this field is only the persisted explicit
+ * choice.
  */
 export type StudioLayoutMode = "board" | "classic";
 export const STUDIO_LAYOUT_MODE_OPTIONS: { value: StudioLayoutMode; label: string }[] = [

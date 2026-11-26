@@ -30,8 +30,12 @@ describe("resolveStudioLayoutMode (pure resolution)", () => {
     expect(resolveStudioLayoutMode(null, true)).toBe("classic");
   });
 
-  it("never chosen + no legacy override → board, the flagship default", () => {
-    expect(resolveStudioLayoutMode(null, false)).toBe("board");
+  it("never chosen + no legacy override → classic, Regular is the default (Larry, 2026-11-22)", () => {
+    expect(resolveStudioLayoutMode(null, false)).toBe("classic");
+  });
+
+  it("an explicit Board choice survives as the saved opt-in", () => {
+    expect(resolveStudioLayoutMode("board", false)).toBe("board");
   });
 });
 
@@ -46,9 +50,9 @@ describe("readLegacyClassicOverride", () => {
 });
 
 describe("useStudioLayoutMode", () => {
-  it("defaults to board with nothing stored anywhere", () => {
+  it("defaults to Regular (classic) with nothing stored anywhere", () => {
     const { result } = renderHook(() => useStudioLayoutMode());
-    expect(result.current.layoutMode).toBe("board");
+    expect(result.current.layoutMode).toBe("classic");
     expect(result.current.layoutModeChosen).toBeNull();
   });
 

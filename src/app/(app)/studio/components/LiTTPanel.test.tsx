@@ -107,6 +107,47 @@ describe("LiTTPanel (real component)", () => {
     expect(screen.getAllByTestId("live-slot").length).toBe(1);
   });
 
+  it("hideable chat: the Hide button calls onHide, and hidden=true takes the panel out of layout but keeps content mounted", () => {
+    const onHide = vi.fn();
+    const { rerender } = render(
+      <LiTTPanel
+        chatContent={<div data-testid="chat-slot">Chat content</div>}
+        activeTab="chat"
+        onTabChange={vi.fn()}
+        collapsed={false}
+        onCollapse={vi.fn()}
+        onExpand={vi.fn()}
+        onHide={onHide}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("litt-panel-hide"));
+    expect(onHide).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("litt-panel")).toHaveAttribute("data-hidden", "false");
+
+    rerender(
+      <LiTTPanel
+        chatContent={<div data-testid="chat-slot">Chat content</div>}
+        activeTab="chat"
+        onTabChange={vi.fn()}
+        collapsed={false}
+        onCollapse={vi.fn()}
+        onExpand={vi.fn()}
+        onHide={onHide}
+        hidden
+      />,
+    );
+    const panel = screen.getByTestId("litt-panel");
+    expect(panel).toHaveAttribute("data-hidden", "true");
+    expect(panel).toHaveStyle({ display: "none" });
+    // Hidden, not unmounted — the conversation survives the toggle.
+    expect(screen.getByTestId("chat-slot")).toBeInTheDocument();
+  });
+
+  it("no Hide button renders without an onHide handler", () => {
+    renderPanel();
+    expect(screen.queryByTestId("litt-panel-hide")).toBeNull();
+  });
+
   it("labels the tabs Chat | Activity (tab ids unchanged)", () => {
     renderPanel();
     expect(screen.getByTestId("litt-tab-chat")).toHaveTextContent("Chat");

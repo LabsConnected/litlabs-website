@@ -17,6 +17,25 @@ describe("MobileBottomSheet", () => {
     return { onClose, ...result };
   }
 
+  it("opens as a small floating pop-out (stage one) and expands only on the user's tap (stage two)", () => {
+    renderSheet();
+    const sheet = screen.getByTestId("mobile-bottom-sheet");
+    // Stage one: floating card with margins, capped height — chat
+    // stays visible around it; nothing big opens uninvited.
+    expect(sheet).toHaveAttribute("data-stage", "popout");
+    expect(sheet.className).toContain("inset-x-3");
+    expect(sheet.className).toContain("max-h-[58dvh]");
+    expect(sheet.className).toContain("rounded-2xl");
+
+    fireEvent.click(screen.getByTestId("mobile-sheet-expand"));
+    expect(sheet).toHaveAttribute("data-stage", "expanded");
+    expect(sheet.className).toContain("max-h-[92dvh]");
+
+    // And it shrinks back the same way.
+    fireEvent.click(screen.getByTestId("mobile-sheet-expand"));
+    expect(sheet).toHaveAttribute("data-stage", "popout");
+  });
+
   it("renders title + children when open, and nothing when closed", () => {
     const first = renderSheet();
     expect(screen.getByTestId("mobile-bottom-sheet")).toBeInTheDocument();
