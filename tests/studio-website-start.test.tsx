@@ -5,8 +5,8 @@
  * The landing's Website chip links to /studio?creator=website. That
  * entry must start a FRESH website build on the working path —
  * create a blank managed project (sourceType "blank", template
- * "blank-static", the same POST the first-run flow uses) and pin it
- * in the URL — instead of resolving into whatever project happens
+ * "blank-static", a POST /api/studio-projects blank create) and pin
+ * it in the URL — instead of resolving into whatever project happens
  * to be selected (for many users the repo-backed project, whose
  * live workspace is HOST_EXECUTION_DISABLED on the hosted service
  * and dead-ended the Website flow at the sandbox wall).
@@ -60,11 +60,6 @@ vi.mock("@/app/(app)/studio/components/CommandStudio", () => ({
   __esModule: true,
   default: () =>
     React.createElement("div", { "data-testid": "command-studio-mounted" }, "Studio ready"),
-}));
-vi.mock("@/app/(app)/studio/components/FirstRunWelcome", () => ({
-  __esModule: true,
-  default: () =>
-    React.createElement("div", { "data-testid": "first-run-welcome" }, "Welcome"),
 }));
 vi.mock("@/app/(app)/studio/components/StudioPrimeLanding", () => ({
   __esModule: true,
