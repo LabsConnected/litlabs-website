@@ -1386,6 +1386,17 @@ function successfulMutationPaths(
  * channel's only states are passed/failed, and labelling a check
  * that never ran as "failed" would be its own untruth — the status
  * event, the persisted set, and the closing note carry the fact.
+ *
+ * ACC-09 — persistence itself was broken (project_check_runs.user_id
+ * was uuid; every identity here is a Clerk ID string, so every save
+ * and read-back failed with 22P02 — see project-checks.ts) and two
+ * note paths could still mislead: the not-saved note claimed the
+ * results were in the Jobs tab (Jobs' durable source is the same
+ * persisted set, so it was empty too), and the no-context skip
+ * returned no note at all. Now: notes only claim what was actually
+ * persisted, and every exit path — ran, could-not-run,
+ * could-not-save, no-context — leaves a truthful note or a
+ * persisted set.
  */
 async function runCompletionChecks(opts: {
   cfg: AgentLoopConfig;
@@ -1395,17 +1406,13 @@ async function runCompletionChecks(opts: {
   const ctx = actionContextFrom(opts.cfg);
   const projectId = ctx?.projectId ?? opts.cfg.qualityLoop?.projectId;
   const userId = ctx?.userId ?? opts.cfg.userId ?? opts.cfg.qualityLoop?.userId;
-  if (!projectId || !userId) {
-    studioLog(`agent-loop:completion_checks_skipped:${opts.loop}`, { errorClass: "no_project_context" });
-    return {};
-  }
   const conversationId = ctx?.conversationId ?? opts.cfg.conversationId ?? null;
   let checksModule: typeof import("@/lib/projects/project-checks");
   try {
     checksModule = await import("@/lib/projects/project-checks");
   } catch (error) {
     studioLog(`agent-loop:completion_checks_threw:${opts.loop}`, {
-      projectId,
+      ...(projectId ? { projectId } : {}),
       errorClass: error instanceof Error ? `${error.name} (import)` : "unknown (import)",
     });
     return {
@@ -1419,11 +1426,23 @@ async function runCompletionChecks(opts: {
     saveProjectCheckRun,
     completionChecksFailureMessage,
     completionChecksUnavailableNote,
+    completionChecksUnavailableNotSavedNote,
+    completionChecksNoContextNote,
     completionChecksNotSavedNote,
     unavailableCheckSet,
     unavailableCheckSetFromError,
     ProjectChecksUnavailableError,
   } = checksModule;
+  if (!projectId || !userId) {
+    studioLog(`agent-loop:completion_checks_skipped:${opts.loop}`, { errorClass: "no_project_context" });
+    // ACC-09: both call sites invoke this only after the
+    // landed-mutation gate passed, so a context-less skip is a
+    // build whose checks silently never ran — ACC-08's
+    // never-silent rule covers it. The closing message carries the
+    // loud note; nothing is persisted (there is no project to tie
+    // a persisted set to), and the note says so.
+    return { note: completionChecksNoContextNote() };
+  }
   try {
     const outcome = await runAllProjectChecks({ projectId, userId });
     for (const check of outcome.checks) {
@@ -1485,7 +1504,16 @@ async function runCompletionChecks(opts: {
       type: "status",
       summary: `The automatic checks could not run for this build: ${reason}`,
     });
-    return { note: completionChecksUnavailableNote(reason) };
+    // ACC-09 — truthfulness: the plain unavailable note states the
+    // Checks panel shows the checks as unavailable, which is only
+    // true when the unavailable set was actually persisted. When
+    // the fallback save also failed, the panel shows "Not run" and
+    // the note must say that instead.
+    return {
+      note: persisted
+        ? completionChecksUnavailableNote(reason)
+        : completionChecksUnavailableNotSavedNote(reason),
+    };
   }
 }
 

@@ -82,9 +82,19 @@ vi.mock("@/lib/projects/project-checks", () => {
       `shows the checks as unavailable rather than passed, and they can be run from there ` +
       `once the workspace is reachable.`,
     completionChecksNotSavedNote: () =>
-      `Note: the automatic checks ran for this build and their results are in this run's ` +
-      `Jobs tab, but the results could not be saved — the Checks panel may still show ` +
-      `them as not run.`,
+      `Note: the automatic checks ran for this build, but their results could not be ` +
+      `saved — the Checks panel and the Jobs tab will show them as not run. You can ` +
+      `run the checks again from the Checks panel.`,
+    completionChecksUnavailableNotSavedNote: (reason: string) =>
+      `IMPORTANT — the automatic checks did NOT run for this build: ${reason}. ` +
+      `Nothing verified the finished site, so treat this build as unchecked — and ` +
+      `this could not be recorded either, so the Checks panel will show the checks ` +
+      `as not run. They can be run from the Checks panel once the workspace is reachable.`,
+    completionChecksNoContextNote: () =>
+      `IMPORTANT — the automatic checks did NOT run for this build: the run finished ` +
+      `without the project context the checks need. Nothing verified the finished ` +
+      `site and nothing was recorded, so the Checks panel will show the checks as ` +
+      `not run. They can be run from the Checks panel.`,
     unavailableCheckSet,
     unavailableCheckSetFromError: (error: InstanceType<typeof ProjectChecksUnavailableError>) =>
       unavailableCheckSet(error.message, error.body?.checks),
@@ -279,5 +289,48 @@ describe("ACC-08 Defect 1 — automatic checks on the approval-resumed path", ()
         ]),
       }),
     );
+  });
+
+  it("checks ran on resume but could not be saved: the closing note is truthful — no Jobs claim (ACC-09)", async () => {
+    const { transport } = memoryTransport();
+    runAllProjectChecksMock.mockResolvedValue(checksOutcome());
+    saveProjectCheckRunMock.mockResolvedValueOnce(false);
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(
+        toolCallReply("tc-2", "files.write", { projectId: "p-test", path: "index.html", content: PAGE }),
+      )
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await resumeAgentLoopV2(makeStockPauseResume(), transport);
+
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.checksNote).toContain("could not be saved");
+    expect(result.checksNote).toContain("will show them as not run");
+    expect(result.checksNote).not.toContain("are in this run's Jobs tab");
+    // The note placement this defect is about: it rides the
+    // RESUMED run's closing message — the exact message Acceptance
+    // Run 1 on aedb2b05 found bare while later publish messages
+    // carried theirs.
+    expect(result.finalText).toContain("could not be saved");
+    expect(result.finalText).toContain("will show them as not run");
+  });
+
+  it("checks could not run on resume AND the unavailable set could not be saved: the note admits nothing was recorded (ACC-09)", async () => {
+    const { transport } = memoryTransport();
+    runAllProjectChecksMock.mockRejectedValue(new Error("terminal not configured"));
+    saveProjectCheckRunMock.mockResolvedValueOnce(false);
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(
+        toolCallReply("tc-2", "files.write", { projectId: "p-test", path: "index.html", content: PAGE }),
+      )
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await resumeAgentLoopV2(makeStockPauseResume(), transport);
+
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.checksNote).toContain("automatic checks did NOT run");
+    expect(result.checksNote).toContain("could not be recorded");
+    expect(result.checksNote).not.toContain("shows the checks as unavailable");
+    expect(result.finalText).toContain("could not be recorded");
   });
 });
