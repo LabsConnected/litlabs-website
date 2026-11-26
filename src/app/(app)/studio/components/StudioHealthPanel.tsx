@@ -352,7 +352,7 @@ export default function StudioHealthPanel({
     output: null,
     // ACC-06a item 2: same not-run reason the checks route records —
     // a missing result is still recorded with WHY, never reasonless.
-    error: "Not run yet — project checks run on demand from the Checks panel; a completed build does not run them automatically.",
+    error: "Not run yet — checks run automatically when a build completes, or on demand from the Checks panel.",
   }), [payload.checks]);
 
   // Kimi wiring item 2: publish the checks summary as this panel's own
