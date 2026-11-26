@@ -8,26 +8,109 @@ import {
 import { PLANS, getStripePriceId, type PlanId } from "@/config/plans";
 import { confirmBookingPayment, recordAudit } from "@/lib/business-operations";
 
-async function isEventProcessed(sb: NonNullable<ReturnType<typeof getAdminSupabase>>, eventId: string): Promise<boolean> {
-  const { data } = await sb
-    .from("stripe_events")
-    .select("id")
-    .eq("stripe_event_id", eventId)
-    .single();
-  return !!data;
+type SbAdmin = NonNullable<ReturnType<typeof getAdminSupabase>>;
+
+/**
+ * A "processing" claim older than this is assumed abandoned — the holder's
+ * function crashed, timed out, or was killed before releasing the claim,
+ * so the row would otherwise block this event forever while telling Stripe
+ * (via a 200 "replayed" response on retry) that nothing further needs to
+ * happen. Generous relative to typical serverless function timeouts; still
+ * well inside Stripe's retry window. Enforced inside claim_stripe_event.
+ */
+const STALE_CLAIM_MS = 5 * 60 * 1000;
+
+type ClaimStatus = "claimed" | "replayed" | "unclaimable";
+
+interface EventClaim {
+  status: ClaimStatus;
+  /** Present only when status === "claimed" — required by finalize/release. */
+  token?: string;
 }
 
-async function markEventProcessed(
-  sb: NonNullable<ReturnType<typeof getAdminSupabase>>,
+/**
+ * Atomically claim a Stripe event via the token-fenced claim_stripe_event
+ * RPC (migration 20261015240000_stripe_event_claim_token).
+ *
+ * The RPC inserts the row or takes over a stale "processing" claim under
+ * FOR UPDATE and returns a per-attempt UUID claim_token. Only the token
+ * that won can finalize or release the row — a stale worker that lost its
+ * claim to a takeover can no longer mark the event processed.
+ *
+ * Outcomes:
+ *   "claimed"      — this delivery owns the event; process it.
+ *   "replayed"     — "duplicate" (already finalized) or "in_progress"
+ *                    (fresh claim held by another delivery); acknowledge.
+ *   "unclaimable"  — RPC missing/error; Stripe must retry (500).
+ */
+async function claimStripeEvent(
+  sb: SbAdmin,
   eventId: string,
   eventType: string,
-  result: string,
-): Promise<void> {
-  await sb.from("stripe_events").insert({
-    stripe_event_id: eventId,
-    event_type: eventType,
-    result,
+): Promise<EventClaim> {
+  const token = crypto.randomUUID();
+  const staleBefore = new Date(Date.now() - STALE_CLAIM_MS).toISOString();
+  const { data, error } = await sb.rpc("claim_stripe_event", {
+    p_stripe_event_id: eventId,
+    p_event_type: eventType,
+    p_claim_token: token,
+    p_stale_before: staleBefore,
   });
+  if (error) {
+    console.error(
+      `[stripe.webhook] claim_stripe_event failed for ${eventId}: ${error.message}`,
+    );
+    return { status: "unclaimable" };
+  }
+  if (data === "owned") return { status: "claimed", token };
+  // "duplicate" | "in_progress" — another delivery owns or completed it.
+  return { status: "replayed" };
+}
+
+/**
+ * Finalize a claim we own. Returns false when the token no longer matches
+ * (claim was taken over after going stale) — the new owner will finalize.
+ */
+async function finalizeStripeEvent(
+  sb: SbAdmin,
+  eventId: string,
+  claimToken: string,
+  result: string,
+): Promise<boolean> {
+  const { data, error } = await sb.rpc("finalize_stripe_event", {
+    p_stripe_event_id: eventId,
+    p_claim_token: claimToken,
+    p_result: result,
+  });
+  if (error) {
+    console.error(
+      `[stripe.webhook] finalize_stripe_event failed for ${eventId}: ${error.message}`,
+    );
+    return false;
+  }
+  return data === true;
+}
+
+/**
+ * Release a claim we own after a processing error: deletes the "processing"
+ * row (token-fenced) so Stripe's retry can claim it fresh. A "lost"/"absent"
+ * result means another worker owns or finished it — still safe to 500; the
+ * retry will observe duplicate/in_progress and acknowledge.
+ */
+async function releaseStripeEvent(
+  sb: SbAdmin,
+  eventId: string,
+  claimToken: string,
+): Promise<void> {
+  const { error } = await sb.rpc("release_stripe_event", {
+    p_stripe_event_id: eventId,
+    p_claim_token: claimToken,
+  });
+  if (error) {
+    console.error(
+      `[stripe.webhook] release_stripe_event failed for ${eventId}: ${error.message}`,
+    );
+  }
 }
 
 /**
@@ -369,11 +452,64 @@ export async function POST(req: NextRequest) {
 
   const sb = isAdminSupabaseConfigured() ? getAdminSupabase() : null;
 
-  // Idempotency: check if event already processed
-  if (sb) {
-    if (await isEventProcessed(sb, event.id)) {
+  // fulfill_agent_purchase / refund_agent_purchase atomically claim this
+  // SAME stripe_events row themselves (INSERT ... ON CONFLICT DO NOTHING)
+  // as their own idempotency gate. If the generic claim below also
+  // inserted a row first, those RPCs would see it as already-claimed and
+  // silently skip all real work (order/entitlement creation, or
+  // revocation on refund) — deterministically, not just under a race. So:
+  // determine up front whether this event will be handled by one of those
+  // self-claiming RPCs, and if so, skip the generic claim entirely and let
+  // the RPC be the sole, atomic source of truth for it.
+  let agentOrderForRefund: { id: string } | null = null;
+  let delegatesToSelfClaimingRpc = false;
+
+  if (sb && event.type === "checkout.session.completed") {
+    const sessionMeta = (event.data.object as Stripe.Checkout.Session).metadata || {};
+    // Mirrors the exact condition the switch below uses to route to
+    // fulfill_agent_purchase — checkout.session.completed has no DB-lookup
+    // fallback, so metadata is authoritative here.
+    delegatesToSelfClaimingRpc = sessionMeta.product_type === "agent" && !!sessionMeta.clerk_id;
+  } else if (sb && event.type === "charge.refunded") {
+    const refundCharge = event.data.object as Stripe.Charge;
+    const refundChargeMeta = refundCharge.metadata || {};
+    const refundPaymentIntentId = refundCharge.payment_intent as string | undefined;
+    if (refundPaymentIntentId) {
+      const { data: agentOrder } = await sb
+        .from("marketplace_orders")
+        .select("id")
+        .eq("stripe_payment_intent_id", refundPaymentIntentId)
+        .maybeSingle();
+      if (agentOrder) {
+        agentOrderForRefund = agentOrder as { id: string };
+        delegatesToSelfClaimingRpc = true;
+      }
+    }
+    // Metadata fallback — same secondary evidence the switch below uses.
+    if (!delegatesToSelfClaimingRpc && refundChargeMeta.product_type === "agent" && refundPaymentIntentId) {
+      delegatesToSelfClaimingRpc = true;
+    }
+  }
+
+  // Idempotency: atomically claim the event before processing. Concurrent
+  // deliveries of the same event cannot produce duplicate side effects —
+  // claim_stripe_event fences the row with a per-attempt token that only
+  // the winner can finalize or release.
+  // Skipped when the event delegates to a self-claiming RPC (see above) —
+  // that RPC's own claim is the sole gate for those events.
+  let claimToken: string | null = null;
+  if (sb && !delegatesToSelfClaimingRpc) {
+    const claim = await claimStripeEvent(sb, event.id, event.type);
+    if (claim.status === "unclaimable") {
+      return NextResponse.json(
+        { error: "Webhook processing failed" },
+        { status: 500 },
+      );
+    }
+    if (claim.status !== "claimed") {
       return NextResponse.json({ received: true, replayed: true });
     }
+    claimToken = claim.token ?? null;
   }
 
   const result = "processed";
@@ -789,31 +925,24 @@ export async function POST(req: NextRequest) {
         const paymentIntentId = charge.payment_intent as string | undefined;
 
         // ── Agent refund: revoke entitlement, do NOT debit LBC ──
-        // Primary lookup: search marketplace_orders by payment_intent_id.
-        // This works even when Stripe metadata is absent, delayed, or incomplete.
+        // Primary evidence: marketplace_orders matched by payment_intent_id
+        // (looked up pre-claim — reused here; this works even when Stripe
+        // metadata is absent, delayed, or incomplete).
         // Secondary evidence: metadata product_type === "agent".
-        if (paymentIntentId) {
-          const { data: agentOrder } = await sb
-            .from("marketplace_orders")
-            .select("id, status")
-            .eq("stripe_payment_intent_id", paymentIntentId)
-            .maybeSingle();
-
-          if (agentOrder) {
-            // Found a matching marketplace order — process as agent refund.
-            // The RPC is idempotent (claims the Stripe event atomically).
-            // It does NOT debit LBC — agent purchases are not credit packs.
-            const { error: rpcError } = await sb.rpc("refund_agent_purchase", {
-              p_stripe_event_id: event.id,
-              p_stripe_event_type: event.type,
-              p_stripe_payment_intent_id: paymentIntentId,
-              p_stripe_refund_id: charge.refunds?.data?.[0]?.id ?? null,
-            });
-            if (rpcError) {
-              throw new Error(`refund_agent_purchase failed: ${rpcError.message}`);
-            }
-            break;
+        if (agentOrderForRefund) {
+          // Found a matching marketplace order — process as agent refund.
+          // The RPC is idempotent (claims the Stripe event atomically).
+          // It does NOT debit LBC — agent purchases are not credit packs.
+          const { error: rpcError } = await sb.rpc("refund_agent_purchase", {
+            p_stripe_event_id: event.id,
+            p_stripe_event_type: event.type,
+            p_stripe_payment_intent_id: paymentIntentId,
+            p_stripe_refund_id: charge.refunds?.data?.[0]?.id ?? null,
+          });
+          if (rpcError) {
+            throw new Error(`refund_agent_purchase failed: ${rpcError.message}`);
           }
+          break;
         }
 
         // Fallback: use metadata product_type as secondary evidence
@@ -937,17 +1066,30 @@ export async function POST(req: NextRequest) {
       }
     }
   } catch (_err) {
-    // Do not acknowledge or record failed events. Stripe must retry them.
+    // Release the claim we own so Stripe's retry can claim the event fresh.
+    // Token-fenced: if our claim was taken over while we were processing,
+    // release is a no-op and the new owner's row is untouched. Delegated
+    // events are skipped — their self-claiming RPC owns the row.
+    if (sb && claimToken) {
+      try {
+        await releaseStripeEvent(sb, event.id, claimToken);
+      } catch {
+        // Non-fatal — Stripe still retries the 500.
+      }
+    }
     return NextResponse.json(
       { error: "Webhook processing failed" },
       { status: 500 },
     );
   }
 
-  // Mark event as processed (idempotency)
-  if (sb) {
+  // Finalize the claim we own (idempotency). Delegated events are skipped —
+  // fulfill_agent_purchase / refund_agent_purchase already recorded the
+  // terminal stripe_events row themselves. A false return means our claim
+  // was taken over after going stale; the new owner finalizes instead.
+  if (sb && claimToken) {
     try {
-      await markEventProcessed(sb, event.id, event.type, result);
+      await finalizeStripeEvent(sb, event.id, claimToken, result);
     } catch {
       // Non-fatal if we can't record the event
     }
