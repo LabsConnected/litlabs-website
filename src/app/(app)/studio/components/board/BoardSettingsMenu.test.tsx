@@ -283,19 +283,20 @@ describe("BoardSettingsMenu (Amendment 5)", () => {
     expect(screen.getByTestId("board-settings-ctrl-scroll")).toBeChecked();
   });
 
-  it("carries the crossbreed layout switch (Amendment 8): Board by default, Regular writes the shared choice", () => {
+  it("carries the layout choice (Amendment 8, demoted 2026-11-22): Regular by default, either pick writes the shared choice", () => {
     renderMenu();
     openMenu();
-    // Board is the flagship default (no explicit choice made yet).
-    expect(screen.getByTestId("board-settings-layout-board")).toBeChecked();
-    expect(screen.getByTestId("board-settings-layout-classic")).not.toBeChecked();
-    fireEvent.click(screen.getByTestId("board-settings-layout-classic"));
-    expect(useBoardSettingsStore.getState().layoutMode).toBe("classic");
+    // Regular is the default (no explicit choice made yet); the
+    // Board is the opt-in the user enables here or in Settings.
     expect(screen.getByTestId("board-settings-layout-classic")).toBeChecked();
-    // The legacy escape-hatch key stays in sync with the choice.
-    expect(localStorage.getItem("litt:studio:layout-mode")).toBe("classic");
+    expect(screen.getByTestId("board-settings-layout-board")).not.toBeChecked();
     fireEvent.click(screen.getByTestId("board-settings-layout-board"));
     expect(useBoardSettingsStore.getState().layoutMode).toBe("board");
+    expect(screen.getByTestId("board-settings-layout-board")).toBeChecked();
+    // The legacy escape-hatch key stays in sync with the choice.
     expect(localStorage.getItem("litt:studio:layout-mode")).toBeNull();
+    fireEvent.click(screen.getByTestId("board-settings-layout-classic"));
+    expect(useBoardSettingsStore.getState().layoutMode).toBe("classic");
+    expect(localStorage.getItem("litt:studio:layout-mode")).toBe("classic");
   });
 });

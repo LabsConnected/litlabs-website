@@ -38,7 +38,7 @@
  */
 
 import type { ReactNode } from "react";
-import { MessageSquare, Activity, Briefcase, FolderOpen, Component, PanelLeftClose, X } from "lucide-react";
+import { MessageSquare, Activity, Briefcase, FolderOpen, Component, PanelLeftClose, EyeOff, X } from "lucide-react";
 import { BrandLogo } from "@/components/branding/BrandLogo";
 import LiTTAmbientHUD from "./litt/LiTTAmbientHUD";
 import type { DeviceStatus } from "@/lib/litt/live/types";
@@ -86,6 +86,18 @@ interface LiTTPanelProps {
   onCollapse: () => void;
   onExpand: () => void;
   /**
+   * Fully hidden (Larry's hideable-chat ruling, 2026-11-25): the
+   * panel leaves the layout entirely so the workspace takes the
+   * full width, but stays MOUNTED (display:none — the Phase C2.1
+   * pattern), so chat content, SSE streams, scroll position, and
+   * composer drafts survive. The parent renders the slim Chat tab
+   * that brings it back. Desktop in-flow mode only; overlay mode
+   * already hides via `collapsed`.
+   */
+  hidden?: boolean;
+  /** Hide the panel entirely (renders the Hide button in the header). */
+  onHide?: () => void;
+  /**
    * F1 overlay mode (SLICE B): render as a floating panel (fixed, right
    * side, elevated shadow, close button) instead of a layout column.
    * Closed overlay panels hide with display:none (content stays mounted).
@@ -115,6 +127,8 @@ export default function LiTTPanel({
   collapsed,
   onCollapse,
   onExpand,
+  hidden = false,
+  onHide,
   overlay = false,
   voiceConnected,
   microphoneStatus,
@@ -145,6 +159,11 @@ export default function LiTTPanel({
                 "0 24px 80px rgba(14,60,26,0.18), 0 0 0 1px rgba(23,122,54,0.12), 0 8px 32px rgba(14,60,26,0.12)",
             }
           : {
+              // Fully hidden: out of the layout, still mounted (see
+              // the `hidden` prop) — inline display wins over the
+              // responsive class so the workspace takes the full
+              // width while every chat state survives.
+              display: hidden ? "none" : undefined,
               width: collapsed ? 64 : `clamp(300px, ${expandedWidth}px, ${expandedMaxWidth ?? "min(640px, 26vw)"})`,
               minWidth: collapsed ? 64 : 280,
               maxWidth: collapsed ? 64 : "36vw",
@@ -155,6 +174,7 @@ export default function LiTTPanel({
       }
       data-testid="litt-panel"
       data-collapsed={collapsed}
+      data-hidden={hidden}
       data-overlay={overlay}
       aria-label="LiTT assistant panel"
     >
@@ -266,6 +286,19 @@ export default function LiTTPanel({
             </>
           ) : null}
           <div className="flex-1" />
+          {!overlay && onHide ? (
+            <button
+              type="button"
+              onClick={onHide}
+              className="grid h-6 w-6 place-items-center rounded-md transition hover:bg-black/5"
+              style={{ color: "var(--text-muted)" }}
+              aria-label="Hide chat"
+              data-testid="litt-panel-hide"
+              title="Hide chat — the workspace takes the full width"
+            >
+              <EyeOff size={14} className="pointer-events-none" />
+            </button>
+          ) : null}
           {overlay ? (
             <button
               type="button"

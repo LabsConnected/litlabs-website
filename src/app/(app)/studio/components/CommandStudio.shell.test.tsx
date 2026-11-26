@@ -410,6 +410,7 @@ if (!Element.prototype.scrollTo) {
 
 import CommandStudio from "./CommandStudio";
 import { useBoardLayoutStore } from "../stores/useBoardLayoutStore";
+import { useBoardSettingsStore } from "../stores/useBoardSettingsStore";
 
 // ── Test viewport: 1600x900 desktop — the Studio destination renders the
 // operating shell (rail + stage + inspector + LiTT command layer), NOT the
@@ -439,6 +440,9 @@ describe("Board-only shell — the full-window board", () => {
     window.localStorage.removeItem("litt-studio-board-layout-v1");
     window.localStorage.removeItem("litt-studio-layout");
     useBoardLayoutStore.setState({ enabledByUser: {}, scopes: {} });
+    // Board is opt-in (Larry, 2026-11-22): these suites exercise the
+    // Board, so enable the advanced workspace explicitly.
+    useBoardSettingsStore.getState().setLayoutMode("board");
 
     globalThis.__TEST_VIEWPORT_WIDTH__ = DESKTOP_WIDTH;
     window.innerWidth = DESKTOP_WIDTH;
@@ -458,6 +462,7 @@ describe("Board-only shell — the full-window board", () => {
   });
 
   afterEach(() => {
+    useBoardSettingsStore.getState().resetBoardSettings();
     useBoardLayoutStore.setState({ enabledByUser: {}, scopes: {} });
     window.localStorage.removeItem("litt-studio-board-layout-v1");
   });
@@ -578,12 +583,16 @@ describe("Board entry — no project bound yet (Studio entry fix, Larry 2026-11-
     window.localStorage.removeItem("litt-studio-board-layout-v1");
     window.localStorage.removeItem("litt-studio-layout");
     useBoardLayoutStore.setState({ enabledByUser: {}, scopes: {} });
+    // Board is opt-in (Larry, 2026-11-22): these suites exercise the
+    // Board, so enable the advanced workspace explicitly.
+    useBoardSettingsStore.getState().setLayoutMode("board");
     globalThis.__TEST_VIEWPORT_WIDTH__ = DESKTOP_WIDTH;
     window.innerWidth = DESKTOP_WIDTH;
     window.innerHeight = DESKTOP_HEIGHT;
   });
 
   afterEach(() => {
+    useBoardSettingsStore.getState().resetBoardSettings();
     useBoardLayoutStore.setState({ enabledByUser: {}, scopes: {} });
   });
 
@@ -612,6 +621,7 @@ describe("MissionCards — classic desktop dock", () => {
   beforeEach(() => {
     // Force the classic desktop layout (the only layout that renders the
     // bottom StudioDock); the shell layout is covered above.
+    useBoardSettingsStore.getState().resetBoardSettings();
     window.localStorage.setItem("litt:studio:layout-mode", "classic");
   });
   afterEach(() => {
@@ -652,6 +662,9 @@ describe("Board-only — ?tool=design deep link", () => {
     stableSearchParams.set("tool", "design");
     window.localStorage.removeItem("litt-studio-board-layout-v1");
     useBoardLayoutStore.setState({ enabledByUser: {}, scopes: {} });
+    // Board is opt-in (Larry, 2026-11-22): these suites exercise the
+    // Board, so enable the advanced workspace explicitly.
+    useBoardSettingsStore.getState().setLayoutMode("board");
     globalThis.__TEST_VIEWPORT_WIDTH__ = DESKTOP_WIDTH;
     window.innerWidth = DESKTOP_WIDTH;
     window.innerHeight = DESKTOP_HEIGHT;
@@ -697,6 +710,9 @@ describe("Phase 0 — board: agent intents never open panels on their own", () =
     window.localStorage.removeItem("litt:studio:layout-mode");
     window.localStorage.removeItem("litt-studio-board-layout-v1");
     useBoardLayoutStore.setState({ enabledByUser: {}, scopes: {} });
+    // Board is opt-in (Larry, 2026-11-22): these suites exercise the
+    // Board, so enable the advanced workspace explicitly.
+    useBoardSettingsStore.getState().setLayoutMode("board");
     globalThis.__TEST_VIEWPORT_WIDTH__ = DESKTOP_WIDTH;
     window.innerWidth = DESKTOP_WIDTH;
     window.innerHeight = DESKTOP_HEIGHT;
@@ -704,6 +720,7 @@ describe("Phase 0 — board: agent intents never open panels on their own", () =
 
   afterEach(() => {
     convState.busy = false;
+    useBoardSettingsStore.getState().resetBoardSettings();
     useBoardLayoutStore.setState({ enabledByUser: {}, scopes: {} });
   });
 
@@ -743,6 +760,7 @@ describe("Phase 0 — classic layout: the dock never auto-opens", () => {
   beforeEach(() => {
     // Force the classic layout (the mobile base body and the desktop
     // escape hatch); the shell layout is covered above.
+    useBoardSettingsStore.getState().resetBoardSettings();
     window.localStorage.setItem("litt:studio:layout-mode", "classic");
     // Classic dockOpen restores sessionStorage "studio-dock-open" — start
     // from the user-closed state so only this test's actions can open it.

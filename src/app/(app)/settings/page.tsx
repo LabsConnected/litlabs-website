@@ -52,6 +52,7 @@ import { useLocalSettings } from "@/hooks/useLocalSettings";
 import { WhatLiTTKnowsSection } from "./litt-knows/WhatLiTTKnowsSection";
 import LiTTAppShell from "@/components/app-shell/LiTTAppShell";
 import SettingsSidebar from "./_components/SettingsSidebar";
+import { AdvancedWorkspaceCard } from "./_components/AdvancedWorkspaceCard";
 
 /* ── Main page ─────────────────────────────────────────────────────── */
 
@@ -864,6 +865,11 @@ function WorkspaceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColor
           </fieldset>
         </div>
       </SettingsCard>
+
+      {/* The Board's opt-in (Larry's demotion, 2026-11-22): Regular
+          is the default; the advanced workspace is enabled here,
+          with a preview — never as an equal header switch. */}
+      <AdvancedWorkspaceCard />
 
       <SettingsCard title="Session behavior" description="Autosave and restore">
         <div className="space-y-3">

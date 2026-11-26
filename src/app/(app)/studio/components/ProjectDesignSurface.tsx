@@ -163,7 +163,7 @@ export function ProjectDesignSurface({
     <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="project-design-surface">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-black/10 px-4 py-2">
         <div className="min-w-0">
-          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-600">{mode === "design" ? "Design" : "Build"}</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.16em]" style={{ color: "var(--litt-primary)" }}>{mode === "design" ? "Design" : "Build"}</p>
           <h2 className="truncate text-sm font-semibold text-zinc-900">{capabilities.projectName ?? "Active project"}</h2>
         </div>
         {selection && (

@@ -101,7 +101,7 @@ function formatTime(timestamp: string | null | undefined): string {
 function statusColor(status: CheckStatus): string {
   if (status === "passed") return "var(--litt-primary)";
   if (status === "failed") return "#ef4444";
-  if (status === "running") return "#a78bfa";
+  if (status === "running") return "var(--color-accent)";
   if (status === "unavailable") return "#e3b341";
   if (status === "not_configured") return "var(--text-muted)";
   return "var(--text-muted)";
@@ -352,7 +352,7 @@ export default function StudioHealthPanel({
     output: null,
     // ACC-06a item 2: same not-run reason the checks route records —
     // a missing result is still recorded with WHY, never reasonless.
-    error: "Not run yet — checks run automatically when a build completes, or on demand from the Checks panel.",
+    error: "Not run yet — project checks run on demand from the Checks panel; a completed build does not run them automatically.",
   }), [payload.checks]);
 
   // Kimi wiring item 2: publish the checks summary as this panel's own
@@ -439,7 +439,7 @@ export default function StudioHealthPanel({
             onClick={() => void runAllChecks()}
             disabled={runningAll || runtime.phase !== "ready"}
             className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[9px] font-bold transition-colors hover:opacity-80 disabled:opacity-30"
-            style={{ backgroundColor: "rgba(168,85,247,0.12)", color: "#a78bfa", border: "1px solid rgba(168,85,247,0.2)" }}
+            style={{ backgroundColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", color: "var(--litt-primary)", border: "1px solid color-mix(in srgb, var(--color-accent) 25%, transparent)" }}
             aria-label="Run all checks"
             title="Run TypeScript, lint, tests, build, and security audit"
           >
@@ -470,7 +470,7 @@ export default function StudioHealthPanel({
                         if (!action.href) e.preventDefault();
                       }}
                       className="rounded-lg px-2 py-1 text-[9px] font-bold transition-colors hover:opacity-80"
-                      style={{ backgroundColor: "rgba(168,85,247,0.12)", color: "#a78bfa", border: "1px solid rgba(168,85,247,0.2)" }}
+                      style={{ backgroundColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", color: "var(--litt-primary)", border: "1px solid color-mix(in srgb, var(--color-accent) 25%, transparent)" }}
                     >
                       {action.label}
                     </a>
@@ -522,7 +522,7 @@ export default function StudioHealthPanel({
             <div className="mt-1 text-[9px] leading-4" style={{ color: "var(--text-muted)" }}>{check.source} · {formatTime(check.timestamp)}</div>
             {check.error && <div className="mt-1 text-[9px] leading-4" style={{ color: check.status === "unavailable" ? "#e3b341" : check.status === "not_run" ? "var(--text-muted)" : "#fca5a5" }}>{check.error}</div>}
             {projectId && <CheckFileRefChip check={check} projectId={projectId} />}
-            {check.suggestedFix && <div className="mt-1 text-[9px] leading-4" style={{ color: "#a78bfa" }}>Fix: {check.suggestedFix}</div>}
+            {check.suggestedFix && <div className="mt-1 text-[9px] leading-4" style={{ color: "var(--litt-primary)" }}>Fix: {check.suggestedFix}</div>}
             {check.output && (
               <details className="mt-1.5">
                 <summary className="flex cursor-pointer items-center gap-1 text-[9px] font-bold" style={{ color: "var(--text-secondary)" }}>

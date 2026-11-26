@@ -1,22 +1,29 @@
 "use client";
 
 /**
- * useStudioLayoutMode — the crossbreed switch's brain (spec
- * Amendment 8, Larry 2026-11-17): Studio offers BOTH layouts — the
- * board (flagship, default) and the regular (classic) layout — with a
- * real, visible toggle, "in case other people don't like it."
+ * useStudioLayoutMode — the layout choice's brain.
+ *
+ * History: spec Amendment 8 (Larry 2026-11-17) introduced the
+ * crossbreed switch with the board as flagship default. Larry's
+ * later ruling (2026-11-22, refined through the 2026-11-25 looks
+ * approval) supersedes the default: REGULAR (classic) is the default
+ * landing layout for everyone, and the Board is OPT-IN only —
+ * presented in Settings as "Enable advanced workspace", never as an
+ * equal home-screen switch. A user who explicitly enabled the Board
+ * keeps it: their persisted choice always wins.
  *
  * Resolution order for the effective mode:
  *   1. The explicit choice persisted in useBoardSettingsStore
- *      (`layoutMode`), set by the header switch or the Board Settings
- *      menu. Once a user flips the switch, this always wins.
+ *      (`layoutMode`), set by the Settings "Enable advanced
+ *      workspace" toggle or the Board Settings menu. Once a user
+ *      makes the choice, this always wins.
  *   2. The pre-switch escape hatch: localStorage
  *      `litt:studio:layout-mode` === "classic" (PR #988's hidden pref,
  *      read once at mount — the exact read CommandStudio always did,
  *      so existing users and tests keep their behavior).
- *   3. "board".
+ *   3. "classic" — Regular, the default.
  *
- * Flipping the switch writes BOTH stores: the settings store (the
+ * Flipping the choice writes BOTH stores: the settings store (the
  * durable explicit choice) and the legacy key (kept in sync so the
  * two can never disagree for any other reader).
  */
@@ -46,18 +53,21 @@ export function resolveStudioLayoutMode(
   legacyClassic: boolean,
 ): StudioLayoutMode {
   if (chosen === "board" || chosen === "classic") return chosen;
-  return legacyClassic ? "classic" : "board";
+  // No explicit choice: Regular is the default (Larry, 2026-11-22).
+  // The legacy escape hatch pointed at classic too, so it resolves
+  // the same way; it is still read so the stored value stays
+  // meaningful for any other reader.
+  void legacyClassic;
+  return "classic";
 }
 
 export interface StudioLayoutModeState {
   /** The effective mode to render. */
   layoutMode: StudioLayoutMode;
-  /** The persisted explicit choice (null = the user never flipped
-   *  the switch; the effective mode came from the legacy key or the
-   *  board default). */
+  /** The persisted explicit choice (null = the user never made the
+   *  choice; the effective mode is the Regular default). */
   layoutModeChosen: StudioLayoutMode | null;
-  /** Flip the switch: persists the explicit choice and keeps the
-   *  legacy key in sync. */
+  /** Make the choice: persists it and keeps the legacy key in sync. */
   setLayoutMode: (mode: StudioLayoutMode) => void;
 }
 
