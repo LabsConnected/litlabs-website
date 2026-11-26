@@ -1118,3 +1118,71 @@ describe("SEC-6.1 — Credential lease enforcement", () => {
     assert.equal(handlerCalled, false, "handler must NEVER be called without valid lease");
   });
 });
+
+
+// ─── 17. AbortSignal cancellation ──────────────────────────────────
+
+describe("SEC-6.17 — AbortSignal cancellation", () => {
+  it("pre-aborted signal returns cancelled without dispatch", async () => {
+    const mock = makeMockTool("project.check", false);
+    const { gateway, shell } = setupGateway({ tools: { "project.check": mock.entry } });
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await gateway.execute(makeRequest({
+      toolId: "project.check",
+      mode: "act",
+      signal: controller.signal,
+    }));
+
+    assert.equal(result.result.status, "cancelled");
+    assert.equal(result.result.success, false);
+    assert.equal(result.denialReason, null);
+    assert.equal(mock.calls.length, 0, "handler must not run for a cancelled request");
+    assert.equal(shell.calls.length, 0, "shell must not spawn for a cancelled request");
+  });
+
+  it("signal is propagated to ShellExecuteOptions for project.run", async () => {
+    const { gateway, shell } = setupGateway();
+    const controller = new AbortController();
+
+    const result = await gateway.execute(makeRequest({
+      toolId: "project.run",
+      mode: "act",
+      inputs: { command: "git", args: ["status"] },
+      signal: controller.signal,
+    }));
+
+    assert.equal(result.result.status, "success");
+    assert.equal(shell.calls.length, 1);
+    assert.equal(shell.calls[0].signal, controller.signal);
+  });
+
+  it("signal is propagated to ToolContext for non-shell tools", async () => {
+    let seenSignal: AbortSignal | null | undefined;
+    const entry: ToolEntry = {
+      definition: {
+        id: "project.check",
+        name: "project.check",
+        description: "Captures ctx.signal",
+        inputSchema: { type: "object", properties: {} },
+        readOnly: true,
+      },
+      metadata: { projectScoped: false, mutating: false, readOnly: true },
+      handler: async (ctx) => {
+        seenSignal = ctx.signal;
+        return { status: "success" as const, success: true, message: "ok", data: {} };
+      },
+    };
+    const { gateway } = setupGateway({ tools: { "project.check": entry } });
+    const controller = new AbortController();
+
+    await gateway.execute(makeRequest({
+      toolId: "project.check",
+      mode: "act",
+      signal: controller.signal,
+    }));
+
+    assert.equal(seenSignal, controller.signal);
+  });
+});

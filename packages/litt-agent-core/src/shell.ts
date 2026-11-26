@@ -284,9 +284,27 @@ export class NodeShellExecutor implements ShellExecutor {
       env,
       onStream,
       stdin,
+      signal,
     } = options;
 
     const t0 = Date.now();
+
+    // Already-aborted: resolve as cancelled without spawning.
+    if (signal?.aborted) {
+      return {
+        ok: false,
+        status: "cancelled",
+        stdout: "",
+        stderr: "",
+        exitCode: null,
+        durationMs: 0,
+        command,
+        args,
+        truncated: false,
+        error: "Cancelled before execution",
+        pid: null,
+      };
+    }
     // Allowlisted host env + explicit layers. Never re-merge raw process.env:
     // a filtered `env` argument that simply omits a secret would otherwise
     // leave the host value in the child (`printenv TERMINAL_INTERNAL_SERVICE_KEY`).
@@ -299,6 +317,7 @@ export class NodeShellExecutor implements ShellExecutor {
     // between spawn and the settle await — otherwise a dead entry would
     // linger in _active (harmless to cancel(), but a slow leak).
     let releaseActive: (() => void) | null = null;
+    let releaseSignal: (() => void) | null = null;
 
     try {
       // Use spawn for streaming support.
@@ -325,6 +344,18 @@ export class NodeShellExecutor implements ShellExecutor {
       const active = { child, cancelled: false };
       this._active.add(active);
       releaseActive = () => { this._active.delete(active); };
+
+      // AbortSignal support: aborting kills this process tree and marks
+      // the execution cancelled — same outcome as cancel(), scoped to
+      // this spawn only.
+      const onAbort = () => {
+        active.cancelled = true;
+        if (child.pid) {
+          killProcessTree(child.pid).catch(() => {});
+        }
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      releaseSignal = () => signal?.removeEventListener("abort", onAbort);
 
       // Pipe explicit stdin to the child, then EOF. Without this, commands
       // that read stdin (e.g. `git commit --file=-`) block forever.
@@ -412,6 +443,7 @@ export class NodeShellExecutor implements ShellExecutor {
 
       if (timeoutHandle) clearTimeout(timeoutHandle);
       releaseActive?.();
+      releaseSignal?.();
       const durationMs = Date.now() - t0;
       const truncated = stdout.length > maxOutputBytes;
 
@@ -442,6 +474,7 @@ export class NodeShellExecutor implements ShellExecutor {
       };
     } catch (err) {
       releaseActive?.();
+      releaseSignal?.();
       const durationMs = Date.now() - t0;
       return {
         ok: false,

@@ -1952,6 +1952,11 @@ export interface ExecutionOptions {
    * Capped at 1 MiB to bound memory use.
    */
   stdin?: string;
+  /**
+   * Optional AbortSignal — when aborted, the command is cancelled
+   * (process tree killed) and the result resolves with status "cancelled".
+   */
+  signal?: AbortSignal;
 }
 
 // ─── Structured execution ─────────────────────────────────────────
@@ -1988,6 +1993,16 @@ export async function runCommand(
   const workspaceRoot = options?.workspaceRoot ?? cwd;
   const timeoutMs = options?.timeoutMs ?? 120_000;
   const label = options?.commandLabel ?? command;
+
+  // Already-aborted signal: do not run the security pipeline or spawn.
+  if (options?.signal?.aborted) {
+    return {
+      status: "cancelled",
+      success: false,
+      message: `${command} ${args.join(" ")} — cancelled before execution`,
+      data: { command, args, code: "ABORTED" },
+    };
+  }
 
   // Bound stdin payload size — stdin is piped verbatim to the child.
   if (options?.stdin !== undefined && options.stdin.length > 1_048_576) {
@@ -2098,6 +2113,7 @@ export async function runCommand(
     env: filteredEnv,
     onStream: options?.onStream,
     stdin: options?.stdin,
+    signal: options?.signal,
   });
   const durationMs = Date.now() - t0;
 
