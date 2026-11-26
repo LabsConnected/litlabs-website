@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 import StudioHealthPanel from "./StudioHealthPanel";
@@ -151,6 +151,38 @@ describe("StudioHealthPanel checks — not-run checks carry their reason (ACC-06
     const reasons = await screen.findAllByText(/run automatically when a build completes/);
     expect(reasons.length).toBeGreaterThanOrEqual(7);
     expect(screen.getAllByText("Not run").length).toBeGreaterThanOrEqual(7);
+  });
+});
+
+describe("StudioHealthPanel checks — Run all is not hostage to the runtime phase (ACC-08 Defect 1)", () => {
+  it("enables Run all when the runtime never reaches ready (host execution disabled, staging F4)", async () => {
+    setupFetch();
+    fixtures.runtime = { ...READY_RUNTIME, phase: "idle" };
+
+    render(<StudioHealthPanel mode="checks" projectId="proj-1" />);
+
+    const button = await screen.findByRole("button", { name: "Run all checks" });
+    expect(button).not.toBeDisabled();
+  });
+
+  it("surfaces the run-all route's own error in the panel instead of pre-disabling", async () => {
+    fetchSpy = spyOnFetch().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/checks/run-all")) {
+        return response({ error: "Terminal is not configured for this workspace" }, 500);
+      }
+      if (url.includes("/checks")) {
+        return response({ checks: [], changedFiles: [], pendingApprovals: [], checkpoints: [] });
+      }
+      return response({}, 404);
+    });
+    fixtures.runtime = { ...READY_RUNTIME, phase: "idle" };
+
+    render(<StudioHealthPanel mode="checks" projectId="proj-1" />);
+
+    const button = await screen.findByRole("button", { name: "Run all checks" });
+    fireEvent.click(button);
+    expect(await screen.findByText("Terminal is not configured for this workspace")).toBeInTheDocument();
   });
 });
 

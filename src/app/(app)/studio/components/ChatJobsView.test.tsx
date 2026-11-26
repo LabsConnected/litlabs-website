@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ThemeProvider } from "@/context/ThemeContext";
 import ChatJobsView from "./ChatJobsView";
@@ -122,5 +122,94 @@ describe("ChatJobsView (shared Jobs tab body — Board + Regular)", () => {
     wrap(<ChatJobsView onOpenChecks={onOpenChecks} />);
     fireEvent.click(screen.getByTestId("board-chat-jobs-open-checks"));
     expect(onOpenChecks).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ChatJobsView checks — durable fallback to the persisted run (ACC-08 Defect 1)", () => {
+  const PERSISTED_CHECKS = [
+    { id: "build", label: "Build", status: "passed", source: "Workspace · pnpm run build", timestamp: "2026-11-25T19:45:00.000Z" },
+    { id: "typecheck", label: "TypeScript", status: "unavailable", source: "Active project workspace", timestamp: "2026-11-25T19:45:00.000Z", error: "Project workspace is not ready" },
+    { id: "accessibility", label: "Accessibility", status: "not_configured", source: "No script configured", timestamp: "2026-11-25T19:45:00.000Z" },
+  ];
+
+  function stubChecksFetch(payload: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the persisted results when the live store is empty (a resumed run's events never reached this client)", async () => {
+    stubChecksFetch({
+      checks: PERSISTED_CHECKS,
+      checkRun: { conversationId: "conv-1", createdAt: "2026-11-25T19:45:00.000Z" },
+    });
+    wrap(<ChatJobsView projectId="project-1" conversationId="conv-1" />);
+
+    const persisted = await screen.findByTestId("board-chat-jobs-checks-persisted");
+    expect(persisted).toHaveTextContent("Build — passed");
+    expect(persisted).toHaveTextContent("TypeScript — could not run");
+    expect(persisted).toHaveTextContent("Accessibility — not configured");
+    const section = screen.getByTestId("board-chat-jobs-checks");
+    expect(section).toHaveTextContent("Saved results from this conversation's last completed build");
+    expect(section).not.toHaveTextContent("No checks have run for this conversation yet.");
+  });
+
+  it("labels a persisted run from another conversation as the project's latest, with its time", async () => {
+    stubChecksFetch({
+      checks: PERSISTED_CHECKS,
+      checkRun: { conversationId: "conv-other", createdAt: "2026-11-25T19:45:00.000Z" },
+    });
+    wrap(<ChatJobsView projectId="project-1" conversationId="conv-1" />);
+
+    await screen.findByTestId("board-chat-jobs-checks-persisted");
+    const section = screen.getByTestId("board-chat-jobs-checks");
+    expect(section).toHaveTextContent("Latest saved results for this project");
+    expect(section).not.toHaveTextContent("Saved results from this conversation's last completed build");
+  });
+
+  it("keeps the honest empty sentence when the GET carries no persisted run (placeholder set only)", async () => {
+    stubChecksFetch({ checks: PERSISTED_CHECKS });
+    wrap(<ChatJobsView projectId="project-1" conversationId="conv-1" />);
+
+    // Give the fallback fetch its chance to resolve, then assert the
+    // placeholder payload did NOT become "results".
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByTestId("board-chat-jobs-checks-persisted")).toBeNull();
+    expect(screen.getByTestId("board-chat-jobs-checks")).toHaveTextContent(
+      "No checks have run for this conversation yet.",
+    );
+  });
+
+  it("the live store stays authoritative — persisted results never override live ones", async () => {
+    stubChecksFetch({
+      checks: PERSISTED_CHECKS,
+      checkRun: { conversationId: "conv-1", createdAt: "2026-11-25T19:45:00.000Z" },
+    });
+    useExecutionStore.setState({
+      phase: "editing",
+      isRunning: false,
+      events: [
+        executionEvent("e2", "Typecheck the project", {
+          type: "build_result",
+          check: "typecheck",
+          success: false,
+          errorCount: 2,
+        }),
+      ],
+      pendingApproval: null,
+    });
+    wrap(<ChatJobsView projectId="project-1" conversationId="conv-1" />);
+    expect(screen.getByTestId("board-chat-jobs-checks")).toHaveTextContent("typecheck — 2 errors");
+    expect(screen.queryByTestId("board-chat-jobs-checks-persisted")).toBeNull();
   });
 });
