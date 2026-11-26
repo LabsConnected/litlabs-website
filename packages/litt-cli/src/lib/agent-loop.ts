@@ -194,8 +194,6 @@ export class CliAgentLoop {
       const step = { ...steps[i], index: i };
       
       // Intent-based routing with bounded execution
-      let stepResult: AgentStepResult;
-      
       const timeoutMs = step.timeoutMs ?? 300000;
       const executionPromise = step.command === "conversation"
         ? this.executeDirectInference(step)
@@ -214,7 +212,7 @@ export class CliAgentLoop {
         }), timeoutMs)
       );
 
-      stepResult = await Promise.race([executionPromise, timeoutPromise]);
+      const stepResult = await Promise.race([executionPromise, timeoutPromise]);
 
       this.stepResults.push(stepResult);
 
