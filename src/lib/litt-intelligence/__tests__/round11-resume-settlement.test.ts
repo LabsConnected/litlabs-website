@@ -133,7 +133,12 @@ describe("resumeAgentLoopV2 — round-11 proof pattern settlement", () => {
     // …but it is not the verdict.
     expect(result.runObservability?.outcome).toBe("completed");
     expect(result.completedWithWarning).toBeDefined();
-    expect(result.finalText).toBe(result.completedWithWarning);
+    // Post-run verification no longer short-circuits on modelFailed:
+    // the completion checks run against the landed mutations and their
+    // honest unavailable note rides the closing text after the warning.
+    expect(result.checksNote).toBeDefined();
+    expect(result.finalText).toContain(result.completedWithWarning);
+    expect(result.finalText).toContain(result.checksNote);
     expect(result.finalText).toMatch(/request is complete/i);
     expect(result.finalText).not.toMatch(/closing summary/i);
     expect(result.finalText).not.toMatch(/quality gate/i);
