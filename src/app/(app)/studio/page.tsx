@@ -6,11 +6,6 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useTheme } from "@/context/ThemeContext";
 import { track } from "@/lib/analytics";
 import CommandStudio from "./components/CommandStudio";
-import FirstRunWelcome from "./components/FirstRunWelcome";
-import {
-  peekFirstRunProjectId,
-  writeFirstRunHandoff,
-} from "./lib/first-run-handoff";
 import StudioShell from "@/components/page-shells/StudioShell";
 import { useStudioLayoutMode } from "./stores/useStudioLayoutMode";
 
@@ -92,115 +87,20 @@ function StudioLoadingState({ onRetry }: { onRetry: () => void }) {
 }
 
 function StudioHub() {
-  const { isLoaded, isSignedIn, userId, getToken } = useClerkAuth();
+  const { isLoaded, isSignedIn, getToken } = useClerkAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [retryKey, setRetryKey] = useState(0);
-  const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
   // Clerk's injected session state can make isLoaded resolve true before
   // hydration while SSR always renders the loading branch — gate the first
   // client render on mounted so server and client markup match (React #418).
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // First-run: check if user has any projects
-  const [projectCheck, setProjectCheck] = useState<{
-    loading: boolean;
-    hasProjects: boolean | null;
-  }>({ loading: true, hasProjects: null });
-  const [isCreating, setIsCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-
   const handleRetry = useCallback(() => {
     // Retry restarts the failed initialization by forcing a full
     // re-mount of the loading state + Clerk re-check, not merely
     // re-animating the spinner.
-    setRetryKey((k) => k + 1);
-  }, []);
-
-  // Check for fresh user (no projects) — show welcome flow
-  useEffect(() => {
-    if (!mounted || !isLoaded || !isSignedIn) return;
-
-    // Skip check if project already in URL
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("project") || peekFirstRunProjectId()) {
-      setProjectCheck({ loading: false, hasProjects: true });
-      return;
-    }
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/studio-projects", {
-          credentials: "include",
-          cache: "no-store",
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const projects = data.projects || data || [];
-        const hasProjects = Array.isArray(projects) ? projects.length > 0 : false;
-        if (!cancelled) setProjectCheck({ loading: false, hasProjects });
-      } catch {
-        // On error, assume has projects to avoid blocking existing users
-        if (!cancelled) setProjectCheck({ loading: false, hasProjects: true });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [mounted, isLoaded, isSignedIn, retryKey]);
-
-  const handleFirstRunSubmit = useCallback(
-    async (idea: string) => {
-      setIsCreating(true);
-      setCreateError(null);
-      try {
-        const token = await getToken?.();
-        const res = await fetch("/api/studio-projects", {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({
-            sourceType: "blank",
-            name: idea.slice(0, 60) || "Untitled Project",
-            templateId: "blank-static",
-          }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error((err as { error?: string }).error || `Failed (${res.status})`);
-        }
-        const { project } = await res.json();
-        if (!project?.id) throw new Error("No project ID returned");
-
-        writeFirstRunHandoff({
-          prompt: idea,
-          projectId: project.id,
-          userId,
-        });
-        setCreatedProjectId(project.id);
-        const params = new URLSearchParams(window.location.search);
-        params.set("project", project.id);
-        params.set("prompt", idea);
-        params.set("tool", "chat");
-        router.replace(`/studio?${params.toString()}`);
-        setProjectCheck({ loading: false, hasProjects: true });
-      } catch (err) {
-        setCreateError(err instanceof Error ? err.message : "Failed to create project");
-      } finally {
-        setIsCreating(false);
-      }
-    },
-    [router, userId, getToken]
-  );
-
-  const handleFirstRunRetry = useCallback(() => {
-    setCreateError(null);
-    setProjectCheck({ loading: true, hasProjects: null });
     setRetryKey((k) => k + 1);
   }, []);
 
@@ -214,8 +114,8 @@ function StudioHub() {
   // and dead-ends the flow at the sandbox wall). "Open GitHub repo"
   // stays a separate, explicit choice inside Studio; it never gates
   // a website build. So: creator=website with no ?project= creates
-  // the blank project up front (the same POST the first-run flow
-  // uses) and pins it in the URL. An explicit ?project= always wins.
+  // the blank project up front (a POST /api/studio-projects blank
+  // create) and pins it in the URL. An explicit ?project= always wins.
   // The POST opts in to empty-project reuse, so a repeat entry pins
   // the previous entry's still-untouched blank instead of minting
   // another duplicate (#892 intent preserved: never the selected
@@ -255,7 +155,6 @@ function StudioHub() {
       }
       const { project } = await res.json();
       if (!project?.id) throw new Error("No project ID returned");
-      setCreatedProjectId(project.id);
       router.replace(`/studio?project=${encodeURIComponent(project.id)}&tool=chat`);
     } catch (err) {
       setWebsiteState({
@@ -338,30 +237,6 @@ function StudioHub() {
     return <StudioLoadingState key={retryKey} onRetry={handleRetry} />;
   }
 
-  // Fresh user with no projects → first-run welcome
-  if (projectCheck.loading) {
-    return <StudioLoadingState key={retryKey} onRetry={handleRetry} />;
-  }
-
-  if (projectCheck.hasProjects === false && !createdProjectId) {
-    // Handoff from dashboard "Ask LiTT" (?tool=chat&prompt=...) — pre-fill the
-    // welcome input so the user's prompt isn't dropped on the fresh-user path.
-    // (Existing users render CommandStudio below, which already consumes ?prompt=.)
-    const handoffPrompt =
-      typeof window !== "undefined"
-        ? new URLSearchParams(window.location.search).get("prompt")
-        : null;
-    return (
-      <FirstRunWelcome
-        onSubmit={handleFirstRunSubmit}
-        isCreating={isCreating}
-        error={createError}
-        onRetry={handleFirstRunRetry}
-        initialIdea={handoffPrompt}
-      />
-    );
-  }
-
   // One-chat entry (Larry's directive, 2026-11-11; ART-20261111-031),
   // superseding the Studio prime landing (ART-20261110-029): the
   // "What do you want to make?" hub page is RETIRED. A bare /studio
@@ -372,6 +247,16 @@ function StudioHub() {
   // (LiTEmptyState, resolved by resolveEntryCreateType), and a
   // describe typed at entry lands in the chat's own composer via
   // ?prompt= (takeFirstRunPrompt) — typed once, never re-asked.
+  //
+  // The first-run welcome screen is RETIRED too (Larry's direct
+  // order, 2026-11-25): there is no project-count gate here at all.
+  // EVERY signed-in user — including a zero-project account — opens
+  // straight into the real Studio. A first chat send from a
+  // zero-project account is provisioned server-side (the
+  // conversations POST binds a starter project), and CommandStudio
+  // consumes ?prompt= itself, so the dashboard "Ask LiTT" handoff
+  // lands in the chat composer for fresh users exactly as it does
+  // for existing users.
   return <CommandStudio />;
 }
 

@@ -3895,7 +3895,7 @@ async function runAgentLoopV2Inner(
   // honestly as failed instead of reporting a corrupted edit as
   // success. Runs that specified no literal, or whose files can't be
   // read back, are untouched by this check.
-  if (!cancelled && !modelFailed && !failedHonestly) {
+  if (!cancelled && !failedHonestly) {
     const literalCheck = await checkRequestedLiteral({
       instruction: userMessage,
       candidatePaths: successfulMutationPaths(toolCallLog),
@@ -3919,7 +3919,7 @@ async function runAgentLoopV2Inner(
   // the unverifiable scope rides the closing text as a note. Only a
   // statically decidable violation fails the run.
   let contrastNote: string | undefined;
-  if (!cancelled && !modelFailed && !failedHonestly) {
+  if (!cancelled && !failedHonestly) {
     const contrastCheck = await checkTextContrast({
       candidatePaths: successfulMutationPaths(toolCallLog),
       readFile: (path) => transport.readFile(path),
@@ -3938,7 +3938,7 @@ async function runAgentLoopV2Inner(
   // desktop screen — settle honestly failed, exactly like a contrast
   // violation. The verdict streams as a "Layout" build_result so
   // Jobs shows it beside the project checks.
-  if (!cancelled && !modelFailed && !failedHonestly) {
+  if (!cancelled && !failedHonestly) {
     const layoutCheck = await checkRenderedLayout({
       candidatePaths: successfulMutationPaths(toolCallLog),
       readFile: (path) => transport.readFile(path),
@@ -3966,7 +3966,6 @@ async function runAgentLoopV2Inner(
   let checksNote: string | undefined;
   if (
     !cancelled &&
-    !modelFailed &&
     !failedHonestly &&
     hasInterveningMutation &&
     toolCallLog.some((t) => t.success && t.mutating)
@@ -6105,7 +6104,7 @@ async function resumeAgentLoopV2Inner(
   // that text is actually in a file the run mutated (read back from
   // the workspace). Otherwise settle honestly as failed — never
   // report a corrupted edit as success.
-  if (!cancelled && !modelFailed && !failedHonestly) {
+  if (!cancelled && !failedHonestly) {
     const literalCheck = await checkRequestedLiteral({
       instruction: resumeUserMessage,
       candidatePaths: successfulMutationPaths(toolCallLog),
@@ -6125,7 +6124,7 @@ async function resumeAgentLoopV2Inner(
   // not statically decidable evidence — the run passes with a note,
   // never failedHonestly.
   let contrastNote: string | undefined;
-  if (!cancelled && !modelFailed && !failedHonestly) {
+  if (!cancelled && !failedHonestly) {
     const contrastCheck = await checkTextContrast({
       candidatePaths: successfulMutationPaths(toolCallLog),
       readFile: (path) => transport.readFile(path),
@@ -6142,7 +6141,7 @@ async function resumeAgentLoopV2Inner(
   // to the initial loop: a proven page-level narrow cap settles the
   // resumed run honestly failed; the verdict streams as a "Layout"
   // build_result so Jobs shows it.
-  if (!cancelled && !modelFailed && !failedHonestly) {
+  if (!cancelled && !failedHonestly) {
     const layoutCheck = await checkRenderedLayout({
       candidatePaths: successfulMutationPaths(toolCallLog),
       readFile: (path) => transport.readFile(path),
@@ -6169,7 +6168,6 @@ async function resumeAgentLoopV2Inner(
   let checksNote: string | undefined;
   if (
     !cancelled &&
-    !modelFailed &&
     !failedHonestly &&
     hasInterveningMutation &&
     toolCallLog.some((t) => t.success && t.mutating)

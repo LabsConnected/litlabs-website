@@ -186,4 +186,24 @@ describe("runAgentLoopV2 — requested-literal verification (ACC-01 F9)", () => 
 
     expect(result.failedHonestly).toBeUndefined();
   });
+
+  it("settles failedHonestly when the model dies during repair and the literal never landed", async () => {
+    // Paid-beta blocker: the literal/completion read-back checks were
+    // guarded by !modelFailed, so a provider failure during the bounded
+    // correction attempt skipped verification entirely and the run
+    // settled completed-with-warning on an unverified mutation.
+    const { transport, files } = memoryTransport();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(
+        toolCallReply("tc-1", "files.write", { projectId: "p-test", path: "index.html", content: CORRUPTED }),
+      )
+      .mockRejectedValue(new Error("provider 429: rate limited"));
+
+    const result = await runAgentLoopV2(INSTRUCTION, transport, config);
+
+    expect(files.get("index.html")).toContain("Fresh from1 the oven");
+    expect(result.failedHonestly).toBeTruthy();
+    expect(result.failedHonestly).toContain("Fresh from the oven every morning");
+    expect(result.finalText).toBe(result.failedHonestly);
+  });
 });

@@ -23,4 +23,7 @@ drop policy if exists project_check_runs_owner_select on public.project_check_ru
 create policy project_check_runs_owner_select
   on public.project_check_runs
   for select
-  using (auth.uid() = user_id);
+  -- Cast both sides to text so this policy stays valid whether user_id is
+  -- uuid (fresh replay) or text (after 20261126120000_user_id_text, which
+  -- the upgrade harness re-runs this file against).
+  using (user_id::text = auth.uid()::text);

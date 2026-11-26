@@ -209,3 +209,23 @@ describe("event payload safety", () => {
     });
   });
 });
+
+describe("sanitizeActionPayload undefined handling", () => {
+  it("drops undefined object keys instead of persisting the string \"undefined\"", () => {
+    const sanitized = sanitizeActionPayload({
+      pendingApproval: {
+        toolId: "files.write",
+        pausedRunId: undefined,
+        reason: "needs approval",
+      },
+      topUndefined: undefined,
+      list: [undefined, "ok"],
+    });
+    const pending = (sanitized as Record<string, unknown>).pendingApproval as Record<string, unknown>;
+    expect("pausedRunId" in pending).toBe(false);
+    expect(pending.toolId).toBe("files.write");
+    expect("topUndefined" in (sanitized as Record<string, unknown>)).toBe(false);
+    // Array holes become null — valid JSON, never the string "undefined".
+    expect((sanitized as Record<string, unknown>).list).toEqual([null, "ok"]);
+  });
+});

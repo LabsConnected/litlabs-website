@@ -127,6 +127,7 @@ vi.mock("@/lib/studio/project-resolver", () => ({
 }));
 
 import { POST } from "./route";
+import { createBlankProject, listProjects } from "@/lib/projects/project-repository";
 
 function postRequest(body: Record<string, unknown>): Request {
   return new Request("http://test.local/api/studio/conversations", {
@@ -228,5 +229,29 @@ describe("POST /api/studio/conversations — reuse", () => {
     expect(body.reused).toBe(true);
     expect(body.conversation.id).toBe(existing.id);
     expect(tables.studio_conversations).toHaveLength(1);
+  });
+});
+
+describe("POST /api/studio/conversations — zero-project provisioning", () => {
+  // The first-run welcome screen is retired (Larry's direct order,
+  // 2026-11-25): a zero-project user's first chat send reaches this
+  // POST with no projectId, and the route itself must provision a
+  // starter project and bind the conversation to it — the client
+  // never has to create or choose a project just to speak to LiTT.
+  it("creates a starter project and binds the conversation when the user has no projects", async () => {
+    vi.mocked(listProjects).mockResolvedValueOnce({ projects: [], legacyOnly: [] });
+    vi.mocked(createBlankProject).mockClear();
+
+    const res = await POST(postRequest({}) as never);
+    const body = (await res.json()) as {
+      conversation: { id: string };
+      projectId?: string;
+    };
+
+    expect(res.status).toBe(201);
+    expect(vi.mocked(createBlankProject)).toHaveBeenCalledTimes(1);
+    expect(body.projectId).toBe("proj-blank");
+    expect(tables.studio_conversations).toHaveLength(1);
+    expect(tables.studio_conversations[0]?.project_id).toBe("proj-blank");
   });
 });
