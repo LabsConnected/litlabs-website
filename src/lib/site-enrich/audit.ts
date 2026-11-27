@@ -115,6 +115,42 @@ function normalizeRelative(src: string): string {
 }
 
 /**
+ * Resolve a page-relative reference against the directory of the file
+ * that references it — standard relative-URL resolution, the same
+ * semantics the deploy validator applies at publish. The audit itself
+ * judges refs root-relative (the convention generated entry pages
+ * use); callers auditing a NESTED page use this to avoid condemning
+ * "../assets/…" references that resolve to real files. ".." pops a
+ * segment and clamps at the root; the ref is expected pre-normalized
+ * (no query/hash, no leading slash).
+ */
+export function resolveRefAgainstDir(ref: string, dir: string): string {
+  if (!dir) return ref;
+  const out = dir.split("/").filter(Boolean);
+  for (const seg of ref.split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") {
+      out.pop();
+      continue;
+    }
+    out.push(seg);
+  }
+  return out.join("/");
+}
+
+/**
+ * Whether a referenced asset exists in the workspace file set under
+ * EITHER reading: as written (root-relative) or resolved against the
+ * referencing file's directory — each with the `public/` prefix
+ * variant the audit accepts. Used on repair paths, which must never
+ * rewrite a reference that exists under any legitimate reading.
+ */
+export function refExistsInFileSet(ref: string, dir: string, files: ReadonlySet<string>): boolean {
+  const candidates = dir ? [ref, resolveRefAgainstDir(ref, dir)] : [ref];
+  return candidates.some((c) => files.has(c) || files.has(`public/${c}`));
+}
+
+/**
  * Audit an HTML document against the workspace file set.
  * `files` is the set of workspace-relative paths that exist on disk.
  */

@@ -10,6 +10,7 @@
  */
 
 import type { StructuredDiagnostic } from "./diagnostic-parser";
+import type { SanitizedRouteAttempt } from "./llm-tool-calling";
 
 export type ProgressEvent =
   | { type: "phase"; phase: AgentLoopPhase; step: number }
@@ -30,7 +31,16 @@ export type ProgressEvent =
   | { type: "deploy_verify"; url: string; success: boolean; detail?: string }
   | { type: "finished"; totalSteps: number; totalDurationMs: number; success?: boolean }
   | { type: "cancelled"; reason: string }
-  | { type: "model_routing"; model: string; provider: string; fallbackFrom?: string; category?: string; latencyMs?: number; canonicalId?: string; configSource?: "code-default" | "env-override" | "registry" }
+  | { type: "model_routing"; model: string; provider: string; fallbackFrom?: string; category?: string; latencyMs?: number; canonicalId?: string; configSource?: "code-default" | "env-override" | "registry"; failover?: SanitizedRouteAttempt[] }
+  /**
+   * P0 R4: a persisted model transition — previous model, current
+   * model, and WHY (failure classes / route_fallback /
+   * no_file_write_calls), with the sanitized per-attempt failover
+   * evidence. Unlike model_routing (stream noise), this event IS
+   * persisted to the run's action events: it is the run record's
+   * provider history the Execution Integrity Contract requires.
+   */
+  | { type: "model_transition"; from: string; to: string; provider: string; reason: string; failover?: SanitizedRouteAttempt[]; step?: number }
   | { type: "build_model_incompatible"; canonicalId: string; provider: string; stepsObserved: number; zeroWriteSteps: number; reason: string }
   | { type: "step_timing"; step: number; stepDurationMs: number; elapsedMs: number }
   | { type: "model_response"; provider: string; model: string; finishReason: string; contentType: string; contentLength: number; messageKeys: string[]; toolCalls: Array<{ name: string; idPresent: boolean; argumentsJsonValid: boolean; argumentKeys: string[]; argumentLength: number }> }

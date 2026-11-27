@@ -45,8 +45,9 @@ import {
   patchActionRun,
   transitionActionRun,
 } from "@/lib/action-runtime";
-import type { LLMMessage } from "./llm-tool-calling";
-import type { DeferredToolCall } from "./agent-loop-v2";
+import type { LLMMessage, ModelTransitionRecord } from "./llm-tool-calling";
+import type { DestructiveActionAssessment } from "./destructive-action";
+import type { CompletedDeployment, DeferredToolCall } from "./agent-loop-v2";
 import type { QualityFinale, QualityLoopSnapshot } from "./quality-loop-flow";
 import type { RunFailureContributor } from "./run-settlement";
 
@@ -131,6 +132,28 @@ export interface RunResult {
    */
   failureContributors?: RunFailureContributor[];
   /**
+   * P0 R4 (audit D6): the run's model transitions — previous model,
+   * current model, fallback reason, and the sanitized provider
+   * failures behind each change. Persisted inside the result JSON
+   * (additive, no migration). Optional for backwards compatibility.
+   */
+  modelTransitions?: ModelTransitionRecord[];
+  /**
+   * P0 R5: the run's stable logical identity, echoed on the result so
+   * a nested pause can persist it on the next paused-run record and
+   * the chain of segments keeps one identity. Additive (result JSON).
+   */
+  logicalRunId?: string;
+  /**
+   * P0 R8: the completed deployment's recorded outcome (deployment
+   * id, URLs, status, URL verification, reuse) for the publish this
+   * segment of the run completed — recorded beside logicalRunId so
+   * the publishing operation correlates with its billing record on
+   * the one run record. Null when the segment published nothing.
+   * Additive (result JSON, no migration).
+   */
+  deployment?: CompletedDeployment | null;
+  /**
    * Quality-loop finale for ACT-mode runs that opted into the gated loop.
    * Durably persists the machine-readable answer to "is this actually good
    * enough to ship?" (verdict + per-stage evidence state) on the run
@@ -156,6 +179,37 @@ export interface PausedRunRecord {
   executionMode: "plan" | "act" | "auto";
   systemPrompt: string;
   checkpointId: string | null;
+  /**
+   * P0 R1: the workspace-checkpoint creation error recorded when this
+   * run paused, when creation was attempted for the run's baseline and
+   * failed. A resume MUST refuse a run carrying it — there is no
+   * verified baseline to continue from. Absent means no failed attempt
+   * was recorded (checkpoint created, never attempted, or not
+   * applicable in a static/gitless workspace). Absent on legacy rows
+   * and before the migration is applied.
+   */
+  checkpointFailure?: string;
+  /**
+   * P0 R6: the destructive-action card data for THIS gate, when the
+   * gated tool is destructive (destructive-action.ts): exact target,
+   * operation, affected dependencies, blocked status, consequences,
+   * recovery availability, and available actions — the payload the
+   * client renders the founder's approval-card standard from. Absent
+   * for non-destructive gates, legacy rows, and before the migration
+   * is applied.
+   */
+  destructiveAction?: DestructiveActionAssessment;
+  /**
+   * P0 R5: the run's ONE stable logical identity (audit D7). Minted by
+   * the initial segment (its metering run id — in production the
+   * billing agent run id the route threads through the metering
+   * context) and carried across every pause/resume so billing,
+   * action, paused, and metering records correlate to the same run
+   * and resumed segments continue the same observability record.
+   * Absent on legacy rows and before the migration is applied —
+   * resumes then derive a segment-local identity exactly as before.
+   */
+  logicalRunId?: string;
   /** Durable parent ActionRun this approval gate belongs to. */
   actionRunId: string | null;
   status: "pending" | "approved" | "rejected" | "expired";
@@ -224,6 +278,9 @@ interface PausedRunRow {
   execution_mode: string;
   system_prompt: string;
   checkpoint_id: string | null;
+  checkpoint_failure?: string | null;
+  destructive_action?: DestructiveActionAssessment | null;
+  logical_run_id?: string | null;
   action_run_id?: string | null;
   status: string;
   created_at: string;
@@ -260,6 +317,9 @@ function rowToRecord(row: PausedRunRow): PausedRunRecord {
     executionMode: row.execution_mode as "plan" | "act" | "auto",
     systemPrompt: row.system_prompt,
     checkpointId: row.checkpoint_id,
+    checkpointFailure: row.checkpoint_failure ?? undefined,
+    destructiveAction: row.destructive_action ?? undefined,
+    logicalRunId: row.logical_run_id ?? undefined,
     actionRunId: row.action_run_id ?? null,
     status: row.status as PausedRunRecord["status"],
     createdAt: row.created_at,
@@ -305,6 +365,12 @@ export async function createPausedRun(input: {
   priorToolCalls?: RunResult["toolCalls"];
   /** ACC-07 build-scope state — see PausedRunRecord.buildScope. */
   buildScope?: { grants: boolean; authorized: boolean };
+  /** P0 R1 checkpoint creation failure — see PausedRunRecord.checkpointFailure. */
+  checkpointFailure?: string | null;
+  /** P0 R6 destructive-action card data — see PausedRunRecord.destructiveAction. */
+  destructiveAction?: DestructiveActionAssessment | null;
+  /** P0 R5 stable logical run identity — see PausedRunRecord.logicalRunId. */
+  logicalRunId?: string | null;
 }): Promise<PausedRunRecord> {
   if (!supabaseAdmin) throw new Error("Database not available");
 
@@ -341,9 +407,60 @@ export async function createPausedRun(input: {
       ...baseRow,
       prior_tool_calls: input.priorToolCalls ?? null,
       build_scope: input.buildScope ?? null,
+      checkpoint_failure: input.checkpointFailure ?? null,
+      destructive_action: input.destructiveAction ?? null,
+      logical_run_id: input.logicalRunId ?? null,
     })
     .select()
     .single();
+
+  if (error && /destructive_action/.test(error.message ?? "")) {
+    // P0 R6 migration not applied yet — degrade to the pre-column
+    // behavior (the card data is not persisted; the gate itself still
+    // carries it in its reason text) rather than breaking pauses.
+    ({ data, error } = await supabaseAdmin
+      .from(TABLE)
+      .insert({
+        ...baseRow,
+        prior_tool_calls: input.priorToolCalls ?? null,
+        build_scope: input.buildScope ?? null,
+        checkpoint_failure: input.checkpointFailure ?? null,
+        logical_run_id: input.logicalRunId ?? null,
+      })
+      .select()
+      .single());
+  }
+
+  if (error && /logical_run_id/.test(error.message ?? "")) {
+    // P0 R5 migration not applied yet — degrade to the pre-column
+    // behavior (the identity is not persisted; resumes derive a
+    // segment-local one, as before) rather than breaking pauses.
+    ({ data, error } = await supabaseAdmin
+      .from(TABLE)
+      .insert({
+        ...baseRow,
+        prior_tool_calls: input.priorToolCalls ?? null,
+        build_scope: input.buildScope ?? null,
+        checkpoint_failure: input.checkpointFailure ?? null,
+      })
+      .select()
+      .single());
+  }
+
+  if (error && /checkpoint_failure/.test(error.message ?? "")) {
+    // P0 R1 migration not applied yet — degrade to the pre-column
+    // behavior (the failure is not persisted; resume falls back to
+    // checkpointId validation) rather than breaking pauses.
+    ({ data, error } = await supabaseAdmin
+      .from(TABLE)
+      .insert({
+        ...baseRow,
+        prior_tool_calls: input.priorToolCalls ?? null,
+        build_scope: input.buildScope ?? null,
+      })
+      .select()
+      .single());
+  }
 
   if (error && /build_scope/.test(error.message ?? "")) {
     // ACC-07 migration not applied yet — degrade to the pre-column

@@ -528,6 +528,68 @@ export async function POST(
     );
   }
 
+  // 5b. P0 R1 — validate the run's workspace checkpoint BEFORE the
+  // claim. The paused record persists only the checkpointId; the
+  // checkpoint row is the durable baseline the resumed run diffs
+  // against. Two states that used to degrade silently are explicit,
+  // recoverable failures now:
+  //   - the record carries a checkpointFailure: creation was attempted
+  //     at pause time and failed, so no baseline was ever created —
+  //     the run reported itself non-resumable when it paused;
+  //   - a checkpointId is recorded but its row no longer exists in a
+  //     non-static workspace: the baseline is gone, and continuing on
+  //     a fabricated empty SHA would settle the run on unverified
+  //     evidence (the pre-R1 behavior at this site).
+  // The remedy in both cases is the same: settle the run failed with
+  // the reason and let the user restart the request, which creates a
+  // fresh checkpoint. Static (gitless) workspaces never require a
+  // checkpoint — creation is not applicable there and the gitless
+  // read-back path verifies the run — so a stray recorded id keeps
+  // the previous empty-SHA threading rather than blocking the resume.
+  let resumeCheckpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
+  const checkpointRecord = resolved;
+  const checkpointRefusal = async (failureCode: string, message: string) => {
+    await settleResumedRunOutcome({
+      record: checkpointRecord,
+      userId,
+      status: "failed",
+      eventType: "run.failed",
+      patch: { currentActivity: "Workspace checkpoint unavailable on resume", failureCode, failureMessage: message },
+      logEvent: "approval:action_run_checkpoint_settle_failed",
+    });
+    return NextResponse.json(
+      { error: message, resolved: true, status: "failed", pausedRunId },
+      { status: 409 },
+    );
+  };
+  if (resolved.checkpointFailure) {
+    return checkpointRefusal(
+      "CHECKPOINT_CREATION_FAILED",
+      `This run cannot be resumed safely: its workspace checkpoint could not be created when it paused (${resolved.checkpointFailure}). Send the request again so the work restarts from a fresh checkpoint.`,
+    );
+  }
+  if (resolved.checkpointId) {
+    const checkpointRow = await getCheckpoint(resolved.checkpointId, userId).catch(() => null);
+    if (checkpointRow) {
+      resumeCheckpoint = {
+        checkpointId: resolved.checkpointId,
+        label: "pre-approval",
+        gitSha: checkpointRow.gitSha,
+      };
+    } else if (transport.isStaticWorkspace === true) {
+      resumeCheckpoint = {
+        checkpointId: resolved.checkpointId,
+        label: "pre-approval",
+        gitSha: "",
+      };
+    } else {
+      return checkpointRefusal(
+        "CHECKPOINT_MISSING",
+        "This run cannot be resumed safely: the workspace checkpoint recorded when it paused no longer exists, so there is no verified baseline to continue from. Send the request again so the work restarts from a fresh checkpoint.",
+      );
+    }
+  }
+
   // 6. Mark the run as "processing" (atomic — prevents duplicate executions)
   // The claim mints this executor's fencing token: renewals and terminal
   // writes below are conditioned on it, so a superseded or stale-marked
@@ -952,23 +1014,12 @@ export async function POST(
       : undefined,
   };
 
-  // The paused-run record persists only the checkpointId — recover the real
-  // pre-mutation git SHA from the checkpoint row (the durable source of
-  // truth) and thread it into the resume. Without it, computeWorkspaceChange
-  // short-circuits on the empty SHA and always reports "unknown", which
-  // defeated the workspace-change scoping of the artifact gate on every
-  // approval-resume (#551): the resumed run could never prove it changed
-  // files. A missing checkpoint row (legacy rows) keeps the previous
-  // empty-SHA behavior.
-  let resumeCheckpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
-  if (resolved.checkpointId) {
-    const checkpointRow = await getCheckpoint(resolved.checkpointId, userId).catch(() => null);
-    resumeCheckpoint = {
-      checkpointId: resolved.checkpointId,
-      label: "pre-approval",
-      gitSha: checkpointRow?.gitSha ?? "",
-    };
-  }
+  // resumeCheckpoint was recovered and VALIDATED pre-claim (step 5b,
+  // P0 R1): the checkpoint row's real pre-mutation git SHA, threaded
+  // into the resume so computeWorkspaceChange diffs the whole run
+  // instead of short-circuiting on an empty SHA (#551). A missing or
+  // failed checkpoint in a non-static workspace already refused the
+  // resume there — it never reaches this point.
 
   // Fire-and-forget with proper error handling — NOT a floating promise.
   // The .then/.catch chain persists the result/error to the DB.
@@ -995,6 +1046,10 @@ export async function POST(
       // verdict covers the whole mutation history.
       priorToolCalls: resolved.priorToolCalls,
       existingCheckpoint: resumeCheckpoint,
+      // P0 R5: the paused run's stable logical identity — the resumed
+      // segment adopts it as its metering identity and continues the
+      // same observability record. Absent on legacy records.
+      logicalRunId: resolved.logicalRunId,
       // Capability set for the resume execution gate. Resolved fresh here
       // from the same source of truth the initial loop used
       // (resolveAvailableCapabilities), so the approved tool cannot fail
@@ -1165,6 +1220,13 @@ export async function POST(
             toolCalls: result.toolCalls,
             cancelled: false,
             failureContributors: result.failureContributors,
+            // P0 R4: the segment's model transitions ride the record.
+            modelTransitions: result.modelTransitions,
+            // P0 R5: …and so does the run's stable logical identity.
+            logicalRunId: result.logicalRunId,
+            // P0 R8: …and the publish it completed, correlated on
+            // the same record by that identity.
+            deployment: result.deployment ?? null,
           },
           executionToken,
           logEvent: "approval:action_run_failure_settle_failed",
@@ -1299,6 +1361,14 @@ export async function POST(
         // Round 11: all failure contributors ride the run record, on
         // completed runs too — the warning state must stay diagnosable.
         failureContributors: result.failureContributors,
+        // P0 R4: the segment's model transitions (previous/current
+        // model + fallback reasons) ride the run record too.
+        modelTransitions: result.modelTransitions,
+        // P0 R5: …and so does the run's stable logical identity.
+        logicalRunId: result.logicalRunId,
+        // P0 R8: …and the publish it completed — the deployment's
+        // recorded outcome, correlated with billing by that identity.
+        deployment: result.deployment ?? null,
         cancelled: result.cancelled,
         cancelReason: result.cancelReason,
         pendingApproval: result.pendingApproval
@@ -1391,6 +1461,15 @@ export async function POST(
             // pre-mutation checkpoint), not null: the next resume diffs
             // the whole run's work instead of reporting "unknown".
             checkpointId: result.baselineCheckpoint?.checkpointId ?? result.checkpoint?.checkpointId ?? null,
+            // P0 R1: carry a checkpoint creation failure across the
+            // nested gate the same way (see the messages route).
+            checkpointFailure: result.checkpointFailure ?? null,
+            // P0 R5: carry the run's stable logical identity across
+            // the nested gate the same way.
+            logicalRunId: result.logicalRunId ?? null,
+            // P0 R6: carry the destructive-action card data across
+            // the nested gate the same way.
+            destructiveAction: result.pendingApproval.destructiveAction ?? null,
             actionRunId: resolved.actionRunId ?? null,
             qualityLoopState: result.pendingApproval.qualityLoopState,
             deferredToolCalls: result.pendingApproval.deferredToolCalls,
