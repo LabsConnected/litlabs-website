@@ -894,6 +894,78 @@ export function seedToolCallRecordsFromHistory(
   return records;
 }
 
+/**
+ * Denied-write memory (Larry's pre-merge hardening requirements): a
+ * write the user DENIED at an approval gate in this run must not
+ * execute through any path — no re-escalation through the recovery
+ * marking, no alternate route in the deferred batch, no retry that
+ * re-asks for the same write. Identity is the tool plus a hash of
+ * its inputs with the loop's own recovery marking stripped: the
+ * escalation adds allowOverwrite to a write's inputs before it
+ * reaches the gate, and a model re-emitting the same write without
+ * that marking is still proposing the same write.
+ */
+export function deniedWriteKey(
+  toolId: string,
+  inputs: Record<string, unknown> | undefined,
+): string {
+  const normalized: Record<string, unknown> = { ...(inputs ?? {}) };
+  delete normalized.allowOverwrite;
+  return `${toolId}:${hashInputs(normalized)}`;
+}
+
+/**
+ * Seed the denied-write set for a resumed segment from (a) the
+ * resume decision itself — the segment was created BECAUSE the user
+ * rejected the frozen call — and (b) the run's history, where
+ * earlier segments' rejections survive as "Error: REJECTED: …" tool
+ * results paired with their calls by tool_call_id (the same pairing
+ * seedToolCallRecordsFromHistory uses).
+ */
+export function seedDeniedWriteKeys(
+  messages: LLMMessage[],
+  resume: { toolId: string; inputs: Record<string, unknown>; decision: string },
+): Set<string> {
+  const denied = new Set<string>();
+  if (resume.decision === "rejected") {
+    denied.add(deniedWriteKey(resume.toolId, resume.inputs));
+  }
+  const wireNameToToolId = new Map<string, string>();
+  for (const tool of toolRegistry.listEnabled()) {
+    wireNameToToolId.set(tool.id.replace(/\./g, "_"), tool.id);
+  }
+  const callById = new Map<
+    string,
+    { toolId: string; inputs: Record<string, unknown> }
+  >();
+  for (const m of messages) {
+    if (m.role !== "assistant" || !m.tool_calls) continue;
+    for (const call of m.tool_calls) {
+      let inputs: Record<string, unknown> = {};
+      try {
+        inputs = JSON.parse(call.function.arguments || "{}");
+      } catch {
+        inputs = {};
+      }
+      callById.set(call.id, {
+        toolId: wireNameToToolId.get(call.function.name) ?? call.function.name,
+        inputs,
+      });
+    }
+  }
+  for (const m of messages) {
+    if (
+      m.role === "tool" &&
+      m.tool_call_id &&
+      (m.content ?? "").startsWith("Error: REJECTED:")
+    ) {
+      const call = callById.get(m.tool_call_id);
+      if (call) denied.add(deniedWriteKey(call.toolId, call.inputs));
+    }
+  }
+  return denied;
+}
+
 // site.compose/site.patch generate and edit the canvas page artifact
 // (compiled to index.html on save) — they ARE the file-writing path for a
 // canvas-first build, even though they never touch files.write directly.
@@ -2802,6 +2874,49 @@ function bounceRejectedToolCall(
 }
 
 /**
+ * The recovery budget for pre-approval write validation — a HARD cap
+ * on model calls a run can spend bouncing invalid writes (Larry's
+ * pre-merge hardening requirements, 2026-11-27):
+ *
+ * - WRITE_RECOVERY_ATTEMPT_LIMIT bounds bounces per tool+path: the
+ *   same invalid write may be fed back once; the second bounce stops
+ *   the run honestly instead of cycling. This mirrors the bound
+ *   apply_patch has always had, now enforced for EVERY write tool
+ *   routed through runPreApprovalWriteValidation.
+ * - WRITE_RECOVERY_BOUNCE_BUDGET bounds bounces per execution
+ *   segment across all tools and paths, so a model rotating paths
+ *   cannot dodge the per-key limit: after at most
+ *   WRITE_RECOVERY_BOUNCE_BUDGET bounced model responses (plus the
+ *   one response that trips the budget), the run stops — no
+ *   unbounded inference calls, no unbounded credit consumption.
+ */
+export const WRITE_RECOVERY_ATTEMPT_LIMIT = 2;
+export const WRITE_RECOVERY_BOUNCE_BUDGET = 8;
+
+/** The path a write-recovery counter is keyed on. */
+function writeRecoveryPath(
+  inputs: Record<string, unknown> | undefined,
+): string {
+  const raw = inputs?.path;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : "index.html";
+}
+
+/**
+ * Canonical recovery-counter key for a write call — the ONE
+ * construction every increment, read, and marking site uses for
+ * every write tool. The PR #1144 hang was caused by a key mismatch
+ * (bounces incremented `files.write:<path>` while the recovery
+ * marking read `apply_patch:<path>`), so divergent constructions of
+ * this string must never be reintroduced.
+ */
+export function writeRecoveryKey(
+  toolId: string,
+  inputs: Record<string, unknown> | undefined,
+): string {
+  return `${toolId}:${writeRecoveryPath(inputs)}`;
+}
+
+/**
  * Patch-recovery fallback marking: when an apply_patch for a path was
  * rejected earlier in this segment, the loop's own recovery guidance
  * offers files.write of the complete corrected contents as the
@@ -2818,9 +2933,8 @@ function markPatchRecoveryOverwrite(toolCall: ToolCallRequest, writeRecoveryAtte
   if (
     (toolCall.toolId === "files.write" || toolCall.toolId === "site.compose") &&
     toolCall.inputs?.allowOverwrite !== true &&
-    (writeRecoveryAttempts.get(
-      `apply_patch:${typeof toolCall.inputs?.path === "string" ? toolCall.inputs.path : "index.html"}`,
-    ) ?? 0) > 0
+    (writeRecoveryAttempts.get(writeRecoveryKey("apply_patch", toolCall.inputs)) ??
+      0) > 0
   ) {
     toolCall.inputs = { ...toolCall.inputs, allowOverwrite: true };
   }
@@ -2834,11 +2948,18 @@ interface WriteValidationEnv {
   toolCallLog: AgentToolCallLogEntry[];
   localProgress: ProgressEmitter;
   /**
-   * Recovery counters keyed `${toolId}:${path}` — one map per segment
+   * Recovery counters keyed by writeRecoveryKey — one map per segment
    * chain; the deferred batch threads the resume segment's map
    * through its shared state so attempts accumulate across it.
    */
   writeRecoveryAttempts: Map<string, number>;
+  /**
+   * Run-level bounce budget as a mutable holder, threaded exactly
+   * like writeRecoveryAttempts: every bounced write validation in the
+   * segment increments it, and exceeding WRITE_RECOVERY_BOUNCE_BUDGET
+   * stops the run (see the bounce branch).
+   */
+  writeRecoveryBudget: { count: number };
   /** site.compose pack-repair budget (§4.3.3) as a mutable holder. */
   packRepairAttempts: { count: number };
   /**
@@ -2942,7 +3063,7 @@ async function runPreApprovalWriteValidation(
       // (placeholder, bad path, malformed plan) still bounces and
       // never becomes a card. The deferred batch opts out via the
       // env flag — its inputs are already approved, never rewritten.
-      const recoveryKey = `${toolCall.toolId}:${String(toolCall.inputs.path ?? "")}`;
+      const recoveryKey = writeRecoveryKey(toolCall.toolId, toolCall.inputs);
       if (env.recoveryOverwriteEscalation && (env.writeRecoveryAttempts.get(recoveryKey) ?? 0) > 0) {
         toolCall.inputs = { ...toolCall.inputs, allowOverwrite: true };
       } else {
@@ -3020,9 +3141,14 @@ async function runPreApprovalWriteValidation(
   }
   if (!writeError) return { kind: "clear" };
 
-  const recoveryKey = `${toolCall.toolId}:${String(toolCall.inputs.path ?? "")}`;
+  const recoveryKey = writeRecoveryKey(toolCall.toolId, toolCall.inputs);
   const recoveryAttempt = (env.writeRecoveryAttempts.get(recoveryKey) ?? 0) + 1;
   env.writeRecoveryAttempts.set(recoveryKey, recoveryAttempt);
+  // Every bounce also draws on the segment-level budget, so rotating
+  // paths or tools cannot dodge the per-key limit below.
+  env.writeRecoveryBudget.count += 1;
+  const attemptExhausted = recoveryAttempt >= WRITE_RECOVERY_ATTEMPT_LIMIT;
+  const budgetExhausted = env.writeRecoveryBudget.count > WRITE_RECOVERY_BOUNCE_BUDGET;
   const recoveryMessage = toolCall.toolId === "apply_patch"
     ? await buildPatchRecoveryMessage(toolCall.inputs, transport, writeError, recoveryAttempt)
     : toolCall.toolId === "files.write"
@@ -3041,7 +3167,9 @@ async function runPreApprovalWriteValidation(
       ? recoveryAttempt >= 2
         ? "Invalid patch repeated after disk re-read; stopped without mutation"
         : "Invalid patch re-read from disk; regenerate or use files.write"
-      : `${toolCall.toolId} rejected pre-approval — model retries with corrected inputs`;
+      : attemptExhausted || budgetExhausted
+        ? `${toolCall.toolId} invalid write repeated after recovery feedback; stopped without mutation`
+        : `${toolCall.toolId} rejected pre-approval — model retries with corrected inputs`;
   toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: invalidWriteSummary, mutating: false });
   localProgress.emit({
     type: "tool_result",
@@ -3050,11 +3178,34 @@ async function runPreApprovalWriteValidation(
     summary: invalidWriteSummary,
     durationMs: 0,
   });
-  if (toolCall.toolId === "apply_patch" && recoveryAttempt >= 2) {
+  // Bounded recovery (Larry's pre-merge hardening requirements): the
+  // per-key attempt limit and the segment bounce budget bound EVERY
+  // write tool routed through this validation, in every context that
+  // validates (initial, resume, deferred). Hitting either bound
+  // terminates the run safely with a real closing message — never
+  // silence, never an infinite bounce. apply_patch keeps its
+  // original stop wording; other tools get the same honest-stop
+  // treatment with the tool, the path, and the reason named in
+  // plain language (the raw validator error stays in the internal
+  // cancelReason — customer text carries no internal detail, R7).
+  if (attemptExhausted || budgetExhausted) {
+    if (toolCall.toolId === "apply_patch") {
+      return {
+        kind: "stop",
+        cancelReason: "The model repeated an unsafe patch after the file was re-read; no mutation was executed",
+        finalText: "I could not safely apply that change after re-reading the current file. No mutation was executed.",
+      };
+    }
+    const recoveryPath = writeRecoveryPath(toolCall.inputs);
     return {
       kind: "stop",
-      cancelReason: "The model repeated an unsafe patch after the file was re-read; no mutation was executed",
-      finalText: "I could not safely apply that change after re-reading the current file. No mutation was executed.",
+      cancelReason: budgetExhausted && !attemptExhausted
+        ? `Write-recovery budget exhausted (${WRITE_RECOVERY_BOUNCE_BUDGET} bounced writes this segment); last invalid ${toolCall.toolId} write for ${recoveryPath}: ${writeError}`
+        : `The model repeated an invalid ${toolCall.toolId} write for ${recoveryPath} after recovery feedback; no mutation was executed: ${writeError}`,
+      finalText:
+        `I stopped: my ${toolCall.toolId} write to ${recoveryPath} did not pass validation after repeated recovery attempts, ` +
+        `even after I re-read the current file and fed back the exact problem. No change was made to ${recoveryPath}, ` +
+        `and everything completed earlier in this run is preserved — try again to continue.`,
     };
   }
   if (toolCall.toolId === "apply_patch" || toolCall.toolId === "files.write") {
@@ -3623,6 +3774,10 @@ async function runAgentLoopV2Inner(
   // object: the shared write validation (runPreApprovalWriteValidation)
   // increments it through the run's WriteValidationEnv.
   const packRepairAttempts = { count: 0 };
+  // Write-recovery bounce budget for this segment (see
+  // WRITE_RECOVERY_BOUNCE_BUDGET) — threaded through the env like
+  // packRepairAttempts.
+  const writeRecoveryBudget = { count: 0 };
   let completedDeployment: CompletedDeployment | null = null;
   // Round 14: images generated during this run, for the inline chat
   // render appended at the tail (readChatImageOutcome).
@@ -3693,6 +3848,15 @@ async function runAgentLoopV2Inner(
     if (elapsed > cfg.maxRuntimeMs) {
       cancelled = true;
       cancelReason = `Max runtime exceeded (${cfg.maxRuntimeMs}ms)`;
+      break;
+    }
+    // Cancellation must interrupt recovery cycles too: a bounced
+    // write `continue`s back to this loop top, so an aborted run is
+    // observed here — before any further model call is spent on
+    // recovery (the per-call aborted checks only guard execution).
+    if (cfg.signal?.aborted) {
+      cancelled = true;
+      cancelReason = "Cancelled by user";
       break;
     }
 
@@ -4289,6 +4453,7 @@ async function runAgentLoopV2Inner(
             toolCallLog,
             localProgress,
             writeRecoveryAttempts: patchRecoveryAttempts,
+            writeRecoveryBudget,
             packRepairAttempts,
             topicPackCtx,
             notePendingRejection: (rejection) => {
@@ -5756,6 +5921,16 @@ export interface DeferredToolBatchState {
    * accumulates attempts across the boundary instead of restarting.
    */
   writeRecoveryAttempts?: Map<string, number>;
+  /** Write-recovery bounce budget, threaded like the counters. */
+  writeRecoveryBudget?: { count: number };
+  /**
+   * Denied-write memory, threaded like the counters: a deferred call
+   * that re-proposes a write the user already rejected in this run is
+   * refused inside the batch, never executed.
+   */
+  deniedWriteKeys?: Set<string>;
+  /** Per-key count of denied-write re-emissions inside the batch. */
+  deniedReemissions?: Map<string, number>;
   /** P0 F2: the resume segment's site.compose pack-repair budget. */
   packRepairAttempts?: { count: number };
   /**
@@ -5954,6 +6129,44 @@ export async function executeDeferredToolCalls(
       break;
     }
 
+    // Denied-write memory (see the resume loop): a deferred call
+    // that re-proposes a write the user already rejected in this run
+    // is refused here too — the batch is an alternate route and must
+    // not become a bypass. First re-emission gets refusal feedback;
+    // a second stops the batch honestly via state.failedHonestly.
+    if (!toolDef.readOnly && state.deniedWriteKeys && state.deniedWriteKeys.size > 0) {
+      const deniedKey = deniedWriteKey(toolCall.toolId, toolCall.inputs);
+      if (state.deniedWriteKeys.has(deniedKey)) {
+        const reemissionsMap = (state.deniedReemissions ??= new Map<string, number>());
+        const reemissions = (reemissionsMap.get(deniedKey) ?? 0) + 1;
+        reemissionsMap.set(deniedKey, reemissions);
+        if (reemissions >= 2) {
+          state.failedHonestly = `The model kept proposing a ${toolCall.toolId} write the user already rejected in this run; stopped without executing it`;
+          ctx.localProgress.emit({ type: "status", summary: state.failedHonestly });
+          break;
+        }
+        const deniedResult: ToolCallResult = {
+          toolCallId: toolCall.toolCallId,
+          toolId: toolCall.toolId,
+          result: null,
+          success: false,
+          error: "This exact write was already rejected by the user earlier in this run. It will not be executed and must not be proposed again in this run — choose a different approach, or explain to the user why you cannot continue without it.",
+        };
+        ctx.llmMessages.push(buildToolResultMessage(deniedResult));
+        ctx.toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: "Refused — this exact write was already rejected by the user in this run", mutating: false });
+        ctx.toolCallRecords.push({
+          toolId: toolCall.toolId,
+          inputsHash,
+          resultHash: hashResult(null),
+          step: ctx.stepsUsed,
+          success: false,
+          mutating: true,
+        });
+        ctx.localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: false, summary: "Refused — already rejected by the user in this run", durationMs: 0 });
+        continue;
+      }
+    }
+
     const permInfo = toPermissionInfo(toolDef);
     const permResult = permissionEngine.check(permInfo, toolCall.inputs, ctx.executionMode);
 
@@ -5987,6 +6200,7 @@ export async function executeDeferredToolCalls(
         toolCallLog: ctx.toolCallLog,
         localProgress: ctx.localProgress,
         writeRecoveryAttempts: (state.writeRecoveryAttempts ??= new Map<string, number>()),
+        writeRecoveryBudget: (state.writeRecoveryBudget ??= { count: 0 }),
         packRepairAttempts: (state.packRepairAttempts ??= { count: 0 }),
         topicPackCtx: null,
         notePendingRejection: (rejection) => {
@@ -6387,6 +6601,16 @@ async function resumeAgentLoopV2Inner(
   // threads these through its shared state.
   const patchRecoveryAttempts = new Map<string, number>();
   const packRepairAttempts = { count: 0 };
+  // Write-recovery bounce budget for this segment (see
+  // WRITE_RECOVERY_BOUNCE_BUDGET) — threaded through the env and the
+  // deferred batch's shared state like the counters above.
+  const writeRecoveryBudget = { count: 0 };
+  // Denied-write memory for this segment: writes the user already
+  // rejected in this run (seeded from the resume decision and the
+  // run's history) are refused before validation, marking, or the
+  // gate — see the enforcement in the resume loop.
+  const deniedWriteKeys = seedDeniedWriteKeys(resume.pausedMessages, resume);
+  const deniedReemissions = new Map<string, number>();
   let pendingPatchRejection: { path: string; error: string } | null = null;
   let pendingWriteRejection: { toolId: string; path: string; error: string } | null = null;
   let patchRecoveryForcesUsed = 0;
@@ -6818,6 +7042,9 @@ async function resumeAgentLoopV2Inner(
       chatImages,
       readLoopNudges,
       writeRecoveryAttempts: patchRecoveryAttempts,
+      writeRecoveryBudget,
+      deniedWriteKeys,
+      deniedReemissions,
       packRepairAttempts,
       pendingWriteRejection: null,
     };
@@ -7017,6 +7244,15 @@ async function resumeAgentLoopV2Inner(
     if (elapsed > cfg.maxRuntimeMs) {
       cancelled = true;
       cancelReason = `Max runtime exceeded (${cfg.maxRuntimeMs}ms)`;
+      break;
+    }
+    // Cancellation must interrupt recovery cycles too: a bounced
+    // write `continue`s back to this loop top, so an aborted run is
+    // observed here — before any further model call is spent on
+    // recovery (the per-call aborted checks only guard execution).
+    if (cfg.signal?.aborted) {
+      cancelled = true;
+      cancelReason = "Cancelled by user";
       break;
     }
 
@@ -7391,6 +7627,45 @@ async function resumeAgentLoopV2Inner(
         break;
       }
 
+      // Denied-write memory: a write the user already rejected in
+      // this run is refused HERE — before the recovery marking (no
+      // re-escalation), before validation (no bounce-budget spend),
+      // and before the approval gate (no re-asking). The first
+      // re-emission gets refusal feedback; a second one stops the
+      // run honestly. The denied write never executes.
+      if (!toolDef.readOnly && deniedWriteKeys.size > 0) {
+        const deniedKey = deniedWriteKey(toolCall.toolId, toolCall.inputs);
+        if (deniedWriteKeys.has(deniedKey)) {
+          const reemissions = (deniedReemissions.get(deniedKey) ?? 0) + 1;
+          deniedReemissions.set(deniedKey, reemissions);
+          if (reemissions >= 2) {
+            failedHonestly = `The model kept proposing a ${toolCall.toolId} write the user already rejected in this run; stopped without executing it`;
+            finalText = "I stopped: I kept proposing a change you already rejected in this run, so I will not ask again. That change was never made, and everything completed earlier in this run is preserved.";
+            localProgress.emit({ type: "status", summary: failedHonestly });
+            break;
+          }
+          const deniedResult: ToolCallResult = {
+            toolCallId: toolCall.toolCallId,
+            toolId: toolCall.toolId,
+            result: null,
+            success: false,
+            error: "This exact write was already rejected by the user earlier in this run. It will not be executed and must not be proposed again in this run — choose a different approach, or explain to the user why you cannot continue without it.",
+          };
+          llmMessages.push(buildToolResultMessage(deniedResult));
+          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: "Refused — this exact write was already rejected by the user in this run", mutating: false });
+          toolCallRecords.push({
+            toolId: toolCall.toolId,
+            inputsHash: hashInputs(toolCall.inputs),
+            resultHash: hashResult(null),
+            step: stepsUsed,
+            success: false,
+            mutating: true,
+          });
+          localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: false, summary: "Refused — already rejected by the user in this run", durationMs: 0 });
+          continue;
+        }
+      }
+
       // P0 F2: patch-recovery fallback marking (see
       // markPatchRecoveryOverwrite) — before the permission check,
       // exactly as in the initial segment.
@@ -7484,6 +7759,7 @@ async function resumeAgentLoopV2Inner(
             toolCallLog,
             localProgress,
             writeRecoveryAttempts: patchRecoveryAttempts,
+            writeRecoveryBudget,
             packRepairAttempts,
             topicPackCtx,
             notePendingRejection: (rejection) => {

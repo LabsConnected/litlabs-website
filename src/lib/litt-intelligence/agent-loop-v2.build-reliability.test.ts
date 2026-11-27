@@ -30,7 +30,13 @@ vi.mock("./llm-tool-calling", async (importOriginal) => ({
   callLLMWithTools: vi.fn(),
 }));
 
-import { runAgentLoopV2, resumeAgentLoopV2, type ResumeInput } from "./agent-loop-v2";
+import {
+  runAgentLoopV2,
+  resumeAgentLoopV2,
+  WRITE_RECOVERY_ATTEMPT_LIMIT,
+  WRITE_RECOVERY_BOUNCE_BUDGET,
+  type ResumeInput,
+} from "./agent-loop-v2";
 import { buildAssistantToolCallMessage, callLLMWithTools } from "./llm-tool-calling";
 
 const PAGE = [
@@ -284,5 +290,216 @@ describe("P0 F2 — write-validation parity on resume (production run 8efba402 s
     expect(result.failedHonestly).toBeUndefined();
     expect(result.cancelled).toBe(false);
     expect(result.finalText).toBe("Rebuilt the home page.");
+  });
+});
+
+describe("P0 write-recovery hardening — bounded, denial-safe, cancellable (Larry's pre-merge requirements)", () => {
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  // A files.write whose content carries an unresolved template
+  // placeholder is provably invalid: validateFilesWriteInputs refuses
+  // it pre-approval, so it can only ever bounce — the exact shape
+  // Larry flagged ("genuinely invalid writes still bounce forever").
+  const INVALID_PAGE = [
+    "<!DOCTYPE html>",
+    "<html><head><title>Harbor Lights Coffee</title></head>",
+    "<body><h1>Welcome to {{business_name}}</h1></body></html>",
+  ].join("\n");
+  // The same gate-tripping replacement the F2 block uses: retention
+  // 0.25 against PAGE, no declared overwrite, minimal styling
+  // signature — the full-overwrite gate must refuse the first
+  // emission and escalate the second.
+  const REBUILD = [
+    "<!DOCTYPE html>",
+    "<html><head><title>Harbor Lights — Rebuilt</title>",
+    "<style>body { background: #0c0a09; color: #fafaf9; }</style>",
+    "</head><body><h1>Harbor Lights, Reimagined</h1><p>A brand new page, top to bottom.</p></body></html>",
+  ].join("\n");
+
+  const ACT_CFG = {
+    model: "test-model",
+    systemPrompt: "You are LiTT.",
+    userId: "u-test",
+    executionMode: "act",
+    enableBuildFix: false,
+    isStaticWorkspace: true,
+    maxSteps: 40,
+  } as const;
+
+  function approvedMkdirResume(): ResumeInput {
+    return {
+      pausedMessages: [
+        { role: "user", content: "Build a one-page site for Harbor Lights Coffee and rebuild the home page" },
+        buildAssistantToolCallMessage(
+          [{ toolId: "files.mkdir", toolCallId: "tc-0", inputs: { path: "assets" } }],
+          "Setting up the project.",
+          undefined,
+        ),
+      ],
+      toolId: "files.mkdir",
+      toolCallId: "tc-0",
+      inputs: { path: "assets" },
+      decision: "approved",
+      stepsUsedBeforePause: 1,
+      hadInterveningMutation: false,
+      config: { ...ACT_CFG },
+    };
+  }
+
+  function approvedMkdirResumeAct(): ResumeInput {
+    return approvedMkdirResume();
+  }
+
+  it("persistent invalid files.write in the INITIAL segment stops at the attempt bound with an actionable message", async () => {
+    const { transport, disk } = diskTransport({ "index.html": PAGE });
+    let calls = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => {
+      calls += 1;
+      return toolReply(
+        "files.write",
+        { projectId: "p-test", path: "index.html", content: INVALID_PAGE },
+        `tc-inv-${calls}`,
+      );
+    });
+
+    const result = await runAgentLoopV2("Write the home page", transport, { ...BASE_CFG, maxSteps: 40 });
+
+    // One feedback bounce, then the bound stops the run — the model
+    // is never called a third time for the same invalid write.
+    expect(calls).toBe(WRITE_RECOVERY_ATTEMPT_LIMIT);
+    expect(result.cancelled).toBe(true);
+    // The closing message names the tool, the path, and the outcome
+    // in plain language (no raw validator detail leaks, R7).
+    expect(result.finalText).toContain("files.write");
+    expect(result.finalText).toContain("index.html");
+    expect(result.finalText).toContain("No change was made to index.html");
+    expect(result.finalText).not.toContain("{{business_name}}");
+    expect(transport.writeFile).not.toHaveBeenCalled();
+    expect(disk.get("index.html")).toBe(PAGE);
+  });
+
+  it("persistent invalid files.write in the RESUME segment stops at the attempt bound with an actionable message", async () => {
+    const { transport, disk } = diskTransport({ "index.html": PAGE });
+    let calls = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => {
+      calls += 1;
+      return toolReply(
+        "files.write",
+        { projectId: "p-test", path: "index.html", content: INVALID_PAGE },
+        `tc-rinv-${calls}`,
+      );
+    });
+
+    const result = await resumeAgentLoopV2(approvedMkdirResume(), transport);
+
+    expect(calls).toBe(WRITE_RECOVERY_ATTEMPT_LIMIT);
+    expect(result.cancelled).toBe(true);
+    expect(result.finalText).toContain("files.write");
+    expect(result.finalText).toContain("index.html");
+    expect(result.finalText).toContain("No change was made to index.html");
+    expect(transport.writeFile).not.toHaveBeenCalled();
+    expect(disk.get("index.html")).toBe(PAGE);
+  });
+
+  it("an escalated write that the user DENIES is never written and never re-asked", async () => {
+    const { transport, disk } = diskTransport({ "index.html": PAGE });
+
+    // Segment A (act mode): the gate-tripping write bounces once,
+    // escalates on re-emission, and reaches the approval checkpoint.
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolReply("files.write", { projectId: "p-test", path: "index.html", content: REBUILD }, "tc-deny-1"))
+      .mockResolvedValueOnce(toolReply("files.write", { projectId: "p-test", path: "index.html", content: REBUILD }, "tc-deny-2"));
+    const segmentA = await resumeAgentLoopV2(approvedMkdirResumeAct(), transport);
+    expect(segmentA.pendingApproval?.toolId).toBe("files.write");
+    expect(segmentA.pendingApproval?.inputs.allowOverwrite).toBe(true);
+    expect(transport.writeFile).not.toHaveBeenCalled();
+
+    // Segment B: the user DENIES that write. The model re-emits the
+    // exact same write — it must be refused outright: no execution,
+    // no new approval card, no re-escalation.
+    const denied = segmentA.pendingApproval!;
+    vi.mocked(callLLMWithTools).mockReset();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolReply("files.write", { projectId: "p-test", path: "index.html", content: REBUILD }, "tc-deny-3"))
+      .mockResolvedValueOnce(textReply("Understood — I will not replace the page."));
+    const segmentB = await resumeAgentLoopV2(
+      {
+        pausedMessages: denied.pausedMessages,
+        toolId: denied.toolId,
+        toolCallId: denied.toolCallId,
+        inputs: denied.inputs,
+        decision: "rejected",
+        rejectionReason: "I don't want the page replaced",
+        stepsUsedBeforePause: denied.stepsUsedAtPause ?? 1,
+        hadInterveningMutation: denied.hadInterveningMutationAtPause ?? false,
+        priorToolCalls: denied.priorToolCalls ?? [],
+        config: { ...ACT_CFG },
+      },
+      transport,
+    );
+
+    expect(segmentB.pendingApproval).toBeUndefined();
+    expect(transport.writeFile).not.toHaveBeenCalled();
+    expect(disk.get("index.html")).toBe(PAGE);
+    // The refusal was fed back to the model, and the run then closed
+    // honestly on the model's own words — not a failure, not silence.
+    const refusal = toolResultFor(segmentB, "tc-deny-3");
+    expect(String(refusal?.content ?? "")).toContain("already rejected by the user");
+    expect(segmentB.failedHonestly).toBeUndefined();
+    expect(segmentB.finalText).toBe("Understood — I will not replace the page.");
+  });
+
+  it("cancellation during a write-recovery cycle stops the run before the next model call", async () => {
+    const { transport } = diskTransport({ "index.html": PAGE });
+    const controller = new AbortController();
+    let calls = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => {
+      calls += 1;
+      // Rotating paths keep every per-key attempt at 1, so only the
+      // cancellation signal — not the attempt bound — can stop this.
+      if (calls === 2) controller.abort();
+      return toolReply(
+        "files.write",
+        { projectId: "p-test", path: `page-${calls}.html`, content: INVALID_PAGE },
+        `tc-cancel-${calls}`,
+      );
+    });
+
+    const result = await runAgentLoopV2("Write pages", transport, {
+      ...BASE_CFG,
+      maxSteps: 40,
+      signal: controller.signal,
+    });
+
+    expect(calls).toBe(2);
+    expect(result.cancelled).toBe(true);
+    expect(result.cancelReason).toBe("Cancelled by user");
+    expect(transport.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("a model that always emits an invalid write terminates within the bounce budget", async () => {
+    const { transport } = diskTransport({ "index.html": PAGE });
+    let calls = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => {
+      calls += 1;
+      // A fresh path every time: the per-key attempt limit can never
+      // trip, so the segment bounce budget is the only bound.
+      return toolReply(
+        "files.write",
+        { projectId: "p-test", path: `page-${calls}.html`, content: INVALID_PAGE },
+        `tc-inf-${calls}`,
+      );
+    });
+
+    const result = await runAgentLoopV2("Write pages", transport, { ...BASE_CFG, maxSteps: 40 });
+
+    expect(result.cancelled).toBe(true);
+    // Exactly the budget's worth of bounced responses, plus the one
+    // response that trips it — and never a call beyond that.
+    expect(calls).toBe(WRITE_RECOVERY_BOUNCE_BUDGET + 1);
+    expect(result.finalText).toContain("No change was made");
+    expect(transport.writeFile).not.toHaveBeenCalled();
   });
 });
