@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { NextRequest } from "next/server";
 import {
+  DELETE,
   GET,
   POST,
 } from "@/app/api/studio-projects/[projectId]/preview/route";
@@ -69,9 +71,12 @@ vi.mock("@/lib/terminal-internal-client", () => ({
 }));
 
 import { auth } from "@/lib/auth";
-import { getProject } from "@/lib/projects/project-repository";import { startPreviewInternal,
+import { getProject, updateProjectRuntime } from "@/lib/projects/project-repository";
+import {
+  startPreviewInternal,
   restartPreviewInternal,
   getPreviewStatusInternal,
+  stopPreviewInternal,
   isSandboxExecutionAvailable,
 } from "@/lib/terminal-internal-client";
 import { ensureWorkspaceAlive, provisionWorkspaceForProject, reprepareWorkspace } from "@/lib/studio/workspace-recovery";
@@ -79,9 +84,11 @@ import { createPreviewToken } from "@/lib/projects/preview-token";
 
 const authMock = vi.mocked(auth);
 const getProjectMock = vi.mocked(getProject);
+const updateProjectRuntimeMock = vi.mocked(updateProjectRuntime);
 const getPreviewStatusMock = vi.mocked(getPreviewStatusInternal);
 const startPreviewMock = vi.mocked(startPreviewInternal);
 const restartPreviewMock = vi.mocked(restartPreviewInternal);
+const stopPreviewMock = vi.mocked(stopPreviewInternal);
 const provisionMock = vi.mocked(provisionWorkspaceForProject);
 const ensureAliveMock = vi.mocked(ensureWorkspaceAlive);
 const reprepareMock = vi.mocked(reprepareWorkspace);
@@ -125,7 +132,7 @@ describe("studio-projects preview route — static guards", () => {
   });
 
   it("GET returns ready + static URL with a project-scoped preview token", async () => {
-    const fetchMock = vi.fn(async (url: string | URL | Request, _opts?: RequestInit) =>
+    const fetchMock = vi.fn(async (_url: string | URL | Request, _opts?: RequestInit) =>
       new Response(JSON.stringify({ content: "<html></html>" }), { status: 200 }),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -613,5 +620,47 @@ describe("studio-projects preview route — force restart (round 13)", () => {
     expect(res.status).toBe(200);
     expect(startPreviewMock).toHaveBeenCalledTimes(1);
     expect(restartPreviewMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("studio-projects preview route — stop lifecycle", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authMock.mockResolvedValue({ userId: "user-1" } as never);
+    getProjectMock.mockResolvedValue({ ...staticProject, framework: "nextjs" } as never);
+    stopPreviewMock.mockResolvedValue(undefined);
+  });
+
+  function deletePreview() {
+    return DELETE(
+      new NextRequest("http://localhost/api/studio-projects/proj-1/preview", {
+        method: "DELETE",
+      }),
+      makeParams("proj-1"),
+    );
+  }
+
+  it("stops only the caller-owned project's workspace and records stopped state", async () => {
+    const response = await deletePreview();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ runtimeStatus: "stopped" });
+    expect(getProjectMock).toHaveBeenCalledWith("proj-1", "user-1");
+    expect(stopPreviewMock).toHaveBeenCalledWith("ws-1", "user-1");
+    expect(updateProjectRuntimeMock).toHaveBeenCalledWith("proj-1", "user-1", {
+      runtimeStatus: "stopped",
+      previewUrl: null,
+      runtimeError: null,
+    });
+  });
+
+  it("does not stop a workspace when the caller does not own the project", async () => {
+    getProjectMock.mockResolvedValue(null);
+
+    const response = await deletePreview();
+
+    expect(response.status).toBe(404);
+    expect(stopPreviewMock).not.toHaveBeenCalled();
+    expect(updateProjectRuntimeMock).not.toHaveBeenCalled();
   });
 });

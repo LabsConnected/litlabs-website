@@ -12,6 +12,8 @@ export const STUDIO_PROJECTS_API = "/api/studio-projects";
 export type CanonicalListProject = {
   id: string;
   name: string;
+  /** Present only on legacy-table rows; canonical rows take precedence on duplicate ids. */
+  isLegacyOnly?: boolean;
   sourceType?: string;
   githubFullName?: string | null;
   githubBranch?: string | null;
@@ -22,25 +24,36 @@ export type CanonicalListProject = {
   runtimeError?: string | null;
 };
 
-export type StudioProjectsPayload = {
-  projects?: CanonicalListProject[];
-  legacyOnly?: CanonicalListProject[];
+export type StudioProjectsPayload<T extends { id: string } = CanonicalListProject> = {
+  projects?: T[];
+  legacyOnly?: T[];
 };
 
-export function mergeCanonicalProjectList(
-  data: StudioProjectsPayload | null | undefined,
-): CanonicalListProject[] {
+/**
+ * Merge canonical and legacy rows, preserving the canonical copy when an
+ * id appears in both lists. The marker lets UI callers with narrower
+ * backend contracts hide actions unavailable for legacy-only records.
+ */
+export function mergeCanonicalProjectList<T extends { id: string } = CanonicalListProject>(
+  data: StudioProjectsPayload<T> | null | undefined,
+): Array<T & { isLegacyOnly?: boolean }> {
   if (!data || typeof data !== "object") return [];
   const canonical = Array.isArray(data.projects) ? data.projects : [];
   const legacy = Array.isArray(data.legacyOnly) ? data.legacyOnly : [];
   const seen = new Set<string>();
-  const out: CanonicalListProject[] = [];
-  for (const project of [...canonical, ...legacy]) {
-    if (!project || typeof project.id !== "string" || !project.id) continue;
-    if (seen.has(project.id)) continue;
-    seen.add(project.id);
-    out.push(project);
-  }
+  const out: Array<T & { isLegacyOnly?: boolean }> = [];
+
+  const append = (rows: T[], isLegacyOnly: boolean) => {
+    for (const project of rows) {
+      if (!project || typeof project.id !== "string" || !project.id) continue;
+      if (seen.has(project.id)) continue;
+      seen.add(project.id);
+      out.push(isLegacyOnly ? { ...project, isLegacyOnly: true } : project);
+    }
+  };
+
+  append(canonical, false);
+  append(legacy, true);
   return out;
 }
 
