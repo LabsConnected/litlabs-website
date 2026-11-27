@@ -27,8 +27,11 @@ describe("browser tool registry", () => {
     }
   });
 
-  it("marks input tools mutating and inspection tools read-only", () => {
-    expect(BROWSER_TOOL_ENTRIES["browser.navigate"].metadata.readOnly).toBe(true);
+  it("marks consequential tools mutating and inspection tools read-only", () => {
+    // navigate is mutating: loading a remote page is a consequential act
+    // and must pass the SEC-4 approval gate like click/type/close.
+    expect(BROWSER_TOOL_ENTRIES["browser.navigate"].metadata.mutating).toBe(true);
+    expect(BROWSER_TOOL_ENTRIES["browser.navigate"].metadata.readOnly).toBe(false);
     expect(BROWSER_TOOL_ENTRIES["browser.snapshot"].metadata.readOnly).toBe(true);
     expect(BROWSER_TOOL_ENTRIES["browser.screenshot"].metadata.readOnly).toBe(true);
     expect(BROWSER_TOOL_ENTRIES["browser.scroll"].metadata.readOnly).toBe(true);

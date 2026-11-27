@@ -2,9 +2,11 @@
  * browser.* agent tools — genuine autonomous browsing via local Chrome CDP.
  *
  * One browser session per CLI process, created lazily on first use and
- * always closed on process exit. Read tools (navigate/snapshot/screenshot/
- * scroll/evaluate-read) are readOnly; input tools (click/type/fill) are
- * mutating so the permission layer gates them behind approval.
+ * always closed on process exit. Inspection tools (snapshot/screenshot/
+ * scroll/extract) are readOnly; consequential actions (navigate/click/
+ * type/close) are mutating so the permission layer gates them behind
+ * approval — navigation included, since loading a remote page is itself
+ * a consequential act (SEC-4).
  */
 
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -83,9 +85,9 @@ function shotPath(ctx: ToolContext, name: string): string {
 const NAV_DEF: ToolDefinition = {
   id: "browser.navigate",
   name: "browser_navigate",
-  description: "Open a public http(s) URL in the local browser and return the final URL + page title. Local/private-network addresses and cloud metadata endpoints are refused. Use for any task that requires viewing a web page.",
+  description: "Open a public http(s) URL in the local browser and return the final URL + page title. Local/private-network addresses and cloud metadata endpoints are refused. Requires approval — loading a remote page is consequential. Use for any task that requires viewing a web page.",
   inputSchema: { type: "object", properties: { url: { type: "string", description: "http(s) URL to open" } }, required: ["url"] },
-  readOnly: true,
+  readOnly: false,
 };
 const SNAP_DEF: ToolDefinition = {
   id: "browser.snapshot",
@@ -163,7 +165,7 @@ const SENSITIVE_INPUT_GUARD = `(() => {
 export const BROWSER_TOOL_ENTRIES: Record<string, ToolEntry> = {
   "browser.navigate": {
     definition: NAV_DEF,
-    metadata: READ_ONLY_META,
+    metadata: MUTATING_META,
     handler: async (ctx, args) => {
       const url = typeof args.url === "string" ? args.url : "";
       let safeUrl: string;
