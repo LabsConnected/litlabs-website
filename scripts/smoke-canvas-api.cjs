@@ -9,9 +9,29 @@
 const { createClient } = require("@supabase/supabase-js");
 const fs = require("fs");
 
-const env = fs.readFileSync(".env.local", "utf8");
-const key = env.match(/SUPABASE_SERVICE_ROLE_KEY="([^"]+)"/)[1];
-const url = "https://rokbfvuoqildggnhappy.supabase.co";
+const env = fs.existsSync(".env.local") ? fs.readFileSync(".env.local", "utf8") : "";
+const key =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  (env.match(/SUPABASE_SERVICE_ROLE_KEY="?([^"\n]+)"?/) || [])[1];
+if (!key) {
+  console.error("Set SUPABASE_SERVICE_ROLE_KEY (env or .env.local).");
+  process.exit(1);
+}
+
+const PROD_PROJECT_REF = "rokbfvuoqildggnhappy";
+const url =
+  process.env.SUPABASE_URL ||
+  (env.match(/NEXT_PUBLIC_SUPABASE_URL="([^"]+)"/) || [])[1] ||
+  (env.match(/SUPABASE_URL="([^"]+)"/) || [])[1];
+if (!url) {
+  console.error("Set SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL in .env.local) — no default target.");
+  process.exit(1);
+}
+if (url.includes(PROD_PROJECT_REF) && process.env.LITT_ALLOW_PROD_TARGET !== "1") {
+  console.error(`Refusing to smoke-test against production (${PROD_PROJECT_REF}).`);
+  console.error("Point SUPABASE_URL at a disposable project, or set LITT_ALLOW_PROD_TARGET=1 to confirm.");
+  process.exit(1);
+}
 const sb = createClient(url, key);
 
 const TEST_USER = "test-user-smoke-" + Date.now();
