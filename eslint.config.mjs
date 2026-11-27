@@ -28,6 +28,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Git worktrees — local only, 376K files
     ".worktrees/**",
+    ".qwen/**",
+    ".claude/**",
     ".codex-deploy-stage*/**",
     // Test artifacts
     "coverage/**",

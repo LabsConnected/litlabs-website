@@ -791,9 +791,9 @@ export async function browserDownload(
           ? inputs.filename
           : download.suggestedFilename() || "download",
       );
-      const savedPath = path.join(dir, filename);
+      const savedPath = path.join(/*turbopackIgnore: true*/ dir, filename);
       await download.saveAs(savedPath);
-      const stat = await fs.promises.stat(savedPath).catch(() => null);
+      const stat = await fs.promises.stat(/*turbopackIgnore: true*/ savedPath).catch(() => null);
       if (!stat) {
         return { success: false, error: "Download finished but the file is missing.", durationMs: 0 };
       }
