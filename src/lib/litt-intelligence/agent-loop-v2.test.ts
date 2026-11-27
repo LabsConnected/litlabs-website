@@ -269,6 +269,43 @@ describe("runAgentLoopV2 — invalid apply_patch never reaches the approval gate
     expect(result.finalText).toContain("Fixed the patch");
   });
 
+  it("an unknown tool call is recorded as rejected evidence, not silently dropped", async () => {
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [{
+          toolCallId: "tc-unknown-1",
+          toolId: "deploy.publish_now",
+          inputs: {},
+        }],
+        finishReason: "tool_calls",
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "Recovered and finished.",
+        toolCalls: [],
+        finishReason: "stop",
+        model: "test-model",
+      });
+
+    const result = await runAgentLoopV2(
+      "publish the site",
+      transportWithFile,
+      {
+        model: "test-model",
+        systemPrompt: "You are LiTT.",
+        executionMode: "act",
+        enableBuildFix: false,
+      },
+    );
+
+    const rejected = result.toolCalls.find((t) => t.toolId === "deploy.publish_now");
+    expect(rejected).toBeDefined();
+    expect(rejected?.success).toBe(false);
+    expect(rejected?.summary).toContain("Unknown tool");
+    expect(rejected?.mutating).toBe(false);
+  });
+
   it("a valid patch still pauses for approval normally", async () => {
     vi.mocked(callLLMWithTools).mockResolvedValueOnce({
       text: "",

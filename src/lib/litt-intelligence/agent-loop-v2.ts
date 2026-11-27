@@ -48,7 +48,7 @@ import { checkTextContrast, textContrastFailureMessage, textContrastRepairPrompt
 import { checkRenderedLayout, renderedLayoutFailureMessage, renderedLayoutRepairPrompt } from "./rendered-layout";
 import { checkSiteQuality, siteQualityFailureMessage } from "./site-quality";
 import { studioLog } from "@/lib/studio/logger";
-import { DEPLOY_ONLY_PROMPT_NOTE, NO_DEPLOY_PROMPT_NOTE, deployOnlyRefusalError, instructionRequestsDeploy, isBlockedInDeployOnlyRun, isDeployOnlyInstruction, isDeployTool, noDeployRefusalError } from "./deploy-intent";
+import { DEPLOY_ONLY_PROMPT_NOTE, DEPLOY_TOOL_IDS, NO_DEPLOY_PROMPT_NOTE, deployOnlyRefusalError, instructionRequestsDeploy, isBlockedInDeployOnlyRun, isDeployOnlyInstruction, isDeployTool, noDeployRefusalError } from "./deploy-intent";
 import { settleRunOutcome, type RunFailureContributor } from "./run-settlement";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { recordModelFailure } from "./provider-registry";
@@ -678,6 +678,83 @@ function detectRepeatedCalls(
   );
 
   return identical.length >= 3;
+}
+
+// ─── Same-tool streak breaker (coordination fix) ──────────────────
+// detectRepeatedCalls keys on IDENTICAL inputs, so it misses the
+// varying-arguments loop: the same tool called again and again with
+// different inputs, every call succeeding, and no project file ever
+// written (acceptance trace: image.stock x4 post-approval, all
+// success, zero file writes — only the build guard's zero-write
+// step count stopped that run, at step 6, and non-build runs have no
+// such guard). This counter extends the same breaker machinery with
+// the zero-write guard's own definition of progress: a successful
+// FILE-WRITING call (isFileWritingTool — the FILE_GENERATION set) is
+// the mutation that resets the streak. The streak is the trailing
+// run of consecutive successful calls to the same non-writing tool:
+// any other record — a different tool, a failed call, a file write —
+// ends it, so legitimate varied work that writes files can never
+// trip it, and a tool that writes files has a streak of 0 by
+// definition. Seeded records with an unknown outcome (success
+// undefined) end the streak too: unknown is not a proven success.
+// The bound mirrors detectRepeatedCalls: 3 proven successes are a
+// working set; the 4th consecutive call is answered with the bounded
+// corrective nudge, and the run cancels honestly once the nudge
+// budget (READ_LOOP_NUDGE_MAX, shared with the read-loop path) is
+// spent — never an unbounded loop, never a silent success.
+//
+// SCOPE — the streak is consulted only for the class no other
+// breaker governs, and only where the build guard is not the
+// designated stopper (the call sites enforce both):
+//   - read-only tools belong to the identical-call breaker above
+//     (its per-input design deliberately allows varied research —
+//     the rotating-signatures test pins that varied reads across
+//     files are legitimate, bounded per input with a shared nudge
+//     budget);
+//   - in a build-guarded run, write-less chains belong to the
+//     guard, whose response (switch models, then
+//     NO_BUILD_CAPABLE_MODEL) is stronger than a cancel and must
+//     not be pre-empted;
+//   - what remains — and what the acceptance trace showed — is a
+//     NON-read-only, non-file-writing tool (image.stock,
+//     image.generate) succeeding repeatedly with varying inputs in
+//     a run with no build guard: previously invisible to every
+//     breaker.
+export const SAME_TOOL_STREAK_LIMIT = 3;
+
+export function countSameToolNonWritingStreak(
+  records: ToolCallRecord[],
+  toolId: string,
+): number {
+  if (isFileWritingTool(toolId)) return 0;
+  let streak = 0;
+  for (let i = records.length - 1; i >= 0; i--) {
+    const record = records[i];
+    if (record.toolId !== toolId) return streak;
+    if (record.success !== true) return streak;
+    streak += 1;
+  }
+  return streak;
+}
+
+function buildSameToolStreakNudgeResult(toolCall: ToolCallRequest, streak: number): ToolCallResult {
+  return {
+    toolCallId: toolCall.toolCallId,
+    toolId: toolCall.toolId,
+    result: null,
+    success: false,
+    error:
+      `${toolCall.toolId} has already succeeded ${streak} times in a row with different inputs ` +
+      `and no file has been written — the results of those calls are in context and repeating ` +
+      `the call returns more of the same. Do NOT call ${toolCall.toolId} again until a ` +
+      `file-writing call has landed. Use what you already fetched to make the change now: ` +
+      `apply_patch with an exact verbatim search string from the content already in context, ` +
+      `or files.write with the complete new content.`,
+  };
+}
+
+export function sameToolStreakCancelReason(toolId: string, streak: number): string {
+  return `Repeated tool call detected: ${toolId} succeeded ${streak} times in a row with different inputs and no intervening file write`;
 }
 
 /**
@@ -1543,6 +1620,18 @@ async function runCompletionChecks(opts: {
   const projectId = ctx?.projectId ?? opts.cfg.qualityLoop?.projectId;
   const userId = ctx?.userId ?? opts.cfg.userId ?? opts.cfg.qualityLoop?.userId;
   const conversationId = ctx?.conversationId ?? opts.cfg.conversationId ?? null;
+  if (!projectId || !userId) {
+    studioLog(`agent-loop:completion_checks_skipped:${opts.loop}`, { errorClass: "no_project_context" });
+    // No project context: this run is not a project build, so there
+    // is no Checks panel or Jobs tab for it and nothing to persist
+    // against. The skip stays logged (ACC-08 observability) but
+    // carries no closing note — the loud-note rule covers project
+    // builds whose checks could not run or could not be saved.
+    // The module import stays BELOW this guard: loading the checks
+    // stack (Supabase clients and all) is wasted work — and a real
+    // async boundary — for runs that can never use it.
+    return {};
+  }
   let checksModule: typeof import("@/lib/projects/project-checks");
   try {
     checksModule = await import("@/lib/projects/project-checks");
@@ -1570,15 +1659,6 @@ async function runCompletionChecks(opts: {
     unavailableCheckSetFromError,
     ProjectChecksUnavailableError,
   } = checksModule;
-  if (!projectId || !userId) {
-    studioLog(`agent-loop:completion_checks_skipped:${opts.loop}`, { errorClass: "no_project_context" });
-    // No project context: this run is not a project build, so there
-    // is no Checks panel or Jobs tab for it and nothing to persist
-    // against. The skip stays logged (ACC-08 observability) but
-    // carries no closing note — the loud-note rule covers project
-    // builds whose checks could not run or could not be saved.
-    return {};
-  }
   try {
     const outcome = await runAllProjectChecks({ projectId, userId });
     for (const check of outcome.checks) {
@@ -2439,6 +2519,7 @@ async function maybeInspectBeforeFinal(
       });
       llmMessages.push({
         role: "user",
+        origin: "internal",
         content: buildMissingStageDeclarationPrompt(missingDecl),
       });
       return true;
@@ -2469,6 +2550,7 @@ async function maybeInspectBeforeFinal(
       });
       llmMessages.push({
         role: "user",
+        origin: "internal",
         content: buildRedesignPrompt(inspection, qualitySession.state.designPasses),
       });
       return true;
@@ -2521,6 +2603,31 @@ async function finalizeQualityGatedRun(
 }
 
 // ─── Agent Loop ───────────────────────────────────────────────────
+
+/**
+ * Record a tool call the loop refused to execute — unknown tool or failed
+ * input validation. These calls previously vanished: no progress event, no
+ * toolCallLog entry, so post-mortems could not see what the model tried
+ * (staging run da4307a2: two consecutive rejected batches were invisible
+ * and only the zero-write guard's symptom survived). Emit a failed
+ * tool_result (persists as tool.failed) and log the rejection so the run's
+ * evidence shows the attempt and the reason.
+ */
+function recordRejectedToolCall(
+  progress: ProgressEmitter,
+  log: AgentToolCallLogEntry[] | undefined,
+  toolCall: { toolCallId: string; toolId: string },
+  error: string,
+): void {
+  progress.emit({
+    type: "tool_result",
+    toolId: toolCall.toolId,
+    success: false,
+    summary: error,
+    durationMs: 0,
+  });
+  log?.push({ toolId: toolCall.toolId, success: false, summary: error, mutating: false });
+}
 
 /**
  * Item 5a — wire the optional `persistEvent` hook into a run's progress
@@ -3355,7 +3462,7 @@ async function runAgentLoopV2Inner(
             "The model's patch was rejected and its reply contained no recovery action — requiring a corrected patch or files.write...",
         });
         llmMessages.push({ role: "assistant", content: zeroCallText });
-        llmMessages.push({ role: "user", content: buildPatchRecoveryForceMessage(pendingPatchRejection) });
+        llmMessages.push({ role: "user", origin: "internal", content: buildPatchRecoveryForceMessage(pendingPatchRejection) });
         continue;
       }
       const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
@@ -3382,7 +3489,7 @@ async function runAgentLoopV2Inner(
             "The model announced more work but emitted no tool calls — asking it to continue...",
         });
         llmMessages.push({ role: "assistant", content: zeroCallText });
-        llmMessages.push({ role: "user", content: resolution.nudgeMessage });
+        llmMessages.push({ role: "user", origin: "internal", content: resolution.nudgeMessage });
         continue;
       }
       if (resolution.action === "stall") {
@@ -3501,14 +3608,16 @@ async function runAgentLoopV2Inner(
       const toolDef = offerableTools.find((t) => t.id === toolCall.toolId);
 
       if (!toolDef) {
+        const error = `Unknown tool: ${toolCall.toolId}`;
         const result: ToolCallResult = {
           toolCallId: toolCall.toolCallId,
           toolId: toolCall.toolId,
           result: null,
           success: false,
-          error: `Unknown tool: ${toolCall.toolId}`,
+          error,
         };
         llmMessages.push(buildToolResultMessage(result));
+        recordRejectedToolCall(localProgress, toolCallLog, toolCall, error);
         continue;
       }
 
@@ -3543,6 +3652,7 @@ async function runAgentLoopV2Inner(
           error: validationError,
         };
         llmMessages.push(buildToolResultMessage(result));
+        recordRejectedToolCall(localProgress, toolCallLog, toolCall, validationError);
         continue;
       }
 
@@ -4046,19 +4156,34 @@ async function runAgentLoopV2Inner(
       // corrective nudge (the content is already in context; spend the
       // step mutating). Exhausted read nudges still cancel honestly;
       // failed writes are bounded by the step budget instead.
+      // The same-tool streak breaker (coordination fix) shares this
+      // site and its nudge budget: identical inputs are not required
+      // — a streak of successful calls to one non-writing tool with
+      // varying inputs and no file written is the same loop wearing
+      // different arguments.
       const inputsHash = hashInputs(toolCall.inputs);
-      if (toolDef.readOnly && detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation)) {
+      const identicalRepeat = toolDef.readOnly && detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation);
+      const sameToolStreak = identicalRepeat || toolDef.readOnly || cfg.buildCapabilityGuard
+        ? 0
+        : countSameToolNonWritingStreak(toolCallRecords, toolCall.toolId);
+      if (identicalRepeat || sameToolStreak >= SAME_TOOL_STREAK_LIMIT) {
         if (readLoopNudges < READ_LOOP_NUDGE_MAX) {
           readLoopNudges += 1;
           localProgress.emit({
             type: "status",
-            summary: `Repeated ${toolCall.toolId} — nudging the model to apply the change instead of re-reading`,
+            summary: identicalRepeat
+              ? `Repeated ${toolCall.toolId} — nudging the model to apply the change instead of re-reading`
+              : `Repeated ${toolCall.toolId} — nudging the model to use the results already in context instead of fetching more`,
           });
-          llmMessages.push(buildToolResultMessage(buildReadLoopNudgeResult(toolCall)));
+          llmMessages.push(buildToolResultMessage(
+            identicalRepeat ? buildReadLoopNudgeResult(toolCall) : buildSameToolStreakNudgeResult(toolCall, sameToolStreak),
+          ));
           continue;
         }
         cancelled = true;
-        cancelReason = `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`;
+        cancelReason = identicalRepeat
+          ? `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`
+          : sameToolStreakCancelReason(toolCall.toolId, sameToolStreak);
         break;
       }
 
@@ -4368,6 +4493,7 @@ async function runAgentLoopV2Inner(
         literalRepairFeedbackGiven = true;
         llmMessages.push({
           role: "user",
+          origin: "internal",
           content: requestedLiteralRepairPrompt(literalCheck.literal, literalCheck.checkedFiles),
         });
         localProgress.emit({
@@ -4399,6 +4525,7 @@ async function runAgentLoopV2Inner(
         contrastRepairFeedbackGiven = true;
         llmMessages.push({
           role: "user",
+          origin: "internal",
           content: textContrastRepairPrompt(contrastCheck.violations),
         });
         localProgress.emit({
@@ -4433,6 +4560,7 @@ async function runAgentLoopV2Inner(
         layoutRepairFeedbackGiven = true;
         llmMessages.push({
           role: "user",
+          origin: "internal",
           content: renderedLayoutRepairPrompt(layoutCheck.violations),
         });
         localProgress.emit({
@@ -4513,6 +4641,12 @@ async function runAgentLoopV2Inner(
   if (!cancelled && !failedHonestly) {
     const leakCheck = await checkInstructionLeakage({
       instructions: [userMessage],
+      // Coordination fix (c): the loop's own injected messages are
+      // internal content (provenance marker) — checked with no
+      // quoted-content exemption, never treated as the customer's.
+      internalInstructions: llmMessages
+        .filter((m) => m.origin === "internal")
+        .map((m) => m.content),
       candidatePaths: successfulMutationPaths(toolCallLog),
       readFile: (path) => transport.readFile(path),
     });
@@ -4730,6 +4864,16 @@ async function runAgentLoopV2Inner(
   // wrap-up route failure after the deliverable landed settles
   // completed-with-warning instead of failing work that succeeded;
   // every failure contributor is recorded either way.
+  // Milestone-aware settlement (coordination fix): the publish
+  // milestone is in this run's authorized scope when the user asked
+  // to publish/deploy, the run is deploy-only, or a deploy was
+  // attempted in the run — and it counts as reached only on R8's
+  // verified deployment record (completedDeployment). A build never
+  // asked to publish gains no deployment requirement (ACC-10).
+  const deploymentRequired =
+    deployOnlyRun ||
+    instructionRequestsDeploy(userMessage) ||
+    toolCallLog.some((call) => DEPLOY_TOOL_IDS.has(call.toolId));
   const settlement = settleRunOutcome({
     cancelled,
     modelFailed,
@@ -4740,6 +4884,8 @@ async function runAgentLoopV2Inner(
     // P0 R3: surviving broken asset references — success is
     // impossible while any remain (see run-settlement.ts).
     missingAssetRefs,
+    deploymentRequired,
+    deploymentVerified: completedDeployment != null,
   });
   if (settlement.completedWithWarning) {
     localProgress.emit({ type: "status", summary: settlement.completedWithWarning });
@@ -5261,6 +5407,13 @@ export interface DeferredToolBatchContext {
   maxOutputChars: number;
   /** Upstream/client abort signal. Deferred execution must honor the same stop request as the resumed loop. */
   signal?: AbortSignal;
+  /**
+   * Coordination fix (b): the owning run carries the build
+   * capability guard — write-less chains there belong to the
+   * guard's model-switching, so the same-tool streak breaker
+   * stands down in the deferred batch exactly as in the loops.
+   */
+  buildGuardActive?: boolean;
   state: DeferredToolBatchState;
   /**
    * Authenticated user id — injected into user-scoped tools (browser.*)
@@ -5325,14 +5478,16 @@ export async function executeDeferredToolCalls(
     const toolDef = ctx.availableTools.find((t) => t.id === toolCall.toolId);
 
     if (!toolDef) {
+      const error = `Unknown tool: ${toolCall.toolId}`;
       const result: ToolCallResult = {
         toolCallId: toolCall.toolCallId,
         toolId: toolCall.toolId,
         result: null,
         success: false,
-        error: `Unknown tool: ${toolCall.toolId}`,
+        error,
       };
       ctx.llmMessages.push(buildToolResultMessage(result));
+      recordRejectedToolCall(ctx.localProgress, ctx.toolCallLog, toolCall, error);
       continue;
     }
 
@@ -5346,6 +5501,7 @@ export async function executeDeferredToolCalls(
         error: validationError,
       };
       ctx.llmMessages.push(buildToolResultMessage(result));
+      recordRejectedToolCall(ctx.localProgress, ctx.toolCallLog, toolCall, validationError);
       continue;
     }
 
@@ -5542,18 +5698,30 @@ export async function executeDeferredToolCalls(
     // Loop detection — same bounded read-loop nudge as the main loop;
     // nudge budget lives on `state` so it carries across the boundary.
     // inputsHash was computed above, before the permission check.
-    if (toolDef.readOnly && detectRepeatedCalls(ctx.toolCallRecords, toolCall.toolId, inputsHash, state.hasInterveningMutation)) {
+    // The same-tool streak breaker shares the site and budget,
+    // exactly as in the main loop (see there).
+    const identicalRepeat = toolDef.readOnly && detectRepeatedCalls(ctx.toolCallRecords, toolCall.toolId, inputsHash, state.hasInterveningMutation);
+    const sameToolStreak = identicalRepeat || toolDef.readOnly || ctx.buildGuardActive
+      ? 0
+      : countSameToolNonWritingStreak(ctx.toolCallRecords, toolCall.toolId);
+    if (identicalRepeat || sameToolStreak >= SAME_TOOL_STREAK_LIMIT) {
       if ((state.readLoopNudges ?? 0) < READ_LOOP_NUDGE_MAX) {
         state.readLoopNudges = (state.readLoopNudges ?? 0) + 1;
         ctx.localProgress.emit({
           type: "status",
-          summary: `Repeated ${toolCall.toolId} — nudging the model to apply the change instead of re-reading`,
+          summary: identicalRepeat
+            ? `Repeated ${toolCall.toolId} — nudging the model to apply the change instead of re-reading`
+            : `Repeated ${toolCall.toolId} — nudging the model to use the results already in context instead of fetching more`,
         });
-        ctx.llmMessages.push(buildToolResultMessage(buildReadLoopNudgeResult(toolCall)));
+        ctx.llmMessages.push(buildToolResultMessage(
+          identicalRepeat ? buildReadLoopNudgeResult(toolCall) : buildSameToolStreakNudgeResult(toolCall, sameToolStreak),
+        ));
         continue;
       }
       state.cancelled = true;
-      state.cancelReason = `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`;
+      state.cancelReason = identicalRepeat
+        ? `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`
+        : sameToolStreakCancelReason(toolCall.toolId, sameToolStreak);
       break;
     }
 
@@ -6242,6 +6410,7 @@ async function resumeAgentLoopV2Inner(
       actionContext: actionContextFrom(cfg),
       isStaticWorkspace: cfg.isStaticWorkspace,
       buildScopeApproved: buildScopeAuthorized,
+      buildGuardActive: cfg.buildCapabilityGuard != null,
     });
     hasInterveningMutation = deferredState.hasInterveningMutation;
     cancelled = deferredState.cancelled;
@@ -6324,6 +6493,7 @@ async function resumeAgentLoopV2Inner(
       literalRepairFeedbackGiven = true;
       llmMessages.push({
         role: "user",
+        origin: "internal",
         content: requestedLiteralRepairPrompt(literalCheck.literal, literalCheck.checkedFiles),
       });
       localProgress.emit({
@@ -6351,6 +6521,7 @@ async function resumeAgentLoopV2Inner(
       contrastRepairFeedbackGiven = true;
       llmMessages.push({
         role: "user",
+        origin: "internal",
         content: textContrastRepairPrompt(contrastCheck.violations),
       });
       localProgress.emit({
@@ -6382,6 +6553,7 @@ async function resumeAgentLoopV2Inner(
       layoutRepairFeedbackGiven = true;
       llmMessages.push({
         role: "user",
+        origin: "internal",
         content: renderedLayoutRepairPrompt(layoutCheck.violations),
       });
       localProgress.emit({
@@ -6605,7 +6777,7 @@ async function resumeAgentLoopV2Inner(
             "The model announced more work but emitted no tool calls — asking it to continue...",
         });
         llmMessages.push({ role: "assistant", content: zeroCallText });
-        llmMessages.push({ role: "user", content: resolution.nudgeMessage });
+        llmMessages.push({ role: "user", origin: "internal", content: resolution.nudgeMessage });
         continue;
       }
       if (resolution.action === "stall") {
@@ -6650,14 +6822,16 @@ async function resumeAgentLoopV2Inner(
       const toolDef = resumeOfferableTools.find((t) => t.id === toolCall.toolId);
 
       if (!toolDef) {
+        const error = `Unknown tool: ${toolCall.toolId}`;
         const result: ToolCallResult = {
           toolCallId: toolCall.toolCallId,
           toolId: toolCall.toolId,
           result: null,
           success: false,
-          error: `Unknown tool: ${toolCall.toolId}`,
+          error,
         };
         llmMessages.push(buildToolResultMessage(result));
+        recordRejectedToolCall(localProgress, toolCallLog, toolCall, error);
         continue;
       }
 
@@ -6671,6 +6845,7 @@ async function resumeAgentLoopV2Inner(
           error: validationError,
         };
         llmMessages.push(buildToolResultMessage(result));
+        recordRejectedToolCall(localProgress, toolCallLog, toolCall, validationError);
         continue;
       }
 
@@ -6935,19 +7110,31 @@ async function resumeAgentLoopV2Inner(
 
       // Loop detection — same bounded read-loop nudge as the initial
       // loop; nudges spent in the deferred batch carry over here.
+      // The same-tool streak breaker shares the site and budget,
+      // exactly as in the initial loop (see there).
       const inputsHash = hashInputs(toolCall.inputs);
-      if (toolDef.readOnly && detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation)) {
+      const identicalRepeat = toolDef.readOnly && detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation);
+      const sameToolStreak = identicalRepeat || toolDef.readOnly || cfg.buildCapabilityGuard
+        ? 0
+        : countSameToolNonWritingStreak(toolCallRecords, toolCall.toolId);
+      if (identicalRepeat || sameToolStreak >= SAME_TOOL_STREAK_LIMIT) {
         if (readLoopNudges < READ_LOOP_NUDGE_MAX) {
           readLoopNudges += 1;
           localProgress.emit({
             type: "status",
-            summary: `Repeated ${toolCall.toolId} — nudging the model to apply the change instead of re-reading`,
+            summary: identicalRepeat
+              ? `Repeated ${toolCall.toolId} — nudging the model to apply the change instead of re-reading`
+              : `Repeated ${toolCall.toolId} — nudging the model to use the results already in context instead of fetching more`,
           });
-          llmMessages.push(buildToolResultMessage(buildReadLoopNudgeResult(toolCall)));
+          llmMessages.push(buildToolResultMessage(
+            identicalRepeat ? buildReadLoopNudgeResult(toolCall) : buildSameToolStreakNudgeResult(toolCall, sameToolStreak),
+          ));
           continue;
         }
         cancelled = true;
-        cancelReason = `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`;
+        cancelReason = identicalRepeat
+          ? `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`
+          : sameToolStreakCancelReason(toolCall.toolId, sameToolStreak);
         break;
       }
 
@@ -7182,6 +7369,7 @@ async function resumeAgentLoopV2Inner(
         literalRepairFeedbackGiven = true;
         llmMessages.push({
           role: "user",
+          origin: "internal",
           content: requestedLiteralRepairPrompt(literalCheck.literal, literalCheck.checkedFiles),
         });
         localProgress.emit({
@@ -7209,6 +7397,7 @@ async function resumeAgentLoopV2Inner(
         contrastRepairFeedbackGiven = true;
         llmMessages.push({
           role: "user",
+          origin: "internal",
           content: textContrastRepairPrompt(contrastCheck.violations),
         });
         localProgress.emit({
@@ -7237,6 +7426,7 @@ async function resumeAgentLoopV2Inner(
         layoutRepairFeedbackGiven = true;
         llmMessages.push({
           role: "user",
+          origin: "internal",
           content: renderedLayoutRepairPrompt(layoutCheck.violations),
         });
         localProgress.emit({
@@ -7297,6 +7487,13 @@ async function resumeAgentLoopV2Inner(
   if (!cancelled && !failedHonestly) {
     const leakCheck = await checkInstructionLeakage({
       instructions: [resumeUserMessage],
+      // Coordination fix (c) — identical to the initial loop: the
+      // logical run's internal messages (this segment's injections
+      // plus any carried through the pause snapshot) are internal
+      // content, checked with no quoted-content exemption.
+      internalInstructions: llmMessages
+        .filter((m) => m.origin === "internal")
+        .map((m) => m.content),
       candidatePaths: successfulMutationPaths(toolCallLog),
       readFile: (path) => transport.readFile(path),
     });
@@ -7530,6 +7727,14 @@ async function resumeAgentLoopV2Inner(
   // a resume: the deliverable (an approved, saved image generation)
   // landed and the gate passed, then the wrap-up model call exhausted
   // its routes and the old outcome expression failed the whole run.
+  // Milestone-aware settlement — identical computation to the
+  // initial loop: publish in scope (asked / deploy-only / deploy
+  // attempted anywhere in this logical run's log, pauses included)
+  // requires R8's verified deployment record to settle success.
+  const deploymentRequired =
+    resumeDeployOnlyRun ||
+    instructionRequestsDeploy(resumeUserMessage) ||
+    toolCallLog.some((call) => DEPLOY_TOOL_IDS.has(call.toolId));
   const settlement = settleRunOutcome({
     cancelled,
     modelFailed,
@@ -7540,6 +7745,8 @@ async function resumeAgentLoopV2Inner(
     // P0 R3: surviving broken asset references — success is
     // impossible while any remain (see run-settlement.ts).
     missingAssetRefs,
+    deploymentRequired,
+    deploymentVerified: completedDeployment != null,
   });
   if (settlement.completedWithWarning) {
     localProgress.emit({ type: "status", summary: settlement.completedWithWarning });
@@ -7666,6 +7873,7 @@ export function createAutonomousRepairCallback(
     const repairMessages: LLMMessage[] = [
       {
         role: "user",
+        origin: "internal",
         content: `The build/check failed with the following output. Please inspect the relevant code, fix the issue, and verify your fix.\n\n--- Error output ---\n${errors}\n--- End error output ---\n\nRepair attempt ${attempt}/3. Use the available tools to read the failing files, identify the issue, and write the fix.`,
       },
     ];

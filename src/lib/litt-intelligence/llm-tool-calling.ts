@@ -114,6 +114,21 @@ export type LLMMessage = {
   role: "user" | "assistant" | "tool";
   content: string;
   /**
+   * Provenance marker (coordination fix, 2026-11-26): "internal"
+   * marks a message the LOOP ITSELF injected as role "user" —
+   * continuation nudges, guard messages, quality/repair prompts —
+   * as opposed to the customer's own words, which carry no marker.
+   * Before this marker the two were indistinguishable, including in
+   * pausedMessages snapshots, so downstream machinery (the R7
+   * instruction-leakage check) could not tell customer instructions
+   * from execution text. Internal content is never customer
+   * content: it earns no quoted-content exemption anywhere, and its
+   * appearance in generated site files is always a leak. The marker
+   * is our metadata only — provider serializers build fresh message
+   * objects and never forward it.
+   */
+  origin?: "internal";
+  /**
    * Optional image attachments (PNG data URLs) for vision-capable calls.
    * Serialized as Gemini inlineData parts or OpenAI image_url content parts.
    * Only honored when the call requests vision (requireVision).

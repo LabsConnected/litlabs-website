@@ -24,6 +24,12 @@
  *     matching: quoted text is content the user asked to see on the
  *     page (that is exactly what the F9 literal check enforces), not
  *     leakage. Internal markers are never exempt.
+ *   - Loop-injected internal messages (origin: "internal" — the
+ *     coordination-fix provenance marker) are checked as
+ *     internalInstructions: their chunks are needles with NO
+ *     quoted-content exemption, because internal text is never
+ *     customer content — nothing in it was "quoted as desired page
+ *     content" by anyone.
  *   - Absence of evidence is not a verdict: if the candidate set was
  *     truncated by the read budget and nothing was found, the check
  *     does not apply. A find always applies — positive evidence is
@@ -138,6 +144,13 @@ function isHtmlPagePath(path: string): boolean {
  */
 export async function checkInstructionLeakage(opts: {
   instructions: ReadonlyArray<string | null | undefined>;
+  /**
+   * Loop-injected internal message texts (origin: "internal").
+   * Chunked into needles WITHOUT the quoted-content exemption:
+   * internal text is never customer content, so no part of it can
+   * be "text the user asked to see on the page".
+   */
+  internalInstructions?: ReadonlyArray<string | null | undefined>;
   candidatePaths: ReadonlyArray<string>;
   readFile: (path: string) => Promise<{ content: string }>;
 }): Promise<InstructionLeakageCheck> {
@@ -151,6 +164,10 @@ export async function checkInstructionLeakage(opts: {
     for (const chunk of extractInstructionChunks(instruction)) {
       if (!isQuotedContent(chunk, spans)) chunks.push(chunk);
     }
+  }
+  for (const internal of opts.internalInstructions ?? []) {
+    if (typeof internal !== "string" || internal.trim().length === 0) continue;
+    for (const chunk of extractInstructionChunks(internal)) chunks.push(chunk);
   }
   const needles = [...new Set([...chunks, ...INTERNAL_CONTENT_MARKERS])];
   if (needles.length === 0) {

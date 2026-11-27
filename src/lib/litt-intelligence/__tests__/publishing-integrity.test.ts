@@ -368,3 +368,114 @@ describe("agent loop publishing integrity (R8)", () => {
     expect(result.finalText).not.toContain(STABLE_URL);
   });
 });
+
+describe("milestone-aware settlement (coordination fix)", () => {
+  let executeSpy: MockInstance<typeof toolRegistry.execute>;
+
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+    executeSpy = vi.spyOn(toolRegistry, "execute");
+  });
+
+  afterEach(() => {
+    executeSpy.mockRestore();
+  });
+
+  function pausedDeployInput(inputs: Record<string, unknown>): ResumeInput {
+    const assistantMsg: LLMMessage = buildAssistantToolCallMessage(
+      [{ toolId: "project.deploy", toolCallId: "tc-deploy-1", inputs }],
+      "Publishing the site.",
+      undefined,
+    );
+    return {
+      pausedMessages: [
+        { role: "user", content: "Build the bakery site and publish it" },
+        assistantMsg,
+      ],
+      toolId: "project.deploy",
+      toolCallId: "tc-deploy-1",
+      inputs,
+      decision: "approved",
+      config: {
+        systemPrompt: "test system prompt",
+        executionMode: "act",
+        enableBuildFix: false,
+      },
+      stepsUsedBeforePause: 2,
+      hadInterveningMutation: true,
+    };
+  }
+
+  it("a publish-implied run whose deploy fails cannot settle as success", async () => {
+    executeSpy.mockImplementation(async (toolId: string) => {
+      expect(toolId).toBe("project.deploy");
+      return { ok: false, error: "deploy transport unavailable" } as never;
+    });
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "The publish did not go through.",
+      model: "test-model",
+      finishReason: "stop",
+      toolCalls: [],
+    } as never);
+
+    const { transport } = makeTransport();
+    const result = await resumeAgentLoopV2(pausedDeployInput({}), transport);
+
+    // The build milestone may be fine, but the run was asked to
+    // publish and no verified deployment exists — the settlement
+    // must not claim success, and must say which milestone is missing.
+    expect(executeSpy).toHaveBeenCalledTimes(1);
+    expect(result.deployment ?? null).toBeNull();
+    const missing = (result.failureContributors ?? []).find((c) => c.kind === "deployment_missing");
+    expect(missing).toBeDefined();
+    const finished = result.events.find((e) => e.type === "finished");
+    expect(finished && "success" in finished ? finished.success : undefined).toBe(false);
+  });
+
+  it("a build-only run settles completed with no deployment at all", async () => {
+    const { transport } = makeTransport();
+    vi.mocked(callLLMWithTools).mockResolvedValueOnce({
+      text: "Writing the page.",
+      model: "test-model",
+      finishReason: "tool_calls",
+      toolCalls: [
+        {
+          toolId: "files.write",
+          toolCallId: "tc-write-1",
+          inputs: {
+            projectId: "p-test",
+            path: "index.html",
+            content: "<!doctype html><html><body><h1>Crumb & Craft</h1></body></html>",
+          },
+        },
+      ],
+    } as never);
+    vi.mocked(callLLMWithTools).mockResolvedValue({
+      text: "Done.",
+      model: "test-model",
+      finishReason: "stop",
+      toolCalls: [],
+    } as never);
+
+    const config: AgentLoopConfig = {
+      maxSteps: 8,
+      maxRuntimeMs: 600_000,
+      maxOutputChars: 40_000,
+      maxRetries: 0,
+      executionMode: "auto",
+      systemPrompt: "test system prompt",
+      enableBuildFix: false,
+      userId: "u-test",
+      isStaticWorkspace: true,
+    };
+    const result = await runAgentLoopV2("Build the bakery page", transport, config);
+
+    // ACC-10: a build never asked to publish gains no deployment
+    // requirement — it settles on the build evidence alone.
+    expect(
+      (result.failureContributors ?? []).some((c) => c.kind === "deployment_missing"),
+    ).toBe(false);
+    const finished = result.events.find((e) => e.type === "finished");
+    expect(finished && "success" in finished ? finished.success : undefined).toBe(true);
+  });
+});

@@ -124,6 +124,50 @@ describe("checkInstructionLeakage", () => {
     expect(check.leaked).toEqual([]);
   });
 
+  it("(c2) loop-injected internal text in a page is leakage (coordination fix c)", async () => {
+    // A quality/repair prompt the loop injected as role "user"
+    // (origin: "internal") is execution text, not a customer
+    // instruction: finding its sentences in a generated page is a
+    // leak through the internalInstructions channel.
+    const internal =
+      "The visual quality inspection scored this page below the threshold, so redesign the hero section with stronger contrast and larger type.";
+    const page =
+      "<!doctype html><html><body><h1>Sunny Crust</h1>" +
+      "<footer>The visual quality inspection scored this page below the threshold, so redesign the hero section with stronger contrast and larger type.</footer></body></html>";
+    const check = await checkInstructionLeakage({
+      instructions: ["Build a bakery homepage"],
+      internalInstructions: [internal],
+      candidatePaths: ["index.html"],
+      readFile: reader({ "index.html": page }),
+    });
+    expect(check.applies).toBe(true);
+    expect(check.leaked).toHaveLength(1);
+    expect(check.leaked[0].path).toBe("index.html");
+  });
+
+  it("(c3) internal text gets NO quoted-content exemption (coordination fix c)", async () => {
+    // The same long span, two provenances: quoted by the CUSTOMER
+    // as desired page content it is exempt (test (c)); carried in
+    // an INTERNAL message it is never customer content, so its
+    // appearance on the page is leakage even though it is "quoted"
+    // inside the internal text.
+    const span = "Fresh from the oven every morning, baked with love for Grand Haven";
+    // The span appears in the internal message twice: quoted (the
+    // shape that WOULD earn the customer-path exemption — the
+    // quoted span contains the chunk) and bare as its own sentence
+    // (the chunk that matches the page). Internal text is processed
+    // without the exemption, so the match stands as leakage.
+    const internal = `The approved headline is "${span}". ${span}`;
+    const page = `<!doctype html><html><body><h1>${span}</h1></body></html>`;
+    const check = await checkInstructionLeakage({
+      instructions: ["Build a bakery homepage"],
+      internalInstructions: [internal],
+      candidatePaths: ["index.html"],
+      readFile: reader({ "index.html": page }),
+    });
+    expect(check.leaked).toHaveLength(1);
+  });
+
   it("(d) an internal execution marker is leakage whatever the instruction was", async () => {
     const page =
       "<!doctype html><html><body><p>Welcome.</p>" +
