@@ -44,47 +44,19 @@
  *   --tui          Redundant — bare `litt` already launches the cockpit (kept for compat)
  */
 
-import { doctorCommand } from "./commands/doctor.js";
-import { versionCommand } from "./commands/version.js";
-import { statusCommand } from "./commands/status.js";
-import { diffCommand } from "./commands/diff.js";
-import { checkCommand } from "./commands/check.js";
-import { testCommand } from "./commands/test.js";
-import { buildCommand } from "./commands/build.js";
-import { runCommand } from "./commands/run.js";
-import { runsCommand } from "./commands/runs.js";
-import { inspectCommand } from "./commands/inspect.js";
-import { askCommand } from "./commands/ask.js";
+// Compile cache MUST be evaluated before any other import — see lib/compile-cache.ts.
+import "./lib/compile-cache.js";
+// Heavy modules (remote → socket.io, auth-session → keyring, runtime-session
+// → agent-core, local-lane → network probe, every command module) are
+// imported lazily at their single call site below — a bare `litt` launch
+// must not pay for them.
 import { createAskOutput, parseAskArgs } from "./lib/ask-output.js";
-import { repairCommand } from "./commands/repair.js";
-import { missionCommand } from "./commands/mission.js";
-import { explainCommand } from "./commands/explain.js";
-import { desktopCommand } from "./commands/desktop.js";
-import { loginCommand } from "./commands/login.js";
-import { logoutCommand } from "./commands/logout.js";
-import { whoamiCommand } from "./commands/whoami.js";
-import { workspaceCommand } from "./commands/workspace.js";
-import { productionDoctorCommand } from "./commands/production-doctor.js";
-import { stripeDoctorCommand } from "./commands/stripe-doctor.js";
-import { stripeRepairCommand } from "./commands/stripe-repair.js";
-import { stripeSandboxCommand } from "./commands/stripe-sandbox.js";
-import { deployVerifyCommand } from "./commands/deploy-verify.js";
-import { studioAcceptanceCommand } from "./commands/studio-acceptance.js";
-import { productionFinishCommand } from "./commands/production-finish.js";
-import { pcStatusCommand } from "./commands/pc-status.js";
-import { pcPerfCommand } from "./commands/pc-perf.js";
-import { pcTasksCommand } from "./commands/pc-tasks.js";
-import { dispatchRemote, isRemoteError, hasRemoteResult } from "./lib/remote.js";
-import { isRemoteUnavailable } from "./lib/remote-unavailable.js";
-import { executeCommand } from "./lib/command-execution.js";
-import { createRuntimeSession } from "./lib/runtime-session.js";
-import { detectProject, ok, fail, header, c, resolveProjectCwd } from "./lib/utils.js";
 import { resolveActiveProject } from "./lib/active-project.js";
+import { detectProject, ok, fail, header, c, resolveProjectCwd } from "./lib/utils.js";
 import { CLI_VERSION } from "./lib/version.js";
 import { resolveDispatch } from "./lib/dispatch.js";
 import type { RuntimeSession } from "./lib/runtime-session.js";
-import { getAuthSession } from "./lib/auth/auth-session.js";
-import { probeLocalLane } from "./lib/local-lane.js";
+import { perfMark } from "./lib/perf.js";
 
 // Lazy-loaded commands that pull in heavy dependencies (Ink/React).
 // These are only imported when the user actually runs them, so
@@ -98,8 +70,12 @@ export interface CommandContext {
   mode: "plan" | "act" | "auto";
 }
 type CommandHandler = (args: string[], session?: RuntimeSession, context?: CommandContext) => Promise<number>;
-const lazyCockpit = async (): Promise<CommandHandler> =>
-  (await import("./commands/cockpit.js")).cockpitCommand;
+const lazyCockpit = async (): Promise<CommandHandler> => {
+  perfMark("main:cockpit-import-start");
+  const mod = await import("./commands/cockpit.js");
+  perfMark("main:cockpit-import-done");
+  return mod.cockpitCommand;
+};
 
 const VERSION = CLI_VERSION;
 
@@ -139,38 +115,48 @@ const REMOTEABLE_COMMANDS = new Set([
 /** Commands that use the RuntimeSession (shared runtime truth). */
 const SESSION_COMMANDS = new Set(["status", "diff", "check", "test", "build", "run", "ask", "repair"]);
 
+/**
+ * Command registry — every handler is a lazy importer so a bare `litt`
+ * launch never pays to parse/compile command modules it didn't invoke.
+ * The invoked command pays one dynamic import (~1-50ms warm) instead of
+ * ~30 modules up front. Compile cache makes re-imports near-free.
+ */
+const lazy = (loader: () => Promise<unknown>, exportName: string): CommandHandler =>
+  async (args, session, mode) =>
+    ((await loader()) as Record<string, CommandHandler>)[exportName](args, session, mode);
+
 const COMMANDS: Record<string, CommandHandler> = {
-  doctor: doctorCommand,
-  version: versionCommand,
-  status: statusCommand,
-  diff: diffCommand,
-  check: checkCommand,
-  test: testCommand,
-  build: buildCommand,
-  run: runCommand,
-  runs: runsCommand,
-  inspect: inspectCommand,
-  ask: askCommand,
-  repair: repairCommand,
-  mission: missionCommand,
-  explain: explainCommand,
-  desktop: desktopCommand,
-  login: loginCommand,
-  logout: logoutCommand,
-  whoami: whoamiCommand,
-  workspace: workspaceCommand,
+  doctor: lazy(() => import("./commands/doctor.js"), "doctorCommand"),
+  version: lazy(() => import("./commands/version.js"), "versionCommand"),
+  status: lazy(() => import("./commands/status.js"), "statusCommand"),
+  diff: lazy(() => import("./commands/diff.js"), "diffCommand"),
+  check: lazy(() => import("./commands/check.js"), "checkCommand"),
+  test: lazy(() => import("./commands/test.js"), "testCommand"),
+  build: lazy(() => import("./commands/build.js"), "buildCommand"),
+  run: lazy(() => import("./commands/run.js"), "runCommand"),
+  runs: lazy(() => import("./commands/runs.js"), "runsCommand"),
+  inspect: lazy(() => import("./commands/inspect.js"), "inspectCommand"),
+  ask: lazy(() => import("./commands/ask.js"), "askCommand"),
+  repair: lazy(() => import("./commands/repair.js"), "repairCommand"),
+  mission: lazy(() => import("./commands/mission.js"), "missionCommand"),
+  explain: lazy(() => import("./commands/explain.js"), "explainCommand"),
+  desktop: lazy(() => import("./commands/desktop.js"), "desktopCommand"),
+  login: lazy(() => import("./commands/login.js"), "loginCommand"),
+  logout: lazy(() => import("./commands/logout.js"), "logoutCommand"),
+  whoami: lazy(() => import("./commands/whoami.js"), "whoamiCommand"),
+  workspace: lazy(() => import("./commands/workspace.js"), "workspaceCommand"),
   // Production operator commands
-  "production-doctor": productionDoctorCommand,
-  "production-finish": productionFinishCommand,
-  "stripe-doctor": stripeDoctorCommand,
-  "stripe-repair": stripeRepairCommand,
-  "stripe-sandbox": stripeSandboxCommand,
-  "deploy-verify": deployVerifyCommand,
-  "studio-acceptance": studioAcceptanceCommand,
+  "production-doctor": lazy(() => import("./commands/production-doctor.js"), "productionDoctorCommand"),
+  "production-finish": lazy(() => import("./commands/production-finish.js"), "productionFinishCommand"),
+  "stripe-doctor": lazy(() => import("./commands/stripe-doctor.js"), "stripeDoctorCommand"),
+  "stripe-repair": lazy(() => import("./commands/stripe-repair.js"), "stripeRepairCommand"),
+  "stripe-sandbox": lazy(() => import("./commands/stripe-sandbox.js"), "stripeSandboxCommand"),
+  "deploy-verify": lazy(() => import("./commands/deploy-verify.js"), "deployVerifyCommand"),
+  "studio-acceptance": lazy(() => import("./commands/studio-acceptance.js"), "studioAcceptanceCommand"),
   // PC performance controller (nested: litt pc status / perf / tasks)
-  "pc-status": pcStatusCommand,
-  "pc-perf": pcPerfCommand,
-  "pc-tasks": pcTasksCommand,
+  "pc-status": lazy(() => import("./commands/pc-status.js"), "pcStatusCommand"),
+  "pc-perf": lazy(() => import("./commands/pc-perf.js"), "pcPerfCommand"),
+  "pc-tasks": lazy(() => import("./commands/pc-tasks.js"), "pcTasksCommand"),
   // cockpit / shell / tui are lazy-loaded below (heavy Ink/React dependency)
 };
 
@@ -357,6 +343,7 @@ function hasByokKey(): boolean {
 }
 
 async function main(): Promise<number> {
+  perfMark("main:entry");
   // Engine check — LiTT CLI requires Node 22+
   const major = parseInt(process.version.slice(1), 10);
   if (major < 22) {
@@ -418,7 +405,10 @@ async function main(): Promise<number> {
   const mode = dispatch.mode;
   const askArgs = command === "ask" ? parseAskArgs(rest) : undefined;
   const structuredAsk = askArgs && askArgs.format !== "text" ? askArgs : undefined;
-  if (structuredAsk?.conflict || (structuredAsk && !structuredAsk.question)) return askCommand(rest);
+  if (structuredAsk?.conflict || (structuredAsk && !structuredAsk.question)) {
+    const { askCommand } = await import("./commands/ask.js");
+    return askCommand(rest);
+  }
   if (structuredAsk && dispatch.useRemote) {
     const message = "Structured ask output is available for the local CLI host.";
     console.error(message);
@@ -523,7 +513,7 @@ async function main(): Promise<number> {
     command === "ask" &&
     localTarget &&
     !byokKeyPresent
-      ? (await probeLocalLane()).available
+      ? (await (await import("./lib/local-lane.js")).probeLocalLane()).available
       : false;
 
   if (
@@ -536,6 +526,7 @@ async function main(): Promise<number> {
       localProviderAvailable,
     )
   ) {
+    const { getAuthSession } = await import("./lib/auth/auth-session.js");
     const authSession = getAuthSession();
     const signedIn = await authSession.isSignedIn();
 
@@ -620,6 +611,7 @@ async function main(): Promise<number> {
         remoteArgs = result.tokens;
       }
     }
+    const { executeCommand } = await import("./lib/command-execution.js");
     const outcome = await executeCommand(command, {
       useRemote: true,
       isRemoteable: (cmd) => REMOTEABLE_COMMANDS.has(cmd),
@@ -672,6 +664,7 @@ async function main(): Promise<number> {
         projectRoot = resolved.project.rootDir;
       }
     }
+    const { createRuntimeSession } = await import("./lib/runtime-session.js");
     session = createRuntimeSession({ cwd: projectRoot, mode });
     // Install Ctrl+C handler for all session commands
     if (command !== "ask") session.installSigintHandler();
@@ -719,6 +712,8 @@ async function runRemote(
   workspaceId?: string,
 ): Promise<number> {
   header(`${command} (remote)`);
+  const { dispatchRemote, isRemoteError, hasRemoteResult } = await import("./lib/remote.js");
+  const { isRemoteUnavailable } = await import("./lib/remote-unavailable.js");
   try {
     // Remote commands execute on terminal-server's filesystem. We do NOT
     // pass the local project root because the server authorizes cwd against
