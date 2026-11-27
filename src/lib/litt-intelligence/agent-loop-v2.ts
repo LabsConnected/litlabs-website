@@ -2227,6 +2227,31 @@ async function finalizeQualityGatedRun(
 // ─── Agent Loop ───────────────────────────────────────────────────
 
 /**
+ * Record a tool call the loop refused to execute — unknown tool or failed
+ * input validation. These calls previously vanished: no progress event, no
+ * toolCallLog entry, so post-mortems could not see what the model tried
+ * (staging run da4307a2: two consecutive rejected batches were invisible
+ * and only the zero-write guard's symptom survived). Emit a failed
+ * tool_result (persists as tool.failed) and log the rejection so the run's
+ * evidence shows the attempt and the reason.
+ */
+function recordRejectedToolCall(
+  progress: ProgressEmitter,
+  log: AgentToolCallLogEntry[] | undefined,
+  toolCall: { toolCallId: string; toolId: string },
+  error: string,
+): void {
+  progress.emit({
+    type: "tool_result",
+    toolId: toolCall.toolId,
+    success: false,
+    summary: error,
+    durationMs: 0,
+  });
+  log?.push({ toolId: toolCall.toolId, success: false, summary: error, mutating: false });
+}
+
+/**
  * Item 5a — wire the optional `persistEvent` hook into a run's progress
  * stream. Events flow through a per-run promise chain so they persist in
  * emit order; each failure is logged and the chain continues. The loop
@@ -3126,14 +3151,16 @@ async function runAgentLoopV2Inner(
       const toolDef = offerableTools.find((t) => t.id === toolCall.toolId);
 
       if (!toolDef) {
+        const error = `Unknown tool: ${toolCall.toolId}`;
         const result: ToolCallResult = {
           toolCallId: toolCall.toolCallId,
           toolId: toolCall.toolId,
           result: null,
           success: false,
-          error: `Unknown tool: ${toolCall.toolId}`,
+          error,
         };
         llmMessages.push(buildToolResultMessage(result));
+        recordRejectedToolCall(localProgress, toolCallLog, toolCall, error);
         continue;
       }
 
@@ -3168,6 +3195,7 @@ async function runAgentLoopV2Inner(
           error: validationError,
         };
         llmMessages.push(buildToolResultMessage(result));
+        recordRejectedToolCall(localProgress, toolCallLog, toolCall, validationError);
         continue;
       }
 
@@ -4693,14 +4721,16 @@ export async function executeDeferredToolCalls(
     const toolDef = ctx.availableTools.find((t) => t.id === toolCall.toolId);
 
     if (!toolDef) {
+      const error = `Unknown tool: ${toolCall.toolId}`;
       const result: ToolCallResult = {
         toolCallId: toolCall.toolCallId,
         toolId: toolCall.toolId,
         result: null,
         success: false,
-        error: `Unknown tool: ${toolCall.toolId}`,
+        error,
       };
       ctx.llmMessages.push(buildToolResultMessage(result));
+      recordRejectedToolCall(ctx.localProgress, ctx.toolCallLog, toolCall, error);
       continue;
     }
 
@@ -4714,6 +4744,7 @@ export async function executeDeferredToolCalls(
         error: validationError,
       };
       ctx.llmMessages.push(buildToolResultMessage(result));
+      recordRejectedToolCall(ctx.localProgress, ctx.toolCallLog, toolCall, validationError);
       continue;
     }
 
@@ -5810,14 +5841,16 @@ async function resumeAgentLoopV2Inner(
       const toolDef = resumeOfferableTools.find((t) => t.id === toolCall.toolId);
 
       if (!toolDef) {
+        const error = `Unknown tool: ${toolCall.toolId}`;
         const result: ToolCallResult = {
           toolCallId: toolCall.toolCallId,
           toolId: toolCall.toolId,
           result: null,
           success: false,
-          error: `Unknown tool: ${toolCall.toolId}`,
+          error,
         };
         llmMessages.push(buildToolResultMessage(result));
+        recordRejectedToolCall(localProgress, toolCallLog, toolCall, error);
         continue;
       }
 
@@ -5831,6 +5864,7 @@ async function resumeAgentLoopV2Inner(
           error: validationError,
         };
         llmMessages.push(buildToolResultMessage(result));
+        recordRejectedToolCall(localProgress, toolCallLog, toolCall, validationError);
         continue;
       }
 
