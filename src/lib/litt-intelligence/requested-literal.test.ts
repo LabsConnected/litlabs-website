@@ -54,6 +54,26 @@ describe("extractExpectedLiteral", () => {
     expect(extractExpectedLiteral("change the banner to say something welcoming")).toBeNull();
   });
 
+  it("returns null when the 'to' tail names a file destination, not content", () => {
+    // Staging acceptance 45904303510: "…include exactly: <marker>. Keep the
+    // rest of the site unchanged and save the edit to index.html" — the last
+    // " to " precedes the filename, so the extractor gated on "index.html"
+    // and failed an edit that had landed the requested marker.
+    expect(
+      extractExpectedLiteral(
+        "Change the hero text to include exactly: Golden Acceptance follow-up verified. Keep the rest of the site unchanged and save the edit to index.html",
+      ),
+    ).toBeNull();
+    expect(extractExpectedLiteral("Update the page and write the result to out.json")).toBeNull();
+    expect(extractExpectedLiteral("Apply the change to src/app.tsx")).toBeNull();
+  });
+
+  it("still extracts real content tails that happen to contain a dot", () => {
+    // "v2.0" has no path separator and its dot-suffix is numeric-ish but the
+    // tail contains a space, so it is content, not a path.
+    expect(extractExpectedLiteral("Update the version label to v2.0 final")).toBe("v2.0 final");
+  });
+
   it("returns null for non-edit instructions, even with quoted spans", () => {
     expect(
       extractExpectedLiteral('Build a one-page site for a bakery called "Sunny Crust"'),
