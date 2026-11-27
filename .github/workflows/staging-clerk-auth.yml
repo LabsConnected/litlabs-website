@@ -29,6 +29,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.expected_staging_sha }}
           fetch-depth: 1
 
       - name: Install Node

@@ -350,6 +350,19 @@ async function main() {
       FRESH_ACCOUNT_REQUESTED
         ? `new Clerk user ${USER_ID} has ${initialProjects.length} existing project(s)`
         : "fresh-account mode is required for this acceptance");
+    let initialWallet = null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const walletResponse = await page.request.get(`${BASE}/api/wallet`, { timeout: 20_000 }).catch(() => null);
+      if (walletResponse?.status() === 200) {
+        initialWallet = await walletResponse.json().catch(() => null);
+        if (initialWallet?.configured === true) break;
+      }
+      await page.waitForTimeout(3000);
+    }
+    step("billing_wallet_initial",
+      initialWallet?.configured === true && initialWallet?.billingExempt === false &&
+        Number.isSafeInteger(initialWallet?.balance) && initialWallet.balance >= 0,
+      `configured=${initialWallet?.configured ?? "missing"} exempt=${initialWallet?.billingExempt ?? "missing"} balance=${initialWallet?.balance ?? "missing"}`);
     await shot(page, "01-signed-in");
 
     // ── Step 1.5: resolve the permanent golden project + provision workspace ──
@@ -678,6 +691,7 @@ async function main() {
     // runResult.pendingApproval.pausedRunId — so the harness drives the
     // whole chain exactly like a user clicking Approve on each card, then
     // reads the deploy hop's toolCalls for the deployment outcome.
+    let initialStablePublicUrl = null;
     if (DEPLOY_REQUESTED) {
       const chainDeadline = Date.now() + 15 * 60 * 1000; // covers every hop
       const pauseChain = approvalEvents.map((e) => e.toolId);
@@ -855,6 +869,22 @@ async function main() {
       } else {
         step("production_url_verified", false, "no productionUrl in events or resumed run");
       }
+
+      // The project address must be the stable URL, not a deployment
+      // snapshot. Capture it before editing so republish can prove identity.
+      const publishStatus = projectId
+        ? await page.request.get(`${BASE}/api/projects/${projectId}/publish`, { timeout: 30_000 }).catch(() => null)
+        : null;
+      const publishBody = publishStatus?.ok() ? await publishStatus.json().catch(() => null) : null;
+      initialStablePublicUrl = publishBody?.stablePublicUrl ?? null;
+      const stableResponse = initialStablePublicUrl
+        ? await page.request.get(initialStablePublicUrl, { timeout: 45_000 }).catch(() => null)
+        : null;
+      const stableBody = stableResponse?.ok() ? await stableResponse.text().catch(() => "") : "";
+      step("stable_project_url_initial",
+        publishStatus?.status() === 200 && publishBody?.published === true &&
+          !!initialStablePublicUrl && stableResponse?.status() === 200 && /ember roast/i.test(stableBody),
+        `status=${publishStatus?.status() ?? "unreachable"} url=${initialStablePublicUrl ?? "missing"} content=${/ember roast/i.test(stableBody)}`);
     } else {
       verdict.notes.push("Deploy not requested (LITT_ACCEPTANCE_DEPLOY=0).");
     }
@@ -1008,8 +1038,8 @@ async function main() {
     // through the reopened composer. The follow-up must mutate the existing
     // project, so this gate proves the complete edit path rather than only
     // proving that the messages POST returned 200.
+    const followUpMarker = "Golden Acceptance follow-up verified";
     if (stillUsable && sheetUp) {
-      const followUpMarker = "Golden Acceptance follow-up verified";
       const followUp = `Update the existing Ember Roast site footer to include exactly: ${followUpMarker}. Keep the rest of the site unchanged and save the edit to index.html.`;
       await commandInput.fill(followUp);
       const followUpResponse = page.waitForResponse((response) =>
@@ -1113,6 +1143,92 @@ async function main() {
       step("post_build_follow_up_mutation", false, "composer was not usable after the drawer was closed and LiTT was reopened");
       step("post_build_follow_up_preview", false, "composer was not usable after the drawer was closed and LiTT was reopened");
     }
+
+    // Read the edited file after a navigation, then republish through the
+    // authenticated project API. The same stable URL must serve the edit.
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 90_000 }).catch(() => null);
+    const savedFollowUp = await readWorkspaceFile("index.html");
+    step("follow_up_save_persists",
+      savedFollowUp?.includes(followUpMarker) === true,
+      savedFollowUp === null ? "index.html unreadable after reload" : `marker persisted=${savedFollowUp.includes(followUpMarker)}`);
+
+    if (DEPLOY_REQUESTED) {
+      const republishResponse = projectId && initialStablePublicUrl && savedFollowUp?.includes(followUpMarker)
+        ? await page.request.post(`${BASE}/api/projects/${projectId}/publish`, { timeout: 120_000 }).catch(() => null)
+        : null;
+      const republishBody = republishResponse?.ok() ? await republishResponse.json().catch(() => null) : null;
+      step("edit_republished",
+        republishResponse?.status() === 200 && republishBody?.published === true && !!republishBody?.deploymentId,
+        `status=${republishResponse?.status() ?? "not_run"} deployment=${republishBody?.deploymentId ?? "missing"}`);
+      const sameStableUrl = !!initialStablePublicUrl && republishBody?.stablePublicUrl === initialStablePublicUrl;
+      step("stable_project_url_unchanged", sameStableUrl,
+        `before=${initialStablePublicUrl ?? "missing"} after=${republishBody?.stablePublicUrl ?? "missing"}`);
+      const republishedUrl = sameStableUrl
+        ? `${initialStablePublicUrl}${initialStablePublicUrl.includes("?") ? "&" : "?"}acceptance_republish=${Date.now()}`
+        : null;
+      const republishedResponse = republishedUrl
+        ? await page.request.get(republishedUrl, { timeout: 45_000 }).catch(() => null)
+        : null;
+      const republishedContent = republishedResponse?.ok() ? await republishedResponse.text().catch(() => "") : "";
+      step("stable_project_url_updated_content",
+        republishedResponse?.status() === 200 && republishedContent.includes(followUpMarker),
+        `status=${republishedResponse?.status() ?? "unreachable"} marker=${republishedContent.includes(followUpMarker)}`);
+    }
+
+    // Open the user-facing Static View in a separate authenticated page.
+    // The earlier preview probe only checks the underlying runtime URL.
+    const staticPage = await context.newPage();
+    await staticPage.setViewportSize({ width: 1440, height: 900 });
+    await staticPage.goto(refreshUrl, { waitUntil: "domcontentloaded", timeout: 60_000 }).catch(() => null);
+    await dismissCookieConsent(staticPage);
+    let staticButton = null;
+    for (const candidate of await staticPage.getByRole("button", { name: "Static View", exact: true }).all()) {
+      if (await candidate.isVisible().catch(() => false) && await candidate.isEnabled().catch(() => false)) {
+        staticButton = candidate;
+        break;
+      }
+    }
+    await staticButton?.click().catch(() => {});
+    const staticFrame = staticPage.getByTestId("preview-iframe");
+    await staticFrame.waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
+    const staticFrameSrc = await staticFrame.getAttribute("src").catch(() => null);
+    const staticUrl = staticFrameSrc ? new URL(staticFrameSrc, BASE).toString() : null;
+    const staticResponse = staticUrl
+      ? await staticPage.request.get(staticUrl, { timeout: 45_000 }).catch(() => null)
+      : null;
+    const staticContent = staticResponse?.ok() ? await staticResponse.text().catch(() => "") : "";
+    step("static_view_opened",
+      !!staticButton && await staticFrame.isVisible().catch(() => false) &&
+        staticResponse?.status() === 200 && staticContent.includes(followUpMarker),
+      `frame=${staticFrameSrc ?? "missing"} status=${staticResponse?.status() ?? "unreachable"} marker=${staticContent.includes(followUpMarker)}`);
+    await shot(staticPage, "09-static-view");
+    await staticPage.close().catch(() => {});
+
+    // A rejected wallet operation is a concrete no-charge case. Keep this
+    // narrower than the separate agent-settlement regression suite, which
+    // covers failures after provider work has begun.
+    const walletBeforeFailedOperationResponse = await page.request.get(`${BASE}/api/wallet`, { timeout: 20_000 }).catch(() => null);
+    const walletBeforeFailedOperation = walletBeforeFailedOperationResponse?.ok()
+      ? await walletBeforeFailedOperationResponse.json().catch(() => null) : null;
+    const failedOperation = await page.request.post(`${BASE}/api/wallet`, {
+      data: { type: "spend", amount: -1, reason: "acceptance invalid spend", idempotencyKey: `acceptance-${Date.now()}` },
+      timeout: 20_000,
+    }).catch(() => null);
+    const walletAfterFailedOperationResponse = await page.request.get(`${BASE}/api/wallet`, { timeout: 20_000 }).catch(() => null);
+    const walletAfterFailedOperation = walletAfterFailedOperationResponse?.ok()
+      ? await walletAfterFailedOperationResponse.json().catch(() => null) : null;
+    const walletBreakdown = walletAfterFailedOperation?.balances;
+    step("billing_wallet_final",
+      walletAfterFailedOperation?.configured === true && walletAfterFailedOperation?.billingExempt === false &&
+        Number.isSafeInteger(walletAfterFailedOperation?.balance) && walletAfterFailedOperation.balance >= 0 &&
+        walletAfterFailedOperation.balance ===
+          (walletBreakdown?.monthly ?? NaN) + (walletBreakdown?.purchased ?? NaN) + (walletBreakdown?.beta_promotional ?? NaN),
+      `configured=${walletAfterFailedOperation?.configured ?? "missing"} balance=${walletAfterFailedOperation?.balance ?? "missing"}`);
+    step("failed_wallet_operation_unbilled",
+      failedOperation?.status() === 400 &&
+        Number.isSafeInteger(walletBeforeFailedOperation?.balance) &&
+        walletBeforeFailedOperation.balance === walletAfterFailedOperation?.balance,
+      `failedStatus=${failedOperation?.status() ?? "unreachable"} before=${walletBeforeFailedOperation?.balance ?? "missing"} after=${walletAfterFailedOperation?.balance ?? "missing"}`);
 
     // Verify the generated site from a real desktop viewport as well. This
     // is deliberately a separate browser page so the mobile composer proof
