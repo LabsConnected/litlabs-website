@@ -2853,6 +2853,15 @@ interface WriteValidationEnv {
    * branch forces a bounded recovery instead of closing the run.
    */
   notePendingRejection: (rejection: { toolId: string; path: string; error: string }) => void;
+  /**
+   * Whether a repeat overwrite-gate bounce for the same path may
+   * escalate into a declared recovery overwrite (see the overwrite
+   * stage in runPreApprovalWriteValidation). True in the live loops
+   * (initial + resume), where the call is a fresh model emission the
+   * loop is actively steering; false in the deferred batch, whose
+   * calls carry already-approved inputs that must never be rewritten.
+   */
+  recoveryOverwriteEscalation: boolean;
 }
 
 type WriteValidationOutcome =
@@ -2912,8 +2921,34 @@ async function runPreApprovalWriteValidation(
     !writeError &&
     (toolCall.toolId === "files.write" || toolCall.toolId === "site.compose")
   ) {
-    writeError = await existingPageOverwriteError(toolCall.inputs, transport);
-    if (writeError) writeError = `${toolCall.toolId} ${writeError}`;
+    const overwriteError = await existingPageOverwriteError(toolCall.inputs, transport);
+    if (overwriteError) {
+      // Recovery escalation: a call that ALREADY bounced once for
+      // this path has had the full steering — the refusal, the
+      // current file content re-read from disk, and the instruction
+      // to declare "allowOverwrite": true when replacing the whole
+      // page is the intent. If the model nevertheless re-emits the
+      // write, that re-emission is the declaration the gate exists
+      // to force: mark it (the same mechanism as
+      // markPatchRecoveryOverwrite) and let the call proceed to the
+      // checkpoint and the approval gate. Without this exit a
+      // re-emitted write bounces forever — the recovery marking only
+      // honors prior apply_patch rejections and a files.write bounce
+      // has no attempt bound — so on resume the nested approval gate
+      // sitting right after this validation was unreachable and the
+      // run spun instead of asking the user (PR #1144 CI:
+      // route.resume-wiring nested-approval test timeout). Scoped
+      // to the overwrite gate only: a provably INVALID write
+      // (placeholder, bad path, malformed plan) still bounces and
+      // never becomes a card. The deferred batch opts out via the
+      // env flag — its inputs are already approved, never rewritten.
+      const recoveryKey = `${toolCall.toolId}:${String(toolCall.inputs.path ?? "")}`;
+      if (env.recoveryOverwriteEscalation && (env.writeRecoveryAttempts.get(recoveryKey) ?? 0) > 0) {
+        toolCall.inputs = { ...toolCall.inputs, allowOverwrite: true };
+      } else {
+        writeError = `${toolCall.toolId} ${overwriteError}`;
+      }
+    }
   }
   // site.compose plan validation runs pre-approval too — the approval
   // freezes the plan, so a malformed one can only die post-approval
@@ -4263,6 +4298,7 @@ async function runAgentLoopV2Inner(
                 pendingWriteRejection = rejection;
               }
             },
+            recoveryOverwriteEscalation: true,
           },
           toolCall,
         );
@@ -5958,6 +5994,9 @@ export async function executeDeferredToolCalls(
             state.pendingWriteRejection = rejection;
           }
         },
+        // Deferred calls carry already-approved inputs — never
+        // rewrite them, so no recovery-overwrite escalation here.
+        recoveryOverwriteEscalation: false,
       },
       toolCall,
     );
@@ -7454,6 +7493,7 @@ async function resumeAgentLoopV2Inner(
                 pendingWriteRejection = rejection;
               }
             },
+            recoveryOverwriteEscalation: true,
           },
           toolCall,
         );
