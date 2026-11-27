@@ -12,7 +12,7 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import type { ToolContext, ToolDefinition, ToolEntry, ToolResult } from "@litt/agent-core";
-import { CdpBrowser, assertPublicHttpUrl, findBrowser } from "./cdp.js";
+import { CdpBrowser, assertPublicHttpDestination, findBrowser } from "./cdp.js";
 
 const ok = (message: string, data: Record<string, unknown> = {}): ToolResult =>
   ({ status: "success", success: true, message, data });
@@ -174,7 +174,7 @@ export const BROWSER_TOOL_ENTRIES: Record<string, ToolEntry> = {
       const url = typeof args.url === "string" ? args.url : "";
       let safeUrl: string;
       try {
-        safeUrl = assertPublicHttpUrl(url);
+        safeUrl = await assertPublicHttpDestination(url);
       } catch (e) { return fail((e as Error).message); }
       try {
         const b = await getBrowser(ctx);

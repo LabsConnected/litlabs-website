@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BROWSER_TOOL_ENTRIES } from "../lib/browser/tools.js";
-import { findBrowser, CdpBrowser, assertPublicHttpUrl } from "../lib/browser/cdp.js";
+import { findBrowser, CdpBrowser, assertPublicHttpUrl, assertPublicHttpDestination, type DnsResolver } from "../lib/browser/cdp.js";
 
 const LIVE = Boolean(findBrowser());
 
@@ -94,6 +94,93 @@ describe("assertPublicHttpUrl", () => {
     try {
       expect(assertPublicHttpUrl("http://127.0.0.1:3000/")).toContain("127.0.0.1");
       expect(() => assertPublicHttpUrl("file:///etc/passwd")).toThrow(/http\(s\)/);
+    } finally {
+      if (prev === undefined) delete process.env.LITT_BROWSER_ALLOW_PRIVATE;
+      else process.env.LITT_BROWSER_ALLOW_PRIVATE = prev;
+    }
+  });
+});
+
+describe("assertPublicHttpDestination (DNS-resolution enforcement)", () => {
+  // Unique fake hosts per test — the module-level DNS verdict cache is
+  // keyed by hostname, so reusing a name would leak state between tests.
+  const resolver =
+    (rows: Array<{ address: string; family: number }>): DnsResolver & { calls: string[] } => {
+      const calls: string[] = [];
+      const fn = (async (h: string) => { calls.push(h); return rows; }) as DnsResolver & { calls: string[] };
+      fn.calls = calls;
+      return fn;
+    };
+
+  it("rejects a hostname that resolves to loopback", async () => {
+    await expect(
+      assertPublicHttpDestination("https://rebind-loopback.test/", resolver([{ address: "127.0.0.1", family: 4 }])),
+    ).rejects.toThrow(/private|reserved/);
+  });
+
+  it("rejects a hostname that resolves to RFC1918 / link-local / metadata", async () => {
+    for (const [i, ip] of ["10.0.0.8", "192.168.1.1", "169.254.169.254"].entries()) {
+      await expect(
+        assertPublicHttpDestination(`https://rebind-${i}.test/`, resolver([{ address: ip, family: 4 }])),
+      ).rejects.toThrow(/private|reserved/);
+    }
+  });
+
+  it("rejects a hostname that resolves to a private IPv6 address", async () => {
+    await expect(
+      assertPublicHttpDestination("https://rebind-v6.test/", resolver([{ address: "fd00::1", family: 6 }])),
+    ).rejects.toThrow(/private|reserved/);
+  });
+
+  it("rejects when ANY resolved address is private (mixed answers poison the host)", async () => {
+    await expect(
+      assertPublicHttpDestination(
+        "https://rebind-mixed.test/",
+        resolver([{ address: "93.184.216.34", family: 4 }, { address: "10.1.2.3", family: 4 }]),
+      ),
+    ).rejects.toThrow(/private|reserved/);
+  });
+
+  it("fails closed when DNS resolution fails or returns nothing", async () => {
+    const failing: DnsResolver = async () => { throw new Error("ENOTFOUND"); };
+    await expect(assertPublicHttpDestination("https://rebind-nxdomain.test/", failing)).rejects.toThrow(/could not verify/);
+    await expect(
+      assertPublicHttpDestination("https://rebind-empty.test/", resolver([])),
+    ).rejects.toThrow(/private|reserved/);
+  });
+
+  it("allows a hostname resolving only to public addresses", async () => {
+    const url = await assertPublicHttpDestination(
+      "https://rebind-public.test/",
+      resolver([{ address: "93.184.216.34", family: 4 }, { address: "2606:2800:220:1:248:1893:25c8:1946", family: 6 }]),
+    );
+    expect(url).toContain("rebind-public.test");
+  });
+
+  it("does not resolve literal IPs — literal checks already ran", async () => {
+    const r = resolver([{ address: "127.0.0.1", family: 4 }]);
+    await expect(assertPublicHttpDestination("http://192.168.0.1/", r)).rejects.toThrow(/private|reserved/);
+    expect(r.calls).toHaveLength(0);
+    await expect(assertPublicHttpDestination("http://8.8.8.8/", r)).resolves.toContain("8.8.8.8");
+    expect(r.calls).toHaveLength(0);
+  });
+
+  it("caches the verdict per host within the TTL", async () => {
+    const r = resolver([{ address: "93.184.216.34", family: 4 }]);
+    await assertPublicHttpDestination("https://rebind-cache.test/", r);
+    await assertPublicHttpDestination("https://rebind-cache.test/other", r);
+    expect(r.calls).toHaveLength(1);
+  });
+
+  it("LITT_BROWSER_ALLOW_PRIVATE bypasses DNS checks entirely", async () => {
+    const prev = process.env.LITT_BROWSER_ALLOW_PRIVATE;
+    process.env.LITT_BROWSER_ALLOW_PRIVATE = "1";
+    try {
+      const r = resolver([{ address: "127.0.0.1", family: 4 }]);
+      await expect(
+        assertPublicHttpDestination("http://rebind-optout.test/", r, true),
+      ).resolves.toContain("rebind-optout.test");
+      expect(r.calls).toHaveLength(0);
     } finally {
       if (prev === undefined) delete process.env.LITT_BROWSER_ALLOW_PRIVATE;
       else process.env.LITT_BROWSER_ALLOW_PRIVATE = prev;

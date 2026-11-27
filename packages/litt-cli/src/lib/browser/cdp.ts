@@ -13,6 +13,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -156,6 +157,77 @@ export function assertPublicHttpUrl(raw: string): string {
   return u.toString();
 }
 
+// ─── DNS-resolution enforcement ────────────────────────────────────
+//
+// assertPublicHttpUrl only inspects the literal host. A public-looking
+// hostname can still resolve to a private/loopback/link-local address
+// (DNS rebinding, split-horizon DNS, attacker-controlled zones). The
+// functions below resolve the name and require EVERY returned address
+// to be public — one private answer poisons the whole destination.
+// Lookup failure fails closed: if we cannot prove the destination is
+// public, the request does not proceed.
+//
+// Residual limitation (documented, not silently claimed away): Chrome
+// performs its own resolution at connect time, so a determined attacker
+// controlling authoritative DNS could in theory rebind between our
+// lookup and Chrome's connect. Fetch-domain request interception
+// (enabled in CdpBrowser.launch) re-validates every request — main
+// document, redirects, and subresources — at request time, which
+// narrows the window to milliseconds. Full pinning would require an
+// egress proxy; that is out of scope for the local CLI adapter.
+
+export type DnsResolver = (hostname: string) => Promise<Array<{ address: string; family: number }>>;
+
+const defaultResolver: DnsResolver = async (hostname) => {
+  const rows = await lookup(hostname, { all: true, verbatim: true });
+  return rows.map((r) => ({ address: r.address, family: r.family }));
+};
+
+interface DnsVerdict { ok: boolean; expires: number }
+const DNS_CACHE_TTL_MS = 15_000;
+const dnsCache = new Map<string, DnsVerdict>();
+
+function addressIsPublic(address: string, family: number): boolean {
+  if (family === 4) return !ipv4IsPrivate(address);
+  if (family === 6) return !ipv6IsPrivate(address);
+  return false; // unknown family → deny
+}
+
+/**
+ * Async counterpart to assertPublicHttpUrl: literal checks PLUS DNS
+ * resolution of hostname destinations. Throws on any private answer,
+ * lookup failure, or unresolvable verdict. Cached per-host for
+ * DNS_CACHE_TTL_MS to keep subresource bursts cheap while still
+ * re-validating frequently enough to blunt rebinding.
+ */
+export async function assertPublicHttpDestination(
+  raw: string,
+  resolve: DnsResolver = defaultResolver,
+  allowPrivate = process.env.LITT_BROWSER_ALLOW_PRIVATE === "1",
+): Promise<string> {
+  const normalized = assertPublicHttpUrl(raw); // scheme + literal-host checks (also honors allowPrivate)
+  if (allowPrivate) return normalized;
+  const host = new URL(normalized).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (isIP(host)) return normalized; // literal IP already validated above
+  const cached = dnsCache.get(host);
+  if (cached && cached.expires > Date.now()) {
+    if (!cached.ok) throw new Error(`browser.navigate refused: ${host} resolves to a private/reserved address`);
+    return normalized;
+  }
+  let addrs: Array<{ address: string; family: number }>;
+  try {
+    addrs = await resolve(host);
+  } catch (e) {
+    throw new Error(`browser.navigate refused: could not verify ${host} resolves publicly (${(e as Error).message})`);
+  }
+  const ok = addrs.length > 0 && addrs.every((a) => addressIsPublic(a.address, a.family));
+  dnsCache.set(host, { ok, expires: Date.now() + DNS_CACHE_TTL_MS });
+  if (!ok) {
+    throw new Error(`browser.navigate refused: ${host} resolves to a private/reserved address`);
+  }
+  return normalized;
+}
+
 export class CdpBrowser {
   private proc: ChildProcess | null = null;
   private ws: WebSocket | null = null;
@@ -267,6 +339,16 @@ export class CdpBrowser {
     b.sessionId = sessionId;
     await b.send("Page.enable", {}, sessionId);
     await b.send("Runtime.enable", {}, sessionId);
+    // Fetch-domain interception: pause EVERY request and re-validate the
+    // destination against the public-URL policy at request time — main
+    // document, redirect hops, and subresources alike. This is the
+    // enforcement point that closes the gap between a one-time navigate
+    // check and what Chrome actually connects to. Required, not
+    // best-effort: if interception cannot be enabled we cannot guarantee
+    // destination policy, so launch fails closed.
+    if (process.env.LITT_BROWSER_ALLOW_PRIVATE !== "1") {
+      await b.send("Fetch.enable", { patterns: [{ urlPattern: "*" }] }, sessionId);
+    }
     // Deny all downloads — a page must not silently write files to disk.
     // Browser.setDownloadBehavior covers the default browser context;
     // failure is non-fatal on Chrome builds that moved the behavior.
@@ -294,6 +376,7 @@ export class CdpBrowser {
   private onMessage(raw: string): void {
     let msg: {
       id?: number; method?: string; params?: unknown; result?: unknown;
+      sessionId?: string;
       error?: { message?: string; code?: number };
     };
     try { msg = JSON.parse(raw) as typeof msg; } catch { return; }
@@ -315,6 +398,47 @@ export class CdpBrowser {
           w.resolve(msg.params);
         }
       }
+      if (msg.method === "Fetch.requestPaused") {
+        const params = msg.params as { requestId?: string; request?: { url?: string } } | undefined;
+        const sid = msg.sessionId ?? this.sessionId;
+        if (params?.requestId && params.request?.url && sid) {
+          void this.handlePausedRequest(sid, params.requestId, params.request.url);
+        }
+      }
+    }
+  }
+
+  /**
+   * Fetch.requestPaused handler — every intercepted request must be
+   * answered exactly once. Non-http(s) URLs (data:, blob:, about:)
+   * pass through untouched; http(s) destinations go through the full
+   * async public-destination check (literal + DNS). Any failure —
+   * private resolution, lookup error, timeout — fails the request.
+   */
+  private async handlePausedRequest(sessionId: string, requestId: string, url: string): Promise<void> {
+    const respond = (method: string, params: Record<string, unknown>) =>
+      this.send(method, params, sessionId).catch(() => {});
+    let scheme = "";
+    try { scheme = new URL(url).protocol; } catch { /* unparsable → fail below */ }
+    // Pass through only schemes a web page legitimately uses. Anything
+    // else — file:, ftp:, an unparsable URL — fails closed.
+    if (["http:", "https:", "data:", "blob:", "about:", "chrome:", "edge:"].includes(scheme)) {
+      if (scheme !== "http:" && scheme !== "https:") {
+        await respond("Fetch.continueRequest", { requestId });
+        return;
+      }
+    } else {
+      await respond("Fetch.failRequest", { requestId, errorReason: "BlockedByClient" });
+      return;
+    }
+    try {
+      await Promise.race([
+        assertPublicHttpDestination(url),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("destination validation timed out")), 5_000)),
+      ]);
+      await respond("Fetch.continueRequest", { requestId });
+    } catch {
+      await respond("Fetch.failRequest", { requestId, errorReason: "BlockedByClient" });
     }
   }
 
@@ -361,7 +485,7 @@ export class CdpBrowser {
     // URL and retreat to about:blank rather than leaving the agent
     // sitting on a blocked destination.
     try {
-      assertPublicHttpUrl(final.url);
+      await assertPublicHttpDestination(final.url);
     } catch {
       await this.send("Page.navigate", { url: "about:blank" }, this.sessionId).catch(() => {});
       throw new Error(`browser.navigate refused: redirect landed on blocked URL ${final.url.slice(0, 120)}`);
