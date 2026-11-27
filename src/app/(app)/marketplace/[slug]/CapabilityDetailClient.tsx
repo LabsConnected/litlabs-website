@@ -203,7 +203,7 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-white/40">
+      <div className="flex min-h-screen items-center justify-center text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">
         <p className="text-sm">Loading capability...</p>
       </div>
     );
@@ -213,7 +213,7 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-center">
-          <p className="text-white/40">This capability doesn&rsquo;t exist.</p>
+          <p className="text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">This capability doesn&rsquo;t exist.</p>
           <Link href="/marketplace" className="mt-3 inline-block text-sm font-bold" style={{ color: T.accentColor }}>
             Back to Marketplace
           </Link>
@@ -242,7 +242,7 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
       <ProductFrame className="py-8">
         <Link
           href="/marketplace"
-          className="inline-flex items-center gap-1.5 text-xs font-bold text-white/40 transition hover:text-white/70"
+          className="inline-flex items-center gap-1.5 text-xs font-bold text-[color-mix(in_srgb,var(--text-color)_40%,transparent)] transition hover:text-[color-mix(in_srgb,var(--text-color)_70%,transparent)]"
         >
           <ArrowLeft size={14} /> Back to Marketplace
         </Link>
@@ -281,20 +281,20 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
           {/* Details */}
           <div className="space-y-6">
             <section>
-              <h2 className="mb-3 text-xs font-black uppercase tracking-widest text-white/40">Details</h2>
-              <dl className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+              <h2 className="mb-3 text-xs font-black uppercase tracking-widest text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">Details</h2>
+              <dl className="space-y-3 rounded-2xl border border-[color-mix(in_srgb,var(--text-color)_10%,transparent)] bg-[color-mix(in_srgb,var(--text-color)_2%,transparent)] p-5">
                 <div className="flex items-center justify-between gap-4 text-sm">
-                  <dt className="text-white/40">Version</dt>
+                  <dt className="text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">Version</dt>
                   <dd className="font-bold" style={{ color: T.headerColor }}>v{item.version}</dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 text-sm">
-                  <dt className="text-white/40">Works with</dt>
+                  <dt className="text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">Works with</dt>
                   <dd className="font-bold" style={{ color: T.headerColor }}>
                     {assistants.length > 0 ? assistants.join(" · ") : "—"}
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 text-sm">
-                  <dt className="text-white/40">Requirements</dt>
+                  <dt className="text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">Requirements</dt>
                   <dd className="text-right font-bold" style={{ color: T.headerColor }}>
                     {item.required_connections.length > 0
                       ? item.required_connections.map((c) => CONNECTION_LABELS[c] || c).join(" · ")
@@ -302,7 +302,7 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 text-sm">
-                  <dt className="text-white/40">Provider</dt>
+                  <dt className="text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">Provider</dt>
                   <dd className="font-bold" style={{ color: T.headerColor }}>
                     {item.author_name || "LiTTree Labs"}
                     {item.is_official && (
@@ -313,16 +313,16 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
                   </dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 text-sm">
-                  <dt className="text-white/40">Price</dt>
+                  <dt className="text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">Price</dt>
                   <dd className="font-bold" style={{ color: T.headerColor }}>{formatPrice(item.price_cents)}</dd>
                 </div>
               </dl>
             </section>
 
             <section>
-              <h2 className="mb-3 text-xs font-black uppercase tracking-widest text-white/40">Changelog</h2>
-              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
-                <p className="text-sm text-white/40">No changelog published yet.</p>
+              <h2 className="mb-3 text-xs font-black uppercase tracking-widest text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">Changelog</h2>
+              <div className="rounded-2xl border border-[color-mix(in_srgb,var(--text-color)_10%,transparent)] bg-[color-mix(in_srgb,var(--text-color)_2%,transparent)] p-5">
+                <p className="text-sm text-[color-mix(in_srgb,var(--text-color)_40%,transparent)]">No changelog published yet.</p>
               </div>
             </section>
           </div>
@@ -366,14 +366,14 @@ export default function CapabilityDetailClient({ slug }: { slug: string }) {
                     {busy ? "Installing…" : `Install ${item.name}`}
                   </button>
                 ) : (
-                  <div className="w-full rounded-xl bg-white/[0.04] py-3 text-center text-sm font-black text-white/30">
+                  <div className="w-full rounded-xl bg-[color-mix(in_srgb,var(--text-color)_4%,transparent)] py-3 text-center text-sm font-black text-[color-mix(in_srgb,var(--text-color)_30%,transparent)]">
                     Coming Soon
                   </div>
                 )}
               </div>
 
               {item.required_connections.length > 0 && (
-                <div className="mt-4 flex items-start gap-1.5 border-t border-white/5 pt-4 text-[11px] font-bold" style={{ color: T.textMuted }}>
+                <div className="mt-4 flex items-start gap-1.5 border-t border-[color-mix(in_srgb,var(--text-color)_5%,transparent)] pt-4 text-[11px] font-bold" style={{ color: T.textMuted }}>
                   <Plug size={12} className="mt-0.5 shrink-0" />
                   Requires {item.required_connections.map((c) => CONNECTION_LABELS[c] || c).join(" · ")}
                 </div>
