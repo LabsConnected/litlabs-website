@@ -309,6 +309,9 @@ test.describe("Site Audit — Navigation Links @public", () => {
 
     for (const href of sampleHrefs) {
       const response = await page.goto(href, { waitUntil: "domcontentloaded" });
+      // Same client-side redirect race as the secrets audit: let in-flight
+      // router navigations settle before the next goto.
+      await page.waitForLoadState("networkidle").catch(() => {});
       const status = response?.status() ?? 0;
       if (status !== 200 && status !== 307 && status !== 302) {
         broken.push(`${href} → ${status}`);
@@ -327,6 +330,10 @@ test.describe("Site Audit — Security @public", () => {
 
     for (const route of publicPaths) {
       await page.goto(route, { waitUntil: "domcontentloaded" });
+      // Static redirect stubs (e.g. /gallery → /showcase) finish their
+      // client-side navigation after domcontentloaded; let the network
+      // settle so the next goto isn't aborted mid-redirect (ERR_ABORTED).
+      await page.waitForLoadState("networkidle").catch(() => {});
       const bodyText = await page.locator("body").innerText();
 
       expect(bodyText, `${route} should not expose API keys`).not.toMatch(/sk_live_|sk_test_|STRIPE_SECRET/);
