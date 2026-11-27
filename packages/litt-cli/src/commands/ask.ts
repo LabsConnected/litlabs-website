@@ -25,6 +25,7 @@ import {
   type StreamChunk,
 } from "@litt/agent-core";
 import { createRuntimeSession } from "../lib/runtime-session.js";
+import { BROWSER_TOOL_ENTRIES } from "../lib/browser/tools.js";
 import { createToolCallStreamFilter } from "../lib/tool-call-stream.js";
 import { createAskOutput, parseAskArgs } from "../lib/ask-output.js";
 import { hasAnyProviderKey, resolveProviderAdapter, providerLabel, resolveIdleStallMs } from "../lib/model-provider.js";
@@ -136,7 +137,10 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   // lets weak local models invoke expensive checks for a prompt that cannot
   // use their results (observed: `Reply with exactly...` -> project.check).
   const directAnswerOnly = isExactAnswerPrompt(question);
-  const tools = new ToolRegistry(undefined, { includeDefaults: !directAnswerOnly });
+  const tools = new ToolRegistry(
+    directAnswerOnly ? {} : BROWSER_TOOL_ENTRIES,
+    { includeDefaults: !directAnswerOnly },
+  );
   const gateway = new ExecutionGateway({
     tools,
     shell,

@@ -22,6 +22,7 @@
  */
 
 import { restoreTerminal } from "./terminal-teardown.js";
+import { BROWSER_TOOL_ENTRIES } from "./browser/tools.js";
 import {
   createShellExecutor,
   CommandExecutor,
@@ -288,7 +289,7 @@ export class RuntimeSession {
   getGateway(): ExecutionGateway {
     if (this._gateway) return this._gateway;
     this._gateway = new ExecutionGateway({
-      tools: new ToolRegistry(),
+      tools: new ToolRegistry(BROWSER_TOOL_ENTRIES),
       shell: this._shell,
       executor: this._executor,
       store: this._store,
