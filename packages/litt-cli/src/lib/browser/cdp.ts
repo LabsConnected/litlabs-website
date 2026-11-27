@@ -183,6 +183,11 @@ export class CdpBrowser {
       b.profileDir = mkdtempSync(join(tmpdir(), "litt-browser-"));
     }
     const portFile = join(b.profileDir, "DevToolsActivePort");
+    // CI containers routinely deny user namespaces (Chrome's sandbox
+    // needs them) and ship a tiny /dev/shm that crashes the renderer.
+    // --no-sandbox stays opt-in outside CI: LITT_BROWSER_NO_SANDBOX=1 or
+    // any CI environment. --disable-dev-shm-usage is harmless everywhere.
+    const noSandbox = process.env.LITT_BROWSER_NO_SANDBOX === "1" || Boolean(process.env.CI);
     const args = [
       "--remote-debugging-port=0",
       `--user-data-dir=${b.profileDir}`,
@@ -193,13 +198,21 @@ export class CdpBrowser {
       "--disable-background-networking",
       "--disable-component-update",
       "--disable-features=Translate",
+      "--disable-dev-shm-usage",
       "--metrics-recording-only",
       "--mute-audio",
+      ...(noSandbox ? ["--no-sandbox"] : []),
       ...(opts.headless === false ? [] : ["--headless=new"]),
       ...(opts.args ?? []),
       "about:blank",
     ];
     b.proc = spawn(exe, args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+    // Keep the stderr tail for diagnostics — Chrome's real failure reason
+    // (missing libs, sandbox denial) otherwise vanishes with the pipe.
+    let stderrTail = "";
+    b.proc.stderr?.on("data", (chunk: Buffer) => {
+      stderrTail = (stderrTail + chunk.toString("utf8")).slice(-4096);
+    });
     b.proc.on("exit", () => { if (!b.closed) b.failAll(new Error("browser process exited")); });
     // Never orphan Chrome: kill synchronously on process exit (SIGINT path
     // exits via process.exit(), which skips async cleanup).
@@ -226,8 +239,11 @@ export class CdpBrowser {
       await new Promise((r) => setTimeout(r, 150));
     }
     if (!version?.webSocketDebuggerUrl) {
+      const tail = stderrTail.trim();
       b.close();
-      throw new Error("browser did not open a DevTools endpoint within 15s");
+      throw new Error(
+        `browser did not open a DevTools endpoint within 15s${tail ? ` — ${tail.split("\n").slice(-3).join(" | ")}` : ""}`,
+      );
     }
     await b.connect(version.webSocketDebuggerUrl);
     // Browser-level Network domain — required for Network.getAllCookies
