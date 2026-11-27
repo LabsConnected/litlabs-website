@@ -8,6 +8,7 @@ import Link from "next/link";
 import { Loader2, ArrowLeft, Activity, KeyRound, Check, AlertCircle } from "lucide-react";
 import GitHubPATDrawer from "./GitHubPATDrawer";
 import NetlifyTokenDrawer from "./NetlifyTokenDrawer";
+import ConnectPcCard from "./ConnectPcCard";
 
 type MetaStatus = {
   connected: boolean;
@@ -130,6 +131,8 @@ export default function ConnectionsPage() {
             Diagnostics
           </Link>
         </div>
+
+        <div className="mb-6"><ConnectPcCard /></div>
 
         {loading ? (
           <div className="flex items-center gap-2 text-sm opacity-50">
