@@ -28,3 +28,13 @@ planned → state persisted → executing ⇄ (checkpoint persisted → paused �
 - The P0 audit inventories the current implementation against each of the nine requirements per surface: satisfied / partial / absent, with source evidence.
 - No repair is proposed, and no execution-core code is modified, until confirmed root causes, affected files, proposed repairs, and acceptance criteria have been presented to the founder.
 - Every repaired capability requires actual runtime evidence, and independent verification (Devin's lane) before release acceptance restarts.
+
+## Addendum (founder, 2026-11-26 ~21:01 ET) — R6–R8: destructive-action, content-separation, and publishing integrity
+
+**R6 — Destructive action safety.** Every destructive approval must display: the exact target file or resource, the requested operation, the reason, affected dependencies, expected consequences, and recovery availability. Approval for an unidentified target is prohibited. Before deleting project assets, the run inspects their references and dependencies; deletion of a required asset is BLOCKED unless the authorized operation includes repairing its references. Repetitive destructive approval loops are prevented. The approval card standard: a card that names the target, operation, and risk; shows the dependency check ("index.html references this image — the homepage hero will lose its image"); states BLOCKED when dependencies are unresolved; and offers Replace image / Cancel deletion / Review affected files. LiTT protects customers from destructive agent mistakes instead of asking them to approve those mistakes.
+
+**R7 — Content and instruction separation.** Internal execution instructions never become customer-facing content. The following must never appear in a generated website: agent repair instructions, internal execution messages, debugging output, system prompts, tool diagnostics, unrequested placeholder content. Generated content is verified against the customer's actual requirements before completion. (Origin: an acceptance run's rebuild pasted the tester's repair message verbatim into the published site's footer.)
+
+**R8 — Publishing integrity.** Publishing is blocked when required build artifacts are missing; duplicate publishing from retries or UI inconsistencies is prevented; actual deployment results are verified; publishing operations are correlated with billing records; publishing always requires explicit authorization.
+
+These extend the same contract — they are not separate systems. Destructive-action and publishing events carry the run ID (§1) and authorized scope (§3); dependency verification at deletion time applies §6's artifact rule to removals as well as references.
