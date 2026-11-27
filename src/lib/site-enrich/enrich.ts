@@ -24,7 +24,13 @@ import { createHash } from "crypto";
 import { insertAssetFromUrl, type InsertAssetResult } from "@/lib/litt-intelligence/tool-handlers-v2";
 import type { WorkspaceTransport } from "@/lib/litt-intelligence/workspace-transport";
 import { resolveSlotImage, type ProviderAttempt, type ResolvedImage } from "./resolver";
-import { auditStaticSiteHtml, extractImageRefs, type VisualAudit } from "./audit";
+import {
+  auditStaticSiteHtml,
+  extractImageRefs,
+  refExistsInFileSet,
+  resolveRefAgainstDir,
+  type VisualAudit,
+} from "./audit";
 
 export interface EnrichReport {
   filesScanned: number;
@@ -121,23 +127,31 @@ export async function enrichStaticSiteVisuals(
   const totalTimeoutMs = Number(process.env.ENRICH_TOTAL_TIMEOUT_MS) || 30_000;
   const overallSignal = AbortSignal.timeout(totalTimeoutMs);
   try {
-    const root = await transport.listFiles("");
-    const htmlFiles = root.entries
-      .filter((e) => e.type === "file" && /\.html?$/i.test(e.name))
-      .map((e) => e.name);
-    if (htmlFiles.length === 0) return report;
-
     const fileSet = new Set<string>();
+    // P0 R3 (audit D4): HTML pages are gathered during the same
+    // recursive collection that builds the file set — previously only
+    // ROOT-level pages were scanned, so a page in a subdirectory was
+    // never audited or repaired. Root pages sort first: the entry
+    // page and the real-photo floor keep their established priority.
+    const htmlFiles: string[] = [];
     const collect = async (dir: string, prefix: string, depth: number) => {
       if (depth > 3) return;
       const res = await transport.listFiles(dir).catch(() => null);
       for (const e of res?.entries ?? []) {
         const p = prefix ? `${prefix}/${e.name}` : e.name;
-        if (e.type === "file") fileSet.add(p);
-        else if (e.type === "directory") await collect(p, p, depth + 1);
+        if (e.type === "file") {
+          fileSet.add(p);
+          if (/\.html?$/i.test(e.name)) htmlFiles.push(p);
+        } else if (e.type === "directory") {
+          await collect(p, p, depth + 1);
+        }
       }
     };
     await collect("", "", 0);
+    htmlFiles.sort(
+      (a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b),
+    );
+    if (htmlFiles.length === 0) return report;
 
     let seed = 1;
     // Site-relative paths of persisted images known to be too small to
@@ -277,6 +291,10 @@ export async function enrichStaticSiteVisuals(
       (await resolveImage(keywords, signal))?.sitePath ?? null;
 
     for (const file of htmlFiles) {
+      // Directory of the page being repaired ("" at the root) — phase
+      // 3 judges local refs against it as well as root-relative, so a
+      // nested page's valid "../assets/…" reference is never rewritten.
+      const fileDir = file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "";
       const { content } = await transport.readFile(file);
       let html = content;
       let changed = false;
@@ -355,8 +373,11 @@ export async function enrichStaticSiteVisuals(
         const relMissing =
           !isExternal &&
           !/^(data:|blob:)/i.test(src) &&
-          !fileSet.has(src.replace(/^\.\//, "").replace(/^\//, "").split(/[?#]/)[0]) &&
-          !fileSet.has(`public/${src.replace(/^\.\//, "").replace(/^\//, "").split(/[?#]/)[0]}`);
+          !refExistsInFileSet(
+            src.split(/[?#]/)[0].replace(/^\.\//, "").replace(/^\//, ""),
+            fileDir,
+            fileSet,
+          );
         // The rewrite differs by kind: an <img> carries src="…" inside the
         // matched tag (SRC_ATTR_RE), a css url() is just the bare URL —
         // replacing the src substring preserves the original quoting.
@@ -420,7 +441,10 @@ export async function enrichStaticSiteVisuals(
     // own <title>/<h1>), real bytes persisted in the workspace. Images
     // that fail to resolve are honestly not faked; the post-audit then
     // still reports what actually shipped.
-    const entry = htmlFiles.find((f) => /^index\.html?$/i.test(f)) ?? htmlFiles[0];
+    const entry =
+      htmlFiles.find((f) => /^index\.html?$/i.test(f)) ??
+      htmlFiles.find((f) => /(^|\/)index\.html?$/i.test(f)) ??
+      htmlFiles[0];
     {
       const { content: entryHtml } = await transport.readFile(entry);
       const countPhotos = (html: string) => {
@@ -595,7 +619,19 @@ export async function enrichStaticSiteVisuals(
     for (const p of report.filesChanged) postFiles.add(p);
     const assets = await transport.listFiles("assets/images").catch(() => null);
     for (const e of assets?.entries ?? []) if (e.type === "file") postFiles.add(`assets/images/${e.name}`);
-    report.audit = auditStaticSiteHtml(finalHtml, postFiles);
+    const rawAudit = auditStaticSiteHtml(finalHtml, postFiles);
+    // A nested entry page's refs resolve against its own directory:
+    // drop broken flags for refs that exist under either reading and
+    // report survivors in their resolved (operative) form.
+    const entryDir = entry.includes("/") ? entry.slice(0, entry.lastIndexOf("/")) : "";
+    report.audit = entryDir
+      ? {
+          ...rawAudit,
+          brokenRefs: rawAudit.brokenRefs
+            .filter((r) => !refExistsInFileSet(r, entryDir, postFiles))
+            .map((r) => resolveRefAgainstDir(r, entryDir)),
+        }
+      : rawAudit;
     // Whatever placeholder references survive every repair phase are
     // named on the report: the artifact is honest (the placeholder
     // renders, never a broken <img>), but the run must not be able to

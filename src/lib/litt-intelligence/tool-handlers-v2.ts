@@ -15,6 +15,7 @@
 import "server-only";
 
 import { destructiveRewriteViolation, existingPageOverwriteError, placeholderViolation, simulatePatchResult, tailwindViolation } from "./patch-validation";
+import { findAssetReferences, normalizeWorkspacePath } from "./destructive-action";
 import { normalizeWorkspaceRelativePath, workspacePathError } from "./workspace-path";
 import { fitImageForPublish, PUBLISH_MAX_IMAGE_BYTES } from "./asset-image-fit";
 import { sniffImageMimeType } from "@/lib/image-sniff";
@@ -233,6 +234,35 @@ export const handleFilesDelete: ToolHandler = async (inputs, transport) => {
   if (pathError) return { success: false, error: pathError };
   const badPath = placeholderViolation(path, "path");
   if (badPath) return { success: false, error: badPath };
+
+  // P0 R6 — dependency protection at the execution boundary (Execution
+  // Integrity Contract §R6): a project asset that live project files
+  // still reference is never deleted out from under them — that is
+  // exactly how the 2026-11-26 acceptance run lost the two images its
+  // homepage needed and broke publishing. The block lives here, at
+  // the one point every execution path passes through, so no caller
+  // (gated, resumed, deferred, or direct) can bypass it. The delete
+  // may land only once the references have been repaired — removed or
+  // repointed — which is the contract's "authorized operation includes
+  // repairing their references" condition. An uninspectable workspace
+  // yields no dependencies (absent evidence is not a verdict) and the
+  // delete proceeds as before.
+  const target = normalizeWorkspacePath(path);
+  if (target) {
+    const dependencies = await findAssetReferences(transport, target);
+    if (dependencies.length > 0) {
+      const referencing = dependencies.map((d) => d.path).join(", ");
+      return {
+        success: false,
+        blocked: true,
+        referencedBy: dependencies.map((d) => d.path),
+        error:
+          `Deletion blocked: ${referencing} still reference${dependencies.length === 1 ? "s" : ""} ${target}. ` +
+          `Deleting it would break those pages. Remove or repoint the reference first ` +
+          `(or replace the asset), then delete. Nothing was deleted.`,
+      };
+    }
+  }
 
   try {
     await transport.deleteFile(path);
