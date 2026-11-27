@@ -18,6 +18,18 @@ Source inspection used the isolated audit branch at `8abb40b91`. The earlier ful
 | WSL Ubuntu, built CLI version, help and local status | Version 0.1.1 and help worked. Status returned authentication required, exit 1, including local-only invocation. | Launch smoke only. A signed-in tool turn and native WSL build remain open. Preserve auth behavior pending diagnosis. |
 | Android/Termux and macOS | No device run in this audit. | Record as unverified. |
 
+## Evidence recorded on November 27, 2026 (CLI takeover lane)
+
+Worktree `cli-next-audit-20261126`, branch `codex/cli-next-audit-20261126` at `4a7d61192` plus Codex's uncommitted session-store changes. Windows, Node 22, pnpm 10.33.4, Ollama live with `litt-coder:8k`.
+
+| Check | Observed result | Scope of inference |
+|---|---|---|
+| `node --test --import tsx src/__tests__/*.test.ts` in `litt-agent-core` after the stdin fix | 1,058/1,058 passed, 0 failed. | Full core suite on Windows. |
+| `stdin-plumbing.test.ts` incl. 6 new live Windows cases | 12/12 passed. Bare `date`, `time`, `pause` return promptly (no stdin-pipe hang); `date +%Y` resolves via Git coreutils or aborts honestly; `findstr` explicit-stdin guard passes. | Real spawned processes on this machine, not mocks. |
+| `litt ask --jsonl` (local-only, `litt-coder:8k`), trivial prompt | `run.started` → `model.started` → one `model.delta` ("4") → `run.result` termination `complete`, exit 0, ~6.9 s wall (includes cold model load). | One headless turn. Proves native delta events reach the JSONL consumer; multi-delta TTFT percentiles still unmeasured. |
+| `litt ask --jsonl`, second prompt | 30 sequenced events: 11 agent rounds, real gateway tool calls (`project.status/log/diff/list_files/check/run`), `project.check` ran `npx tsc --noEmit` exit 0 in 95.3 s, one honest tool-arg validation failure plus identical-retry guard, run terminated `cancelled` exit 130 at the 120 s ask timeout — no fake success. | One real multi-tool turn against this worktree. Shows structured events, truthful termination, and live tool execution; model chose tools over answering (weak-model behavior, expected). |
+| Session-store uncommitted diff (Codex) | `vitest run session-store.test.ts` 15/15 passed. | Conversation-ID persistence fix is coherent and green; left uncommitted to preserve Codex's lane state. |
+
 ## Traceability and outstanding live checks
 
 | Behavior | Repository evidence | Outstanding end-to-end observation |
