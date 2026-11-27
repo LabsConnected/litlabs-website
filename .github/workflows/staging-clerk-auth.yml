@@ -332,22 +332,22 @@ jobs:
             # Surface a sanitized tail — the log is deleted by the final
             # cleanup step, so without this every auth failure is opaque.
             python3 - "$auth_log" 2>/dev/null | tee -a "$GITHUB_STEP_SUMMARY" <<'PY' || true
-import re, sys
-try:
-    lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
-except Exception as exc:
-    print(f"- auth-setup log unavailable: {exc}")
-    sys.exit(0)
-secret = re.compile(
-    r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
-    r"|(?:sk|pk)_(?:test|live)_[A-Za-z0-9]+"
-    r"|[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,}"
-)
-print("\n### auth-setup failure (sanitized tail)\n```")
-for line in lines[-80:]:
-    print(secret.sub("<redacted>", line))
-print("```")
-PY
+          import re, sys
+          try:
+              lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
+          except Exception as exc:
+              print(f"- auth-setup log unavailable: {exc}")
+              sys.exit(0)
+          secret = re.compile(
+              r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
+              r"|(?:sk|pk)_(?:test|live)_[A-Za-z0-9]+"
+              r"|[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,}"
+          )
+          print("\n### auth-setup failure (sanitized tail)\n```")
+          for line in lines[-80:]:
+              print(secret.sub("<redacted>", line))
+          print("```")
+          PY
             exit 1
           fi
           echo "User A authentication: PASS"

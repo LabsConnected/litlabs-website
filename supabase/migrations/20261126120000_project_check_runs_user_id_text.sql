@@ -6,9 +6,12 @@
 -- (project-checks:persist_failed on staging, verified live).
 --
 -- Postgres refuses ALTER COLUMN TYPE while a policy depends on the
--- column (0A000), so the owner-select policy is dropped first and
--- recreated against the new text type below.
+-- column (0A000), so every policy referencing user_id is dropped first.
+-- owner_insert is recreated by 20261126130000 on replays; owner_select is
+-- recreated below. Dropping owner_insert here is a no-op on first apply
+-- (the policy does not exist yet) and is required for idempotent re-runs.
 drop policy if exists project_check_runs_owner_select on public.project_check_runs;
+drop policy if exists project_check_runs_owner_insert on public.project_check_runs;
 
 alter table public.project_check_runs
   alter column user_id type text using user_id::text;

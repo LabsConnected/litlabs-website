@@ -170,7 +170,14 @@ export async function GET(
   // project (automatic at build completion, or on demand), the panel
   // shows THOSE results — tied to the run that produced them —
   // instead of the not_run placeholder set.
-  if (payload.project.workspaceStatus === "ready") {
+  // ACC-10 Defect 1: the persisted read is no longer gated on the
+  // workspace being "ready" right now. A persisted run is historical
+  // fact (it carries its own timestamps); gating it on the CURRENT
+  // workspace status made the Checks panel and the Jobs tab deny a
+  // run that demonstrably happened whenever the workspace was not
+  // ready at read time — the two surfaces disagreed about the same
+  // build (Acceptance Run 1 on 4adcdd4c).
+  {
     const persisted = await getLatestProjectCheckRun(projectId, userId);
     if (persisted) {
       return NextResponse.json(

@@ -237,27 +237,32 @@ export class CliAgentLoop {
 
   /**
    * Direct inference path for simple conversations (no tool execution).
+   *
+   * NOT IMPLEMENTED: this loop has no model provider wired in, so there is
+   * no genuine inference to perform here. Returning fabricated success
+   * would violate the no-false-success contract — report an explicit
+   * failure instead. Production chat goes through runAgentLoop (which owns
+   * the provider), not this path.
    */
   private async executeDirectInference(step: AgentStep): Promise<AgentStepResult> {
-    // Logic for direct LLM response without tool invocation
     const toolCallId = `direct_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    
-    // Placeholder for actual direct inference call to the model
-    // This bypasses CommandExecutor/gateway
+    const message =
+      "Direct inference is not available in this execution path. " +
+      "Conversation steps must be routed through runAgentLoop, which owns the model provider.";
     return {
       step,
       result: {
-        status: "success",
-        message: "Direct response: " + step.args.join(" "),
-        success: true,
+        status: "failed",
+        message,
+        success: false,
         data: {},
       },
       runId: this.currentRunId!,
       toolCallId,
-      status: "success",
-      durationMs: 10,
-      risk: { level: "safe", capability: "read_only", reason: "Direct inference", mutating: false },
-      approved: true,
+      status: "failed",
+      durationMs: 0,
+      risk: { level: "safe", capability: "read_only", reason: "Direct inference unsupported", mutating: false },
+      approved: false,
     };
   }
 

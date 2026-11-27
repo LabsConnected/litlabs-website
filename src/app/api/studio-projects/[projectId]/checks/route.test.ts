@@ -30,14 +30,20 @@ vi.mock("@/lib/terminal-config", () => ({
   requireTerminalBaseUrl: vi.fn(() => "https://terminal.test"),
   terminalNotConfiguredResponse: vi.fn(() => null),
 }));
+vi.mock("@/lib/projects/project-checks", () => ({
+  getLatestProjectCheckRun: vi.fn(async () => null),
+  saveProjectCheckRun: vi.fn(async () => true),
+}));
 
 import { auth } from "@/lib/auth";
 import { getProject, verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { listCheckpoints, listPendingApprovals } from "@/lib/missions/mission-repository";
+import { getLatestProjectCheckRun } from "@/lib/projects/project-checks";
 
 const authMock = vi.mocked(auth);
 const getProjectMock = vi.mocked(getProject);
 const verifyMock = vi.mocked(verifyProjectWorkspace);
+const latestRunMock = vi.mocked(getLatestProjectCheckRun);
 
 const PROJECT = {
   id: "p1",
@@ -109,6 +115,42 @@ describe("checks route — honest not-run + bounded commands (ACC-06a item 2)", 
       expect(check.error).toBeTruthy();
       expect(check.error).toMatch(/on demand/i);
     }
+  });
+
+  // ACC-10 Defect 1 — a persisted check run is historical fact and
+  // must be served even when the workspace is not "ready" at read
+  // time. The old gate made the Checks panel and the Jobs tab deny a
+  // run that demonstrably happened (Acceptance Run 1 on 4adcdd4c:
+  // the panel showed the run, Jobs claimed none had ever run).
+  it("GET serves the persisted check run even when the workspace is not ready", async () => {
+    getProjectMock.mockResolvedValue({ ...PROJECT, workspaceStatus: "provisioning" } as never);
+    latestRunMock.mockResolvedValue({
+      checks: [
+        {
+          id: "build",
+          label: "Build",
+          status: "not_configured",
+          source: "No script configured",
+          timestamp: "2026-11-26T23:14:17.000Z",
+        },
+      ],
+      summary: { total: 7, passed: 0, failed: 0, notConfigured: 7, changedFileCount: 1 },
+      conversationId: "conv-1",
+      createdAt: "2026-11-26T23:14:17.000Z",
+    } as never);
+
+    const res = await GET(getRequest(), makeParams("p1"));
+    const payload = (await res.json()) as {
+      checks: Array<{ id: string; status: string }>;
+      checkRun?: { conversationId: string | null; createdAt: string } | null;
+    };
+
+    expect(payload.checkRun).toEqual({
+      conversationId: "conv-1",
+      createdAt: "2026-11-26T23:14:17.000Z",
+    });
+    expect(payload.checks).toHaveLength(1);
+    expect(payload.checks[0].status).toBe("not_configured");
   });
 
   it("POST settles a hung workspace command as failed with a timeout reason", async () => {

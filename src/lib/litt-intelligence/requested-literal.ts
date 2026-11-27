@@ -195,6 +195,12 @@ export function extractExpectedLiteral(instruction: string): string | null {
   if (tail.length > 240) return null;
   const literal = cleanLiteral(tail);
   if (!literal) return null;
+  // A tail that names a FILE is a destination, not replacement text:
+  // "…and save the edit to index.html" ends in " to index.html", and
+  // gating on the filename fails every honest edit (staging acceptance
+  // 45904303510 follow-up: the requested marker landed but the run
+  // reported failure because the check searched for "index.html").
+  if (isFilePathLiteral(literal)) return null;
   // A tail that opens with an instruction verb is a paraphrase, not
   // content: "update the footer to include the verification marker"
   // asks for content in the model's own words — gating on it would
@@ -203,6 +209,17 @@ export function extractExpectedLiteral(instruction: string): string | null {
   const firstWord = literal.split(/\s+/, 1)[0].toLowerCase();
   if (INSTRUCTION_VERBS.has(firstWord)) return null;
   return literal;
+}
+
+/**
+ * A path-like token: no whitespace, carries a file extension or a path
+ * separator. "index.html", "src/app.tsx", "./out.json" are destinations
+ * a " to " clause can name — never literal page content.
+ */
+function isFilePathLiteral(literal: string): boolean {
+  if (/\s/.test(literal)) return false;
+  if (/[\\/]/.test(literal)) return true;
+  return /\.[A-Za-z0-9]{1,10}$/.test(literal);
 }
 
 /** Verbs that open an instruction phrase rather than literal content. */
