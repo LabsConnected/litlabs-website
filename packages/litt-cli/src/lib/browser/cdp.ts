@@ -13,10 +13,21 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  assertPublicHttpDestination,
+  assertPublicHttpUrl,
+  startEgressProxy,
+  type DnsResolver,
+  type EgressProxy,
+} from "./net-guard.js";
+
+// Policy + DNS-resolution enforcement lives in ./net-guard.ts (shared
+// with the enforcing egress proxy). Re-exported here so existing
+// importers (tools.ts, tests) keep their paths.
+export { assertPublicHttpDestination, assertPublicHttpUrl };
+export type { DnsResolver };
 
 export interface CdpBrowserOptions {
   /** Explicit browser binary. Auto-detected when omitted. */
@@ -66,167 +77,11 @@ export function findBrowser(): string | null {
   return null;
 }
 
-// ─── Navigation policy ─────────────────────────────────────────────
-// The agent must not be able to reach local services, LAN hosts, or
-// cloud metadata endpoints through the browser — page content is
-// untrusted input and a prompt-injected page could otherwise exfiltrate
-// via http://169.254.169.254/ or pivot into the internal network.
-// Literal IP hosts are checked directly; hostname→private-IP resolution
-// (DNS rebinding) is a known residual limitation documented in the tool
-// description. LITT_BROWSER_ALLOW_PRIVATE=1 is the explicit dev opt-out.
-
-const PRIVATE_HOSTNAMES = new Set([
-  "localhost",
-  "metadata.google.internal",
-  "metadata",
-  "instance-data",
-]);
-
-function ipv4IsPrivate(ip: string): boolean {
-  const parts = ip.split(".").map((n) => parseInt(n, 10));
-  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return true; // unparseable → deny
-  const [a, b] = parts;
-  return (
-    a === 0 || a === 10 || a === 127 || // this-net, private, loopback
-    (a === 100 && b >= 64 && b <= 127) || // CGNAT
-    (a === 169 && b === 254) || // link-local incl. cloud metadata
-    (a === 172 && b >= 16 && b <= 31) || // private
-    (a === 192 && b === 168) || // private
-    (a === 198 && (b === 18 || b === 19)) || // benchmarking
-    a >= 224 // multicast + reserved + broadcast
-  );
-}
-
-function ipv6IsPrivate(ip: string): boolean {
-  const s = ip.toLowerCase();
-  if (s === "::1" || s === "::") return true;
-  if (s.startsWith("fe80") || s.startsWith("fc") || s.startsWith("fd")) return true; // link-local, ULA
-  // IPv4-mapped IPv6 (::ffff:a.b.c.d). Node's URL parser normalizes the
-  // dotted form to hex (::ffff:7f00:1), so handle both representations —
-  // otherwise a mapped loopback/private address would slip the guard.
-  const mapped = s.match(/^::ffff:(.+)$/);
-  if (mapped) {
-    const rest = mapped[1];
-    if (/^\d+\.\d+\.\d+\.\d+$/.test(rest)) return ipv4IsPrivate(rest);
-    const groups = rest.split(":");
-    if (groups.length === 2) {
-      const hi = parseInt(groups[0], 16);
-      const lo = parseInt(groups[1], 16);
-      if (!Number.isNaN(hi) && !Number.isNaN(lo) && hi <= 0xffff && lo <= 0xffff) {
-        return ipv4IsPrivate(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
-      }
-    }
-    return true; // unrecognized mapped form → deny
-  }
-  return false;
-}
-
-/**
- * Throws when `raw` is not a public http(s) URL. Returns the normalized
- * URL string on success. Callers must run this BEFORE navigating — and
- * again on the final post-redirect URL.
- */
-export function assertPublicHttpUrl(raw: string): string {
-  if (process.env.LITT_BROWSER_ALLOW_PRIVATE === "1") {
-    const u = new URL(raw);
-    if (u.protocol !== "http:" && u.protocol !== "https:") {
-      throw new Error(`browser.navigate only supports http(s) URLs, got ${u.protocol}`);
-    }
-    return u.toString();
-  }
-  let u: URL;
-  try {
-    u = new URL(raw);
-  } catch {
-    throw new Error(`browser.navigate got an invalid URL: ${raw.slice(0, 120)}`);
-  }
-  if (u.protocol !== "http:" && u.protocol !== "https:") {
-    throw new Error(`browser.navigate only supports http(s) URLs, got ${u.protocol}`);
-  }
-  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (PRIVATE_HOSTNAMES.has(host) || host.endsWith(".localhost") || host.endsWith(".internal")) {
-    throw new Error(`browser.navigate refused: ${host} is a local/internal host`);
-  }
-  const kind = isIP(host);
-  if (kind === 4 && ipv4IsPrivate(host)) {
-    throw new Error(`browser.navigate refused: ${host} is a private/reserved address`);
-  }
-  if (kind === 6 && ipv6IsPrivate(host)) {
-    throw new Error(`browser.navigate refused: ${host} is a private/reserved address`);
-  }
-  return u.toString();
-}
-
-// ─── DNS-resolution enforcement ────────────────────────────────────
-//
-// assertPublicHttpUrl only inspects the literal host. A public-looking
-// hostname can still resolve to a private/loopback/link-local address
-// (DNS rebinding, split-horizon DNS, attacker-controlled zones). The
-// functions below resolve the name and require EVERY returned address
-// to be public — one private answer poisons the whole destination.
-// Lookup failure fails closed: if we cannot prove the destination is
-// public, the request does not proceed.
-//
-// Residual limitation (documented, not silently claimed away): Chrome
-// performs its own resolution at connect time, so a determined attacker
-// controlling authoritative DNS could in theory rebind between our
-// lookup and Chrome's connect. Fetch-domain request interception
-// (enabled in CdpBrowser.launch) re-validates every request — main
-// document, redirects, and subresources — at request time, which
-// narrows the window to milliseconds. Full pinning would require an
-// egress proxy; that is out of scope for the local CLI adapter.
-
-export type DnsResolver = (hostname: string) => Promise<Array<{ address: string; family: number }>>;
-
-const defaultResolver: DnsResolver = async (hostname) => {
-  const rows = await lookup(hostname, { all: true, verbatim: true });
-  return rows.map((r) => ({ address: r.address, family: r.family }));
-};
-
-interface DnsVerdict { ok: boolean; expires: number }
-const DNS_CACHE_TTL_MS = 15_000;
-const dnsCache = new Map<string, DnsVerdict>();
-
-function addressIsPublic(address: string, family: number): boolean {
-  if (family === 4) return !ipv4IsPrivate(address);
-  if (family === 6) return !ipv6IsPrivate(address);
-  return false; // unknown family → deny
-}
-
-/**
- * Async counterpart to assertPublicHttpUrl: literal checks PLUS DNS
- * resolution of hostname destinations. Throws on any private answer,
- * lookup failure, or unresolvable verdict. Cached per-host for
- * DNS_CACHE_TTL_MS to keep subresource bursts cheap while still
- * re-validating frequently enough to blunt rebinding.
- */
-export async function assertPublicHttpDestination(
-  raw: string,
-  resolve: DnsResolver = defaultResolver,
-  allowPrivate = process.env.LITT_BROWSER_ALLOW_PRIVATE === "1",
-): Promise<string> {
-  const normalized = assertPublicHttpUrl(raw); // scheme + literal-host checks (also honors allowPrivate)
-  if (allowPrivate) return normalized;
-  const host = new URL(normalized).hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (isIP(host)) return normalized; // literal IP already validated above
-  const cached = dnsCache.get(host);
-  if (cached && cached.expires > Date.now()) {
-    if (!cached.ok) throw new Error(`browser.navigate refused: ${host} resolves to a private/reserved address`);
-    return normalized;
-  }
-  let addrs: Array<{ address: string; family: number }>;
-  try {
-    addrs = await resolve(host);
-  } catch (e) {
-    throw new Error(`browser.navigate refused: could not verify ${host} resolves publicly (${(e as Error).message})`);
-  }
-  const ok = addrs.length > 0 && addrs.every((a) => addressIsPublic(a.address, a.family));
-  dnsCache.set(host, { ok, expires: Date.now() + DNS_CACHE_TTL_MS });
-  if (!ok) {
-    throw new Error(`browser.navigate refused: ${host} resolves to a private/reserved address`);
-  }
-  return normalized;
-}
+// Navigation/DNS egress policy (assertPublicHttpUrl,
+// assertPublicHttpDestination, resolvePublicIp, startEgressProxy) lives
+// in ./net-guard.ts — Chrome is launched through that enforcing proxy
+// so every connection is validated and pinned at the network layer.
+// LITT_BROWSER_ALLOW_PRIVATE=1 disables both the guards and the proxy.
 
 export class CdpBrowser {
   private proc: ChildProcess | null = null;
@@ -238,12 +93,25 @@ export class CdpBrowser {
   private sessionId = "";
   private profileDir = "";
   private persistentProfile = false;
+  private egressProxy: EgressProxy | null = null;
   private closed = false;
 
   static async launch(opts: CdpBrowserOptions = {}): Promise<CdpBrowser> {
     const exe = opts.executablePath ?? findBrowser();
     if (!exe) throw new Error("No Chrome/Edge binary found — set LITT_BROWSER_PATH");
     const b = new CdpBrowser();
+    // Enforcing egress proxy: every connection Chrome makes (documents,
+    // redirects, subresources, workers, WebSockets) is validated against
+    // the public-destination policy and pinned to the resolved IP, so
+    // Chrome never performs its own DNS resolution — the rebinding /
+    // validation-to-connect race is closed at the network layer. If the
+    // proxy cannot start we cannot guarantee destination policy, so
+    // launch fails closed. LITT_BROWSER_ALLOW_PRIVATE=1 opts out for
+    // trusted local development (e.g. browsing localhost).
+    const allowPrivate = process.env.LITT_BROWSER_ALLOW_PRIVATE === "1";
+    if (!allowPrivate) {
+      b.egressProxy = await startEgressProxy();
+    }
     const persistent = opts.profileDir ?? process.env.LITT_BROWSER_PROFILE;
     if (persistent) {
       b.profileDir = persistent;
@@ -272,6 +140,17 @@ export class CdpBrowser {
       "--disable-dev-shm-usage",
       "--metrics-recording-only",
       "--mute-audio",
+      // All egress through the enforcing proxy. "<-loopback>" removes
+      // Chrome's implicit localhost bypass so loopback targets are
+      // forced through policy too. --disable-quic keeps everything on
+      // TCP through the proxy (QUIC/UDP cannot be proxied).
+      ...(b.egressProxy
+        ? [
+            `--proxy-server=http://127.0.0.1:${b.egressProxy.port}`,
+            "--proxy-bypass-list=<-loopback>",
+            "--disable-quic",
+          ]
+        : []),
       ...(noSandbox ? ["--no-sandbox"] : []),
       ...(opts.headless === false ? [] : ["--headless=new"]),
       ...(opts.args ?? []),
@@ -323,40 +202,46 @@ export class CdpBrowser {
     }
     if (!version?.webSocketDebuggerUrl) {
       const tail = stderrTail.trim();
-      b.close();
+      await b.close();
       throw new Error(
         `browser did not open a DevTools endpoint within 15s${tail ? ` — ${tail.split("\n").slice(-3).join(" | ")}` : ""}`,
       );
     }
-    await b.connect(version.webSocketDebuggerUrl);
+    try {
+      await b.connect(version.webSocketDebuggerUrl);
+    } catch (e) {
+      await b.close();
+      throw e;
+    }
     // Browser-level Network domain — required for Network.getAllCookies
     // (session save/restore). Page/Runtime are enabled on the page
     // session below; this one is on the browser target itself.
-    await b.send("Network.enable").catch(() => {});
-    // Create a page target and attach with flattened session.
-    const { targetId } = await b.send<{ targetId: string }>("Target.createTarget", { url: "about:blank" });
-    const { sessionId } = await b.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true });
-    b.sessionId = sessionId;
-    await b.send("Page.enable", {}, sessionId);
-    await b.send("Runtime.enable", {}, sessionId);
-    // Fetch-domain interception: pause EVERY request and re-validate the
-    // destination against the public-URL policy at request time — main
-    // document, redirect hops, and subresources alike. This is the
-    // enforcement point that closes the gap between a one-time navigate
-    // check and what Chrome actually connects to. Required, not
-    // best-effort: if interception cannot be enabled we cannot guarantee
-    // destination policy, so launch fails closed.
-    if (process.env.LITT_BROWSER_ALLOW_PRIVATE !== "1") {
-      await b.send("Fetch.enable", { patterns: [{ urlPattern: "*" }] }, sessionId);
-    }
-    // Deny all downloads — a page must not silently write files to disk.
-    // Browser.setDownloadBehavior covers the default browser context;
-    // failure is non-fatal on Chrome builds that moved the behavior.
     try {
-      await b.send("Browser.setDownloadBehavior", { behavior: "deny" });
-    } catch { /* older/newer Chrome may not support it — clicks still gated by approval */ }
-    if (opts.width && opts.height) {
-      await b.send("Emulation.setDeviceMetricsOverride", { width: opts.width, height: opts.height, deviceScaleFactor: 1, mobile: false }, sessionId);
+      await b.send("Network.enable").catch(() => {});
+      // Create a page target and attach with flattened session.
+      const { targetId } = await b.send<{ targetId: string }>("Target.createTarget", { url: "about:blank" });
+      const { sessionId } = await b.send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true });
+      b.sessionId = sessionId;
+      await b.send("Page.enable", {}, sessionId);
+      await b.send("Runtime.enable", {}, sessionId);
+      // Destination policy is enforced at the network layer by the egress
+      // proxy started in launch() — every request, redirect, subresource,
+      // worker and WebSocket is validated and IP-pinned there, which also
+      // covers targets Fetch-domain interception would miss. No
+      // Fetch.enable: it would only add a per-request pause/validate
+      // round-trip on top of the authoritative proxy check.
+      // Deny all downloads — a page must not silently write files to disk.
+      // Browser.setDownloadBehavior covers the default browser context;
+      // failure is non-fatal on Chrome builds that moved the behavior.
+      try {
+        await b.send("Browser.setDownloadBehavior", { behavior: "deny" });
+      } catch { /* older/newer Chrome may not support it — clicks still gated by approval */ }
+      if (opts.width && opts.height) {
+        await b.send("Emulation.setDeviceMetricsOverride", { width: opts.width, height: opts.height, deviceScaleFactor: 1, mobile: false }, sessionId);
+      }
+    } catch (e) {
+      await b.close();
+      throw e;
     }
     return b;
   }
@@ -398,47 +283,6 @@ export class CdpBrowser {
           w.resolve(msg.params);
         }
       }
-      if (msg.method === "Fetch.requestPaused") {
-        const params = msg.params as { requestId?: string; request?: { url?: string } } | undefined;
-        const sid = msg.sessionId ?? this.sessionId;
-        if (params?.requestId && params.request?.url && sid) {
-          void this.handlePausedRequest(sid, params.requestId, params.request.url);
-        }
-      }
-    }
-  }
-
-  /**
-   * Fetch.requestPaused handler — every intercepted request must be
-   * answered exactly once. Non-http(s) URLs (data:, blob:, about:)
-   * pass through untouched; http(s) destinations go through the full
-   * async public-destination check (literal + DNS). Any failure —
-   * private resolution, lookup error, timeout — fails the request.
-   */
-  private async handlePausedRequest(sessionId: string, requestId: string, url: string): Promise<void> {
-    const respond = (method: string, params: Record<string, unknown>) =>
-      this.send(method, params, sessionId).catch(() => {});
-    let scheme = "";
-    try { scheme = new URL(url).protocol; } catch { /* unparsable → fail below */ }
-    // Pass through only schemes a web page legitimately uses. Anything
-    // else — file:, ftp:, an unparsable URL — fails closed.
-    if (["http:", "https:", "data:", "blob:", "about:", "chrome:", "edge:"].includes(scheme)) {
-      if (scheme !== "http:" && scheme !== "https:") {
-        await respond("Fetch.continueRequest", { requestId });
-        return;
-      }
-    } else {
-      await respond("Fetch.failRequest", { requestId, errorReason: "BlockedByClient" });
-      return;
-    }
-    try {
-      await Promise.race([
-        assertPublicHttpDestination(url),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("destination validation timed out")), 5_000)),
-      ]);
-      await respond("Fetch.continueRequest", { requestId });
-    } catch {
-      await respond("Fetch.failRequest", { requestId, errorReason: "BlockedByClient" });
     }
   }
 
@@ -681,8 +525,13 @@ export class CdpBrowser {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    const proxy = this.egressProxy;
+    this.egressProxy = null;
     const proc = this.proc;
     this.proc = null;
+    // Shut the proxy down first so no in-flight page request can still
+    // egress while Chrome is closing.
+    if (proxy) await proxy.close().catch(() => {});
     // Graceful shutdown FIRST: Browser.close lets Chrome flush cookies and
     // the profile store to disk. proc.kill() (TerminateProcess) would
     // discard pending writes — which is exactly what broke session

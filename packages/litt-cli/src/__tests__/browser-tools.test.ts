@@ -8,10 +8,13 @@
 
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer as createTcpServer, connect } from "node:net";
+import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BROWSER_TOOL_ENTRIES } from "../lib/browser/tools.js";
 import { findBrowser, CdpBrowser, assertPublicHttpUrl, assertPublicHttpDestination, type DnsResolver } from "../lib/browser/cdp.js";
+import { startEgressProxy } from "../lib/browser/net-guard.js";
 
 const LIVE = Boolean(findBrowser());
 
@@ -184,6 +187,136 @@ describe("assertPublicHttpDestination (DNS-resolution enforcement)", () => {
     } finally {
       if (prev === undefined) delete process.env.LITT_BROWSER_ALLOW_PRIVATE;
       else process.env.LITT_BROWSER_ALLOW_PRIVATE = prev;
+    }
+  });
+});
+
+describe("startEgressProxy (network-level destination enforcement)", () => {
+  // The proxy is the authoritative layer: Chrome never resolves DNS
+  // itself — every CONNECT / absolute-URI request is validated and the
+  // connection is pinned to the validated IP. These tests inject the
+  // resolver and TCP dial so no real egress happens.
+  const publicResolver =
+    (host: string): DnsResolver =>
+    async (h: string) => (h === host ? [{ address: "93.184.216.34", family: 4 }] : [{ address: "127.0.0.1", family: 4 }]);
+
+  /** Send a raw request head to the proxy; resolves with the status line. */
+  const proxyStatus = (port: number, head: string): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const s = connect({ host: "127.0.0.1", port });
+      let buf = "";
+      s.on("data", (d) => {
+        buf += d.toString("utf8");
+        const idx = buf.indexOf("\r\n");
+        if (idx >= 0) { s.destroy(); resolve(buf.slice(0, idx)); }
+      });
+      s.on("error", reject);
+      s.setTimeout(5000, () => { s.destroy(); reject(new Error("proxy status timeout")); });
+      s.write(head);
+    });
+
+  it("denies CONNECT to loopback, RFC1918, link-local/metadata and localhost names", async () => {
+    const proxy = await startEgressProxy();
+    try {
+      for (const target of ["127.0.0.1:443", "10.1.2.3:80", "169.254.169.254:80", "localhost:443", "[::1]:443"]) {
+        const status = await proxyStatus(proxy.port, `CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`);
+        expect(status, target).toContain("403");
+      }
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it("denies CONNECT when DNS resolves to a private address (rebinding at connect time)", async () => {
+    const proxy = await startEgressProxy(async () => [{ address: "192.168.0.10", family: 4 }]);
+    try {
+      const status = await proxyStatus(proxy.port, "CONNECT proxy-rebind.test:443 HTTP/1.1\r\nHost: proxy-rebind.test\r\n\r\n");
+      expect(status).toContain("403");
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it("tunnels CONNECT to the pinned IP for public destinations", async () => {
+    // Local echo server stands in for the origin; the injected dial maps
+    // the "public" pinned IP onto it — proving validation passed and the
+    // tunnel carries bytes end-to-end.
+    const echo = createTcpServer((s) => { s.on("error", () => {}); s.pipe(s); });
+    await new Promise<void>((r) => echo.listen(0, "127.0.0.1", r));
+    const echoPort = (echo.address() as { port: number }).port;
+    const proxy = await startEgressProxy(publicResolver("proxy-connect.test"), () => connect({ host: "127.0.0.1", port: echoPort }));
+    try {
+      const status = await new Promise<string>((resolve, reject) => {
+        const s = connect({ host: "127.0.0.1", port: proxy.port });
+        let buf = "";
+        s.on("data", (d) => {
+          buf += d.toString("utf8");
+          if (buf.includes("\r\n\r\n")) {
+            s.write("ping-through-tunnel");
+            setTimeout(() => { s.destroy(); resolve(buf); }, 300);
+          }
+        });
+        s.on("error", reject);
+        s.setTimeout(5000, () => { s.destroy(); reject(new Error("tunnel timeout")); });
+        s.write("CONNECT proxy-connect.test:443 HTTP/1.1\r\nHost: proxy-connect.test:443\r\n\r\n");
+      });
+      expect(status).toContain("200 Connection Established");
+      expect(status).toContain("ping-through-tunnel"); // echoed back through the tunnel
+    } finally {
+      await proxy.close();
+      await new Promise<void>((r) => echo.close(() => r()));
+    }
+  });
+
+  it("denies plain-http proxy requests to private destinations", async () => {
+    const proxy = await startEgressProxy(async () => { throw new Error("ENOTFOUND"); });
+    try {
+      const status = await proxyStatus(proxy.port, "GET http://127.0.0.1:9/secret HTTP/1.1\r\nHost: 127.0.0.1:9\r\n\r\n");
+      expect(status).toContain("403");
+      // Unresolvable host → lookup fails → fail closed (403).
+      const status2 = await proxyStatus(proxy.port, "GET http://proxy-http-deny.test/ HTTP/1.1\r\nHost: proxy-http-deny.test\r\n\r\n");
+      expect(status2).toContain("403");
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it("forwards plain-http requests to the pinned IP with Host preserved", async () => {
+    let seenHost = "";
+    let seenPath = "";
+    const origin = createHttpServer((req, res) => {
+      seenHost = req.headers.host ?? "";
+      seenPath = req.url ?? "";
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("proxied-ok");
+    });
+    await new Promise<void>((r) => origin.listen(0, "127.0.0.1", r));
+    const originPort = (origin.address() as { port: number }).port;
+    const proxy = await startEgressProxy(publicResolver("proxy-http-allow.test"), () => connect({ host: "127.0.0.1", port: originPort }));
+    try {
+      const status = await new Promise<string>((resolve, reject) => {
+        const s = connect({ host: "127.0.0.1", port: proxy.port });
+        let buf = "";
+        s.on("data", (d) => {
+          buf += d.toString("utf8");
+          if (buf.includes("\r\n\r\n")) {
+            const idx = buf.indexOf("\r\n\r\n");
+            const head = buf.slice(0, idx);
+            const body = buf.slice(idx + 4);
+            if (head.includes("200") && body.includes("proxied-ok")) { s.destroy(); resolve(head.split("\r\n")[0]); }
+          }
+        });
+        s.on("error", reject);
+        s.setTimeout(5000, () => { s.destroy(); reject(new Error("forward timeout")); });
+        s.write(`GET http://proxy-http-allow.test:${originPort}/some/path?q=1 HTTP/1.1\r\nHost: proxy-http-allow.test:${originPort}\r\nConnection: close\r\n\r\n`);
+      });
+      expect(status).toContain("200");
+      expect(seenHost).toBe(`proxy-http-allow.test:${originPort}`);
+      // Absolute-URI request line is preserved end-to-end (RFC 7230).
+      expect(seenPath).toBe(`http://proxy-http-allow.test:${originPort}/some/path?q=1`);
+    } finally {
+      await proxy.close();
+      await new Promise<void>((r) => origin.close(() => r()));
     }
   });
 });
