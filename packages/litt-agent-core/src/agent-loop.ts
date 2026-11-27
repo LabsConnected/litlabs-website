@@ -1430,6 +1430,7 @@ export async function runAgentLoop(
           },
           runId: `agent_${tcId}`,
           toolCallId: tcId,
+          signal: options.abortSignal ?? undefined,
           onStream: options.onToolStream as ((chunk: { stream: "stdout" | "stderr"; text: string; ts: number }) => void) | undefined,
         });
         res = gwResult.result;
@@ -1774,6 +1775,8 @@ export async function runAgentLoop(
         termination,
         escalations: escalationEvents.length ? escalationEvents : undefined,
       };
+    } finally {
+      options.abortSignal?.removeEventListener("abort", abortFromRun);
     }
 
     // Accumulate usage

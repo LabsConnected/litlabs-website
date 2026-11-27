@@ -30,6 +30,7 @@ let capturedOptions: Record<string, unknown> | null = null;
  * already returned would miss that flush and falsely report a leak.
  */
 let scriptedModelDeltas: string[] = [];
+let interruptRun = false;
 
 vi.mock("../lib/auth/auth-session.js", () => ({
   getAuthSession: () => ({ getAuthState: async () => ({ signedIn: false, email: null }) }),
@@ -50,6 +51,12 @@ vi.mock("@litt/agent-core", async (original) => ({
     for (const text of scriptedModelDeltas) {
       onModelStream?.({ type: "delta", text });
     }
+    if (interruptRun && options.abortSignal instanceof AbortSignal) {
+      process.emit("SIGINT", "SIGINT");
+      if (options.abortSignal.aborted) {
+        return { termination: "cancelled", rounds: 1, toolCalls: [], durationMs: 1 };
+      }
+    }
     return { termination: "complete", rounds: 0, toolCalls: [], durationMs: 1 };
   }),
 }));
@@ -69,6 +76,7 @@ function writtenChunks(): string {
 beforeEach(() => {
   capturedOptions = null;
   scriptedModelDeltas = [];
+  interruptRun = false;
   for (const provider of PROVIDERS) {
     if (provider.envKey) vi.stubEnv(provider.envKey, "");
   }
@@ -125,6 +133,14 @@ describe("ask tool-result reporting (regression for 4becca17)", () => {
       version: 1, type: "run.result", termination: "error", exitCode: 1,
     });
     expect(loggedLines()).toBe("");
+  });
+
+  it("returns exit 130 with one terminal record on SIGINT during a run", async () => {
+    interruptRun = true;
+    expect(await askCommand(["--jsonl", "hello"])).toBe(130);
+    const events = writtenChunks().trim().split("\n").map((line) => JSON.parse(line));
+    expect(events.filter((event) => event.type === "run.result")).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({ termination: "cancelled", exitCode: 130 });
   });
 
   it("a successful tool reports its actual message, not a generic line", async () => {

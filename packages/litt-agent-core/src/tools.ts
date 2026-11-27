@@ -289,15 +289,15 @@ const inspectPkgHandler: ToolHandler = async (ctx) => {
 };
 
 const checkHandler: ToolHandler = async (ctx) => {
-  return runTypecheck(ctx.shell, ctx.cwd);
+  return runTypecheck(ctx.shell, ctx.cwd, { signal: ctx.signal, onStream: ctx.onStream });
 };
 
 const testHandler: ToolHandler = async (ctx) => {
-  return runTest(ctx.shell, ctx.cwd);
+  return runTest(ctx.shell, ctx.cwd, { signal: ctx.signal, onStream: ctx.onStream });
 };
 
 const buildHandler: ToolHandler = async (ctx) => {
-  return runBuild(ctx.shell, ctx.cwd);
+  return runBuild(ctx.shell, ctx.cwd, { signal: ctx.signal, onStream: ctx.onStream });
 };
 
 const runHandler: ToolHandler = async (ctx, args) => {

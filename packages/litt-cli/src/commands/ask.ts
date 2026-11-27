@@ -110,7 +110,6 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   // Use the detected project root (walks upward from cwd)
   const projectRoot = project.rootDir;
   const sess = session ?? createRuntimeSession({ cwd: projectRoot, mode: "act" });
-  sess.installSigintHandler();
 
   // The effective mode comes from the session, which carries the --mode
   // flag (index.ts builds it from dispatch). It is never hardcoded here:
@@ -148,6 +147,17 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   });
 
   let inFlightModel: { cancel?: () => void } | null = null;
+  const abort = new AbortController();
+  let interrupted = false;
+  const interrupt = () => {
+    interrupted = true;
+    abort.abort();
+    approvalBridge.cancel();
+  };
+  const cancelled = () => {
+    if (!output.structured) console.error("Agent cancelled.");
+    return output.finish(130, "cancelled");
+  };
   const askBody = async (): Promise<number> => {
   try {
     // Resolve auth + REMOTE state so the model knows who it's acting for
@@ -156,6 +166,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     // reachable?" — it would guess or say "unable to determine."
     const authSession = getAuthSession();
     const authState = await authSession.getAuthState();
+    abort.signal.throwIfAborted();
     const remoteUrl = getTerminalUrl();
 
     // Route through the same ModelRuntime as the TUI — picks the best
@@ -179,6 +190,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     const localOnly = resolveLocalOnly();
     const modelRuntime = new ModelRuntime(authState.signedIn && !hasLocalKey);
     await modelRuntime.refresh();
+    abort.signal.throwIfAborted();
 
     // Determine whether the local daemon must serve this request.
     // When executionTarget=local (LITT_LOCAL_MODE=1, --local, or default),
@@ -211,6 +223,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       routingMode = selectedId ? "fixed" : "auto";
       routed = modelRuntime.route(routingMode, selectedId, question);
     }
+    abort.signal.throwIfAborted();
     const model = resolveProviderAdapter(routed, {
       tools: tools.list(),
       routingMode,
@@ -226,7 +239,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
 
     const toolCallFilter = createToolCallStreamFilter();
     const writeDelta = (text: string) => {
-      if (!text) return;
+      if (!text || abort.signal.aborted) return;
       if (output.structured) output.event("model.delta", { text });
       else process.stdout.write(text);
     };
@@ -239,6 +252,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       cwd: projectRoot,
       userId: "cli-user",
       mode,
+      abortSignal: abort.signal,
       // Non-interactive runs declare headless interaction so the gateway's
       // policy layer denies approval-required actions (fail closed).
       interaction: interactive ? "interactive" : "headless",
@@ -311,8 +325,9 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     const streamTail = toolCallFilter.flush();
     writeDelta(streamTail);
 
+    const exitCode = interrupted || result.termination === "cancelled" ? 130 : result.termination === "complete" ? 0 : 1;
     if (output.structured) {
-      return output.finish(result.termination === "complete" ? 0 : 1, result.termination, {
+      return output.finish(exitCode, interrupted ? "cancelled" : result.termination, {
         content: result.content,
         rounds: result.rounds,
         durationMs: result.durationMs,
@@ -354,11 +369,10 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       console.log(`${c.dim}Reason: ${result.content}${c.reset}`);
     }
 
-    return result.termination === "complete" ? 0 : 1;
+    return exitCode;
   } catch (err) {
+    if (interrupted) return cancelled();
     return problem(`Agent error: ${err instanceof Error ? err.message : String(err)}`);
-  } finally {
-    closeApprovalPrompt?.();
   }
   };
 
@@ -369,9 +383,20 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   const deadlineMs = Number(process.env.LITT_ASK_TIMEOUT_MS) > 0
     ? Number(process.env.LITT_ASK_TIMEOUT_MS)
     : 120000;
-  return withAskDeadline(askBody(), deadlineMs, () => inFlightModel?.cancel?.()).catch((err) =>
-    problem(err instanceof Error ? err.message : String(err)),
-  );
+  process.on("SIGINT", interrupt);
+  try {
+    return await withAskDeadline(askBody(), deadlineMs, () => {
+      abort.abort();
+      inFlightModel?.cancel?.();
+    });
+  } catch (err) {
+    await shell.cancel();
+    if (interrupted) return cancelled();
+    return problem(err instanceof Error ? err.message : String(err));
+  } finally {
+    process.off("SIGINT", interrupt);
+    closeApprovalPrompt?.();
+  }
 }
 
 // ─── Hard ask deadline ─────────────────────────────────────────────

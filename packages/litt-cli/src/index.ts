@@ -674,7 +674,7 @@ async function main(): Promise<number> {
     }
     session = createRuntimeSession({ cwd: projectRoot, mode });
     // Install Ctrl+C handler for all session commands
-    session.installSigintHandler();
+    if (command !== "ask") session.installSigintHandler();
   }
 
   try {

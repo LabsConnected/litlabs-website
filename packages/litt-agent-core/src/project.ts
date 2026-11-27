@@ -14,7 +14,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import type { ShellExecutor, ProjectContext, ToolResult } from "./types.js";
+import type { ShellExecutor, ProjectContext, ToolContext, ToolResult } from "./types.js";
 import { detectUnsupportedShellSyntax } from "./execution.js";
 
 // ─── Project Detection ────────────────────────────────────────────
@@ -728,11 +728,13 @@ const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
  * surfaced as status="timeout" with a "TIMEOUT after Xms" message —
  * NOT as a misleading "exit 1".
  */
+type ProjectCommandProgress = Pick<ToolContext, "signal" | "onStream">;
+
 export async function runCommand(
   shell: ShellExecutor,
   command: string,
   args: string[],
-  options?: { cwd?: string; timeoutMs?: number; stdin?: string },
+  options?: ProjectCommandProgress & { cwd?: string; timeoutMs?: number; stdin?: string },
 ): Promise<ToolResult> {
   // Reject shell-style invocations BEFORE spawning anything. No shell is
   // ever used here (see execution.ts), so `echo 'x' > file` or a `>`
@@ -754,7 +756,10 @@ export async function runCommand(
   const cwd = options?.cwd ?? shell.cwd;
   const timeoutMs = options?.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
 
-  const result = await shell.execute({ command, args, cwd, timeoutMs, stdin: options?.stdin });
+  const result = await shell.execute({
+    command, args, cwd, timeoutMs, stdin: options?.stdin,
+    signal: options?.signal ?? undefined, onStream: options?.onStream,
+  });
 
   // Surface timeout as TIMEOUT, not misleadingly as "exit 1".
   // The shell executor sets status="timeout" and exitCode=-1 when the
@@ -764,7 +769,9 @@ export async function runCommand(
     ? `${command} ${args.join(" ")} — exit 0 (${result.durationMs}ms)`
     : result.status === "timeout"
       ? `${command} ${args.join(" ")} — TIMEOUT after ${timeoutMs}ms (${result.durationMs}ms)`
-      : `${command} ${args.join(" ")} — exit ${result.exitCode} (${result.durationMs}ms)`;
+      : result.status === "cancelled"
+        ? `${command} ${args.join(" ")} — cancelled (${result.durationMs}ms)`
+        : `${command} ${args.join(" ")} — exit ${result.exitCode} (${result.durationMs}ms)`;
 
   return {
     status: result.status,
@@ -798,7 +805,7 @@ export async function runScript(
   shell: ShellExecutor,
   scriptName: string,
   cwd?: string,
-  options?: { timeoutMs?: number },
+  options?: ProjectCommandProgress & { timeoutMs?: number },
 ): Promise<ToolResult> {
   const root = cwd ?? shell.cwd;
   const pkgPath = path.join(root, "package.json");
@@ -829,11 +836,7 @@ export async function runScript(
   const hasYarn = fs.existsSync(path.join(root, "yarn.lock"));
   const pm = hasPnpm ? "pnpm" : hasYarn ? "yarn" : "npm";
 
-  const runOpts: { cwd: string; timeoutMs?: number } = { cwd: root };
-  if (options?.timeoutMs !== undefined) {
-    runOpts.timeoutMs = options.timeoutMs;
-  }
-  return runCommand(shell, pm, ["run", scriptName], runOpts);
+  return runCommand(shell, pm, ["run", scriptName], { ...options, cwd: root });
 }
 
 /**
@@ -848,6 +851,7 @@ export async function runScript(
 export async function runTypecheck(
   shell: ShellExecutor,
   cwd?: string,
+  progress?: ProjectCommandProgress,
 ): Promise<ToolResult> {
   const root = cwd ?? shell.cwd;
   const pkgPath = path.join(root, "package.json");
@@ -856,13 +860,13 @@ export async function runTypecheck(
     try {
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
       if (pkg.scripts?.typecheck) {
-        return runScript(shell, "typecheck", root, { timeoutMs: VERIFY_TIMEOUTS.typecheck });
+        return runScript(shell, "typecheck", root, { ...progress, timeoutMs: VERIFY_TIMEOUTS.typecheck });
       }
     } catch { /* fall through to tsc */ }
   }
 
   // Fallback: run tsc --noEmit directly
-  return runCommand(shell, "npx", ["tsc", "--noEmit"], { cwd: root, timeoutMs: VERIFY_TIMEOUTS.typecheck });
+  return runCommand(shell, "npx", ["tsc", "--noEmit"], { ...progress, cwd: root, timeoutMs: VERIFY_TIMEOUTS.typecheck });
 }
 
 /**
@@ -875,8 +879,9 @@ export async function runTypecheck(
 export async function runTest(
   shell: ShellExecutor,
   cwd?: string,
+  progress?: ProjectCommandProgress,
 ): Promise<ToolResult> {
-  return runScript(shell, "test", cwd ?? shell.cwd, { timeoutMs: VERIFY_TIMEOUTS.test });
+  return runScript(shell, "test", cwd ?? shell.cwd, { ...progress, timeoutMs: VERIFY_TIMEOUTS.test });
 }
 
 /**
@@ -890,8 +895,9 @@ export async function runTest(
 export async function runBuild(
   shell: ShellExecutor,
   cwd?: string,
+  progress?: ProjectCommandProgress,
 ): Promise<ToolResult> {
-  return runScript(shell, "build", cwd ?? shell.cwd, { timeoutMs: VERIFY_TIMEOUTS.build });
+  return runScript(shell, "build", cwd ?? shell.cwd, { ...progress, timeoutMs: VERIFY_TIMEOUTS.build });
 }
 
 // ─── Path Safety ──────────────────────────────────────────────────
