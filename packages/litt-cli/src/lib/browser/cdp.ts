@@ -14,7 +14,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export interface CdpBrowserOptions {
@@ -44,8 +44,6 @@ export interface PageSnapshot {
   /** Interactive elements: links, buttons, inputs with a stable selector hint. */
   elements: Array<{ tag: string; text: string; selector: string }>;
 }
-
-interface CdpTarget { targetId: string; type: string; url: string; title?: string }
 
 const CHROME_CANDIDATES = [
   process.env.LITT_BROWSER_PATH,
@@ -162,9 +160,9 @@ export class CdpBrowser {
   private proc: ChildProcess | null = null;
   private ws: WebSocket | null = null;
   private msgId = 0;
-  private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
-  private events: Array<{ method: string; params: any }> = [];
-  private eventWaiters: Array<{ method: string; predicate?: (p: any) => boolean; resolve: (p: any) => void }> = [];
+  private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  private events: Array<{ method: string; params: unknown }> = [];
+  private eventWaiters: Array<{ method: string; predicate?: (p: unknown) => boolean; resolve: (p: unknown) => void }> = [];
   private sessionId = "";
   private profileDir = "";
   private persistentProfile = false;
@@ -281,8 +279,11 @@ export class CdpBrowser {
   }
 
   private onMessage(raw: string): void {
-    let msg: any;
-    try { msg = JSON.parse(raw); } catch { return; }
+    let msg: {
+      id?: number; method?: string; params?: unknown; result?: unknown;
+      error?: { message?: string; code?: number };
+    };
+    try { msg = JSON.parse(raw) as typeof msg; } catch { return; }
     if (msg.id !== undefined) {
       const p = this.pending.get(msg.id);
       if (p) {
@@ -309,20 +310,20 @@ export class CdpBrowser {
     this.pending.clear();
   }
 
-  send<T = any>(method: string, params: any = {}, sessionId?: string): Promise<T> {
+  send<T = unknown>(method: string, params: unknown = {}, sessionId?: string): Promise<T> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error("browser not connected"));
     }
     const id = ++this.msgId;
-    const payload: any = { id, method, params };
+    const payload: { id: number; method: string; params: unknown; sessionId?: string } = { id, method, params };
     if (sessionId) payload.sessionId = sessionId;
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
       this.ws!.send(JSON.stringify(payload));
     });
   }
 
-  private waitEvent(method: string, timeoutMs = 15_000, predicate?: (p: any) => boolean): Promise<any> {
+  private waitEvent(method: string, timeoutMs = 15_000, predicate?: (p: unknown) => boolean): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`timeout waiting for ${method}`)), timeoutMs);
       this.eventWaiters.push({
@@ -355,8 +356,11 @@ export class CdpBrowser {
     return final;
   }
 
-  async evaluate<T = any>(expression: string): Promise<T> {
-    const res = await this.send<{ result: { value?: T }; exceptionDetails?: any }>(
+  async evaluate<T = unknown>(expression: string): Promise<T> {
+    const res = await this.send<{
+      result: { value?: T };
+      exceptionDetails?: { exception?: { description?: string; value?: string }; text?: string };
+    }>(
       "Runtime.evaluate",
       { expression, returnByValue: true, awaitPromise: true },
       this.sessionId,
