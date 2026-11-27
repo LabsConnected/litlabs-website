@@ -30,9 +30,17 @@
  *   same-workspace stylesheets the transform embeds, resolved
  *   document-relative exactly as the served document resolves them.
  *
- * Stylesheet FILES themselves are not manifest entries: they are embedded
- * into the document during the authenticated read and never fetched by
- * URL. Logs, notes, env-style files and unreferenced assets remain
+ * Stylesheets: linked sheets are embedded into the document during the
+ * authenticated read — their own path is still authorized so a sheet that
+ * cannot be embedded (unreadable, oversized) falls back to a token fetch
+ * instead of the guaranteed-401 session URL, and their url() reference
+ * closure is included so embedded-CSS asset requests authenticate.
+ * Images and other non-script subresources are authorized the same way:
+ * the opaque-origin iframe can carry neither the session cookie nor any
+ * other credential, so the transform reissues every same-workspace
+ * subresource reference under the token prefix — an image that the page
+ * legitimately fetches must be in this manifest or it fails to load.
+ * Logs, notes, env-style files and unreferenced assets remain
  * unreachable through the token.
  *
  * Bounds: at most MAX_DOCUMENTS documents and MAX_ASSETS total paths,
@@ -224,6 +232,9 @@ export async function collectPreviewAssetManifest(
           if (addAsset(script.path)) scriptQueue.push({ path: script.path, depth });
         }
         for (const cssPath of scanned.stylesheets.slice(0, 16)) {
+          // Authorize the sheet itself: a link the transform cannot embed
+          // (unreadable or oversized) falls back to a token fetch.
+          addAsset(cssPath);
           const job = stylesheetJobs.get(cssPath) ?? { cssPath, docPaths: new Set<string>() };
           job.docPaths.add(path);
           stylesheetJobs.set(cssPath, job);

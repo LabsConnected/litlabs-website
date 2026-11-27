@@ -149,12 +149,14 @@ export function cssAssetPaths(css: string, documentPath: string): string[] {
 
 /**
  * Scan a static HTML document for the workspace references the preview
- * asset manifest must authorize: its scripts (with module flags) and the
- * same-workspace HTML documents it links to (in-frame navigation targets).
- * Uses exactly the transform's resolution and validation rules, so the
- * manifest can never drift from what the transform rewrites. Exposed for
- * preview-asset-manifest.ts; the transform itself walks the same rules
- * while rewriting.
+ * asset manifest must authorize: its scripts (with module flags), the
+ * same-workspace HTML documents it links to (in-frame navigation targets),
+ * the non-script subresources it fetches by URL (<img>/<source>/<video>/
+ * <audio> src, srcset and poster, icon/manifest links, and url() refs in
+ * inline styles) and its linked stylesheets (whose own url() closure the
+ * manifest must also cover). Uses exactly the transform's resolution and
+ * validation rules, so the manifest can never drift from what the
+ * transform rewrites.
  */
 export type PreviewDocumentScan = {
   scripts: PreviewScriptAsset[];
@@ -186,9 +188,16 @@ export function scanPreviewDocument(
       } else if (child.tagName === "a" && attr("href")) {
         const path = assetPath(attrValue("href")!, documentPath, /\.html?$/i);
         if (path) linkedDocuments.push(path);
-      } else if (child.tagName === "link" && attr("rel")?.value.toLowerCase() === "stylesheet" && attr("disabled") === undefined) {
-        const path = assetPath(attrValue("href")!, documentPath, /\.css$/i);
-        if (path) stylesheets.push(path);
+      } else if (child.tagName === "link" && attr("href")) {
+        if (attr("rel")?.value.toLowerCase() === "stylesheet" && attr("disabled") === undefined) {
+          const path = assetPath(attrValue("href")!, documentPath, /\.css$/i);
+          if (path) stylesheets.push(path);
+        } else {
+          // Icons, manifests and other non-stylesheet link targets are
+          // fetched by URL from the opaque origin — authorize them.
+          const path = previewAssetPath(attrValue("href")!, documentPath);
+          if (path) assets.add(path);
+        }
       } else {
         const assetAttrs = ASSET_ATTRIBUTES[child.tagName];
         if (assetAttrs) {
@@ -254,6 +263,16 @@ export function scanPreviewDocument(
  * - Stylesheets carry no execution semantics, so they keep the established
  *   #661 treatment: same-workspace CSS is embedded during the owner's
  *   authenticated HTML read, subject to the existing count/size caps.
+ *   url() refs inside embedded CSS are reissued under the token prefix
+ *   (the browser resolves them against the document URL, which is the
+ *   session path the opaque origin cannot authenticate).
+ *
+ * - Non-script subresources (<img>/<source>/<video>/<audio> src, srcset and
+ *   poster, icon/manifest links, and url() refs in <style> blocks and
+ *   style attributes) follow the script rule: reissued under the token
+ *   prefix. The opaque-origin iframe carries no session cookie on
+ *   subresource fetches, so any reference left on the session path is a
+ *   guaranteed failed load (verified: every workspace <img> 401s).
  *
  * File access stays bound to the owner's verified workspace; the sandbox,
  * CSP and ownership checks are unchanged.
@@ -294,8 +313,13 @@ export async function prepareStaticPreviewDocument(
             // served document, so they must be token-authorized the same way.
             const rewritten = rewriteCssAssetUrls(content, entryPath, options.assetBase);
             child.childNodes = [{ nodeName: "#text", value: rewritten.css.replace(/<\/style/gi, "\\3c /style"), parentNode: child }];
-            changed = true;
+          } else {
+            // Not embeddable (unreadable or oversized): issue a token-
+            // authorized fetch instead of the guaranteed-401 session URL
+            // the opaque origin would produce.
+            attr("href")!.value = `${options.assetBase}${path}${previewAssetSuffix(attr("href")!.value)}`;
           }
+          changed = true;
         }
       } else if (script) {
         const path = assetPath(attr("src")!.value, entryPath, /\.(?:js|mjs)$/i);
@@ -313,6 +337,18 @@ export async function prepareStaticPreviewDocument(
           // Same-workspace navigation must retain the opaque-origin bearer;
           // external and fragment-only links remain untouched.
           attr("href")!.value = href;
+          changed = true;
+        }
+      }
+      // Non-stylesheet link targets (icons, manifests) are fetched by URL
+      // from the opaque origin with no session — reissue them under the
+      // token prefix like every other renderable subresource. An href
+      // already under the token prefix (the unembeddable-stylesheet
+      // fallback above) must not be rewritten a second time.
+      if (child.tagName === "link" && attr("href") && !attr("href")!.value.startsWith(options.assetBase)) {
+        const path = previewAssetPath(attr("href")!.value, entryPath);
+        if (path) {
+          attr("href")!.value = `${options.assetBase}${path}${previewAssetSuffix(attr("href")!.value)}`;
           changed = true;
         }
       }

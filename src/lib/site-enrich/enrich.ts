@@ -134,7 +134,12 @@ export async function enrichStaticSiteVisuals(
       for (const e of res?.entries ?? []) {
         const p = prefix ? `${prefix}/${e.name}` : e.name;
         if (e.type === "file") fileSet.add(p);
-        else if (e.type === "directory") await collect(p, p, depth + 1);
+        // Workspace transports disagree on the directory label: the
+        // terminal-server /ws-files endpoint emits "folder" (see
+        // collectStaticArtifact's identical fix). Missing nested assets
+        // made every subdir file look absent — valid refs were re-resolved
+        // and the photo floor appended a phantom gallery.
+        else if (e.type === "directory" || e.type === "folder" || e.type === "dir") await collect(p, p, depth + 1);
       }
     };
     await collect("", "", 0);
@@ -200,7 +205,11 @@ export async function enrichStaticSiteVisuals(
         }
         let saved: InsertAssetResult | null = null;
         try {
-          saved = await insertAssetFromUrl(resolved.url, { nameHint, signal }, transport);
+          // Static workspaces are served from the workspace ROOT — pin the
+          // insert dir so a stray package.json (or a transient listFiles
+          // failure, which falls back to public/) can never land the asset
+          // where the emitted site-relative ref cannot resolve.
+          saved = await insertAssetFromUrl(resolved.url, { nameHint, directory: "assets/images", signal }, transport);
         } catch {
           saved = null;
         }
@@ -366,7 +375,7 @@ export async function enrichStaticSiteVisuals(
             : ref.raw.replace(src, nextSrc);
         if (isExternal && !isPlaceholder) {
           // Rehost the hotlink into the project — persists in deploys.
-          const saved = await insertAssetFromUrl(src, { nameHint: "external-image" }, transport)
+          const saved = await insertAssetFromUrl(src, { nameHint: "external-image", directory: "assets/images" }, transport)
             .catch(() => null);
           if (saved?.success && saved.sitePath) {
             html = html.replace(ref.raw, rewrite(saved.sitePath));
