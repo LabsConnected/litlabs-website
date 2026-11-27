@@ -88,7 +88,7 @@ import {
   formatInspectionForSynthesis,
   readCompletionActivityType,
 } from "../lib/read-lane.js";
-import { matchLocalToolMission, formatLocalToolSummary, type LocalToolResult } from "../lib/local-tool-mission.js";
+import { matchLocalToolMission, matchFilesystemSearch, formatLocalToolSummary, type LocalToolResult } from "../lib/local-tool-mission.js";
 import { shouldSkipPlanning } from "../lib/mission-complexity.js";
 import { PerfTrace } from "../lib/perf-trace.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
@@ -2361,6 +2361,72 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // executionTarget="remote" means this gate never engages.
     const intent = classifyIntent(input);
     const isMission = opts?.forceMission === true || intent === "mission";
+
+    // ─── Deterministic local-tool missions — ALL users ──────────────
+    // A mission that decomposes into canonical local tools (git status,
+    // package inspect, file listing, typecheck/lint/build/test,
+    // filesystem search) produces an evidence-grounded summary with NO
+    // model inference. This runs for signed-in and model-available
+    // sessions too, not only when the capability gate blocks the model
+    // path: deterministic routing is the required behavior for
+    // tool-answerable requests — a weak local model can skip tool calls
+    // entirely and still report COMPLETE with no visible evidence (the
+    // observed P0 fake-evidence failure).
+    if (isMission) {
+      // ─── Filesystem search dispatch ────────────────────────────
+      // "find/search <name> in <place>" is decided deterministically
+      // BEFORE the generic local-tool match and long before the model:
+      // execute (real filesystem.search), clarify (broad or untargeted
+      // scope — ask instead of guessing), or refuse (denied location).
+      // A tool-less model must never see these — it only fabricates a
+      // refusal ("can't access the filesystem") or invents paths.
+      const fsMatch = matchFilesystemSearch(input);
+      if (fsMatch) {
+        if (fsMatch.action === "execute") {
+          const fsMissionMatch: import("../lib/local-tool-mission.js").LocalToolMissionMatch = {
+            calls: [fsMatch.call],
+            summary: fsMatch.call.label,
+            goal: input,
+          };
+          const fsPerf = PerfTrace.start("local");
+          await runLocalToolMission(input, fsMissionMatch, session, store, projectRoot, fsPerf);
+          persistSession();
+          return;
+        }
+        // clarify / refuse — a deterministic answer, no model, no mission.
+        store.actions.addChatMessage({
+          role: "user",
+          content: input,
+          ts: Date.now(),
+          status: "complete",
+        });
+        store.actions.addChatMessage({
+          role: "assistant",
+          content: fsMatch.action === "clarify" ? fsMatch.question : fsMatch.reason,
+          ts: Date.now(),
+          status: "complete",
+          servedModel: "filesystem-router",
+        });
+        store.actions.addActivity({
+          id: `act_${Date.now()}_fs_route`,
+          ts: Date.now(),
+          type: "info",
+          tag: "FS-ROUTE",
+          text: fsMatch.action === "clarify"
+            ? "Filesystem search: clarification required (scope/target)"
+            : "Filesystem search: denied location",
+        });
+        persistSession();
+        return;
+      }
+      const localToolMatch = matchLocalToolMission(input);
+      if (localToolMatch) {
+        const localPerf = PerfTrace.start("local");
+        await runLocalToolMission(input, localToolMatch, session, store, projectRoot, localPerf);
+        persistSession();
+        return;
+      }
+    }
 
     // A local model counts as available only after the real Ollama
     // endpoint responds and reports at least one installed model.
