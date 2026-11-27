@@ -110,7 +110,7 @@ import {
   createDraftPR as safeCreateDraftPR,
   isProtectedBranch,
 } from "../lib/git-workflow.js";
-import { saveSession, summarize, markInterrupted, consumeUnlockedWrite, type SessionSnapshot } from "../lib/session-store.js";
+import { saveSession, summarize, markInterrupted, consumeUnlockedWrite, newSessionId, type SessionSnapshot } from "../lib/session-store.js";
 import type { WorkspaceEntry } from "../lib/workspace-store.js";
 
 /**
@@ -1058,6 +1058,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   // ─── Session persistence (/resume) ──────────────────────────────
   /** Persist the current shell session (transcript + context). */
   const lastPersistWarnRef = useRef(0);
+  const conversationId = useRef<string | null>(null);
   const persistSession = useCallback(() => {
     // Live transcript from the pure store — store.state.chatTranscript is a
     // render-time snapshot that misses messages appended this turn (this
@@ -1068,6 +1069,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     const firstUser = messages.find((m) => m.role === "user");
     try {
       saveSession({
+      id: conversationId.current ??= newSessionId(),
       project: store.state.project || projectName || "unnamed",
       cwd: session.getCwd(),
       branch: store.state.branch,
@@ -1104,10 +1106,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   // kill, not written in response to it. This throttled effect persists
   // the transcript as it changes — new user messages, streaming deltas,
   // and finalized assistant replies — independent of any exit path.
-  // saveSession()'s existing same-conversation-merge-in-place logic
-  // (session-store.ts) makes repeated calls for the same turn safe: each
-  // call overwrites that one session record, it never appends a
-  // duplicate.
+  // Repeated writes target the same conversation ID, including after /resume.
   const PERSIST_THROTTLE_MS = Number(process.env.LITT_PERSIST_THROTTLE_MS ?? "") || 1000;
   const lastIncrementalPersistRef = useRef(0);
   useEffect(() => {
@@ -1370,6 +1369,8 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
 
   // ─── /resume + /new ─────────────────────────────────────────────
   const restoreSession = useCallback((snapshot: SessionSnapshot) => {
+    if (conversationId.current && conversationId.current !== snapshot.id) persistSession();
+    conversationId.current = snapshot.id;
     // Transcript — restore the saved conversation exactly once.
     // markInterrupted() turns any message still "streaming" (the
     // process ended before it was finalized) into an explicit error
@@ -1411,9 +1412,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     store.actions.setOverlay("none");
     store.actions.setComposerValue("");
     act(store, `Session restored: ${snapshot.summary}`, "info", "decision", "RESUME");
-  }, [session, store]);
+  }, [session, store, persistSession]);
 
   const newSession = useCallback(() => {
+    persistSession();
+    conversationId.current = null;
     store.actions.clearChatTranscript();
     store.actions.clearMission();
     store.actions.clearToolProgress();
@@ -1422,7 +1425,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     store.actions.setOverlay("none");
     store.actions.setComposerValue("");
     act(store, "New session", "info", "decision", "NEW");
-  }, [store]);
+  }, [store, persistSession]);
 
   // ─── /ship ──────────────────────────────────────────────────────
   const runShipVerify = useCallback(async (): Promise<VerificationResult> => {

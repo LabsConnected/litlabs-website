@@ -290,6 +290,7 @@ export interface ConversationContext {
 }
 
 export interface SaveSessionInput extends ConversationContext {
+  id?: string;
   summary: string;
   messages: SessionMessage[];
 }
@@ -330,8 +331,8 @@ export function buildConversationSave(
 
 /**
  * Save (or update) a session. Returns the persisted snapshot.
- * The most recent session with the same project + summary is updated
- * in place within SAME_CONVERSATION_MS; otherwise a new one is added.
+ * When a conversation has an identity, update that record directly.
+ * Older callers can still coalesce recent saves within the same workspace.
  */
 export function saveSession(input: SaveSessionInput): SessionSnapshot {
   return withSessionsLock(() => {
@@ -339,22 +340,24 @@ export function saveSession(input: SaveSessionInput): SessionSnapshot {
     testHoldDelay(); // test-only — see acquireSessionsLock() doc comment
     const now = Date.now();
     const recent = all[0] ?? null;
-    const sameConversation = Boolean(
+    const sameConversation = (
       recent
       && recent.project === input.project
+      && recent.cwd === input.cwd
       && recent.summary === input.summary
-      && now - recent.updatedAt < SAME_CONVERSATION_MS,
+      && now - recent.updatedAt < SAME_CONVERSATION_MS
     );
+    const previous = input.id ? all.find((item) => item.id === input.id) : sameConversation ? recent : null;
 
     const snapshot: SessionSnapshot = {
       ...input,
-      id: sameConversation && recent ? recent.id : newSessionId(),
-      createdAt: sameConversation && recent ? recent.createdAt : now,
+      id: input.id ?? previous?.id ?? newSessionId(),
+      createdAt: previous?.createdAt ?? now,
       updatedAt: now,
       messages: input.messages.slice(-MAX_SAVED_MESSAGES).map(boundMessage),
     };
 
-    const rest = sameConversation ? all.slice(1) : all;
+    const rest = all.filter((item) => item.id !== snapshot.id);
     writeAllSessions([snapshot, ...rest].slice(0, MAX_SESSIONS));
     return snapshot;
   });
