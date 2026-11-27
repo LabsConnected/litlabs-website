@@ -2682,10 +2682,19 @@ export function summarizeToolResult(toolId: string, result: unknown): string {
         `but its asset record failed to persist — it may not appear in Media`
       ).slice(0, 200);
     }
+    // deliveryVerified === false means the provider returned only a link
+    // whose bytes were never fetched or persisted (e.g. the Pollinations
+    // lazy endpoint). The generation call itself succeeded, but nothing
+    // may claim the image is safely held — say so instead of implying
+    // verified delivery. A successful project save still wins: it means
+    // the bytes were fetched and written, so it is checked first.
     if (obj.savedToProject === true) {
       return projectPath
         ? `Image generated and saved to project (${projectPath})`
         : "Image generated and saved to project";
+    }
+    if (obj.deliveryVerified === false) {
+      return "Image generated but delivery could not be verified — the provider URL may not persist; check Media and Files.".slice(0, 200);
     }
     // Media results carry a multi-KB data: URL — never let it become the
     // summary. Chat-context generations (no project save) land here.

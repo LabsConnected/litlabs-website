@@ -444,6 +444,61 @@ describe("generateImage", () => {
     expect(job?.status).toBe("completed");
     expect(job?.metadata?.durableUrl).toBe(STORAGE_URL);
   });
+
+  it("reports deliveryVerified=false when only an unverified provider URL is held", async () => {
+    // persistImage returns the source URL unchanged on any failure —
+    // that is the honest "we hold a link, not the bytes" state. The
+    // result must say so instead of implying verified delivery.
+    const LAZY_URL =
+      "https://image.pollinations.ai/prompt/a%20bike?width=1024&height=1024&seed=7&nologo=true&enhance=false&model=flux";
+    const { deps } = makeDeps({
+      dispatch: async () => ({
+        id: "res_unverified",
+        status: 200,
+        title: "a bike",
+        format: "image" as const,
+        downloadUrl: LAZY_URL,
+      }),
+      persistImage: async (_uid, url) => url, // failure path: unchanged
+    });
+
+    const result = await generateImage(
+      { userId: "user_abc", requestId: "op_unverified" },
+      freeInput,
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.downloadUrl).toBe(LAZY_URL);
+      expect(result.deliveryVerified).toBe(false);
+    }
+  });
+
+  it("reports deliveryVerified=true for inline data: URL bytes even when persist fails", async () => {
+    const DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==";
+    const { deps } = makeDeps({
+      dispatch: async () => ({
+        id: "res_data",
+        status: 200,
+        title: "inline",
+        format: "image" as const,
+        downloadUrl: DATA_URL,
+      }),
+      persistImage: async (_uid, url) => url, // failure path: unchanged
+    });
+
+    const result = await generateImage(
+      { userId: "user_abc", requestId: "op_data" },
+      freeInput,
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.deliveryVerified).toBe(true);
+    }
+  });
 });
 
 describe("generateImage — provider fallthrough to the no-key last resort", () => {
