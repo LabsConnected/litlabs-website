@@ -61,7 +61,7 @@ function ToolBlock({ entry, details }: { entry: ToolProgressEntry; details: bool
           <Text color={color} bold>{glyph} </Text>
           <Text color={COLORS.brand} bold>{entry.label}</Text>
         </Box>
-        <Text dimColor>  {entry.lastChunk ? entry.lastChunk : "Running…"}</Text>
+        <Text color={COLORS.secondary}>  {entry.lastChunk ? entry.lastChunk : "Running…"}</Text>
       </Box>
     );
   }
@@ -72,7 +72,7 @@ function ToolBlock({ entry, details }: { entry: ToolProgressEntry; details: bool
       <Box>
         <Text color={COLORS.success}>{glyph} </Text>
         <Text color={COLORS.text}>{entry.label}</Text>
-        <Text dimColor>{duration}</Text>
+        <Text color={COLORS.secondary}>{duration}</Text>
       </Box>
     );
   }
@@ -85,7 +85,7 @@ function ToolBlock({ entry, details }: { entry: ToolProgressEntry; details: bool
       <Box>
         <Text color={color} bold={failed}>{glyph} </Text>
         <Text color={failed ? COLORS.text : COLORS.text} bold={failed}>{entry.label}</Text>
-        <Text dimColor>{duration}</Text>
+        <Text color={COLORS.secondary}>{duration}</Text>
       </Box>
       {entry.summary && (
         <Text color={failed ? COLORS.error : COLORS.secondaryDim}>
