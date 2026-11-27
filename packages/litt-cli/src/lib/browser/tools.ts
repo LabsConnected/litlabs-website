@@ -9,7 +9,7 @@
  * a consequential act (SEC-4).
  */
 
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, existsSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import type { ToolContext, ToolDefinition, ToolEntry, ToolResult } from "@litt/agent-core";
 import { CdpBrowser, assertPublicHttpUrl, findBrowser } from "./cdp.js";
@@ -35,6 +35,10 @@ async function persistSession(b: CdpBrowser, cwd: string): Promise<void> {
     const path = sessionFile(cwd);
     mkdirSync(join(cwd, ".litt", "browser"), { recursive: true });
     writeFileSync(path, JSON.stringify({ savedAt: new Date().toISOString(), cookies }, null, 2));
+    // session.json holds live session cookies — restrict to owner-only.
+    // Best-effort: chmod is a no-op semantic on Windows ACLs but correct
+    // on POSIX (WSL/Termux/macOS/Linux).
+    try { chmodSync(path, 0o600); } catch { /* platform without POSIX perms */ }
   } catch { /* session persistence is best-effort */ }
 }
 
