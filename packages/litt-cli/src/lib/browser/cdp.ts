@@ -207,9 +207,17 @@ export class CdpBrowser {
     b.proc = spawn(exe, args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     // Keep the stderr tail for diagnostics — Chrome's real failure reason
     // (missing libs, sandbox denial) otherwise vanishes with the pipe.
+    // Chrome also announces "DevTools listening on ws://…" here; on some
+    // platforms (CI containers) it never writes DevToolsActivePort, so
+    // the stderr endpoint is the authoritative fallback.
     let stderrTail = "";
+    let stderrWsUrl: string | null = null;
     b.proc.stderr?.on("data", (chunk: Buffer) => {
-      stderrTail = (stderrTail + chunk.toString("utf8")).slice(-4096);
+      const text = chunk.toString("utf8");
+      stderrTail = (stderrTail + text).slice(-4096);
+      // Match against the accumulated tail — the line can split across chunks.
+      const m = /DevTools listening on (ws:\/\/\S+)/.exec(stderrTail);
+      if (m) stderrWsUrl = m[1];
     });
     b.proc.on("exit", () => { if (!b.closed) b.failAll(new Error("browser process exited")); });
     // Never orphan Chrome: kill synchronously on process exit (SIGINT path
@@ -223,6 +231,10 @@ export class CdpBrowser {
     const deadline = Date.now() + 15_000;
     let version: { webSocketDebuggerUrl?: string } | null = null;
     while (Date.now() < deadline) {
+      if (stderrWsUrl) {
+        version = { webSocketDebuggerUrl: stderrWsUrl };
+        break;
+      }
       if (existsSync(portFile)) {
         try {
           // Chrome holds DevToolsActivePort open on Windows — a read can
