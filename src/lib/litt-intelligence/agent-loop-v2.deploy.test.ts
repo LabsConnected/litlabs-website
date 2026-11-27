@@ -479,3 +479,90 @@ describe("I. a provider failure after deployment neither repeats nor loses it", 
     expect(result.finalText).not.toContain(LIVE_URL);
   });
 });
+
+/* ── Case II: milestone-aware settlement — timeout and retry ─────────
+ *
+ * P0 hardening (2026-11-27): the deployment-verification gate
+ * (run-settlement.ts deploymentRequired/deploymentVerified) already
+ * covers plain failure, cancellation and success. These two cases
+ * pin the remaining asked-for scenarios: a deploy that TIMES OUT
+ * must settle exactly like any other unverified deploy (no special
+ * leniency for "it might still be running"), and a deploy that
+ * FAILS then is RETRIED and succeeds must settle on the retry's
+ * verified evidence, not be poisoned by the earlier failed attempt.
+ */
+
+describe("II. milestone-aware settlement: timeout and retry", () => {
+  function approvedDeploy(toolCallId = "c1") {
+    return {
+      pausedMessages: [{ role: "user" as const, content: "deploy it live" }],
+      toolId: "project.deploy",
+      toolCallId,
+      inputs: {},
+      decision: "approved" as const,
+      config,
+      stepsUsedBeforePause: 1,
+      hadInterveningMutation: true,
+    };
+  }
+
+  it("a deploy that times out settles exactly like any other unverified deploy — no leniency", async () => {
+    execute.mockResolvedValue({
+      ok: true,
+      result: {
+        success: false,
+        deployment: { deploymentId: "dep_timeout", status: "building", publicUrl: null },
+        errorClass: "timeout",
+        error: "Deployment timed out waiting for build output after 60000ms.",
+        retryable: true,
+      },
+    });
+    callLLMWithTools.mockRejectedValue(new Error("All tool-calling models failed"));
+
+    const result = await resumeAgentLoopV2(approvedDeploy(), transport());
+
+    expect(result.deployment ?? null).toBeNull();
+    expect(result.finalText).not.toMatch(/https?:\/\/\S*\/sites\//);
+    expect(result.finalText).not.toMatch(/is live|deployed successfully/i);
+    const missing = (result.failureContributors ?? []).find((c) => c.kind === "deployment_missing");
+    expect(missing).toBeDefined();
+  });
+
+  it("a failed deploy that is then retried settles on the retry's verified evidence, not the earlier failure", async () => {
+    // Attempt 1: the same pause/approve/resume cycle a real retry goes
+    // through — the user (or the model, on being told it failed) asks
+    // again and a fresh approval authorizes a second project.deploy.
+    execute.mockResolvedValueOnce({
+      ok: true,
+      result: {
+        success: false,
+        deployment: { deploymentId: "dep_try1", status: "failed", publicUrl: null },
+        errorClass: "transport",
+        error: "Deployment transport unavailable.",
+        retryable: true,
+      },
+    });
+    callLLMWithTools.mockRejectedValue(new Error("All tool-calling models failed"));
+
+    const firstAttempt = await resumeAgentLoopV2(approvedDeploy("c1"), transport());
+    expect(firstAttempt.deployment ?? null).toBeNull();
+    expect(
+      (firstAttempt.failureContributors ?? []).some((c) => c.kind === "deployment_missing"),
+    ).toBe(true);
+
+    // Attempt 2 (the retry): a fresh approved deploy call succeeds with
+    // R8-verified evidence.
+    execute.mockReset();
+    execute.mockResolvedValueOnce({ ok: true, result: deploySuccess });
+    callLLMWithTools.mockRejectedValue(new Error("All tool-calling models failed"));
+
+    const retry = await resumeAgentLoopV2(approvedDeploy("c2"), transport());
+
+    expect(retry.deployment).toBeDefined();
+    expect(retry.deployment!.deploymentId).toBe("dep_abc123");
+    expect(retry.finalText).toContain(STABLE_URL);
+    expect(
+      (retry.failureContributors ?? []).some((c) => c.kind === "deployment_missing"),
+    ).toBe(false);
+  });
+});
