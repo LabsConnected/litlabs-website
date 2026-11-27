@@ -28,7 +28,7 @@ import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage
 export type { LLMMessage };
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
-import { buildFilesWriteRecoveryMessage, buildPatchRecoveryMessage, existingPageOverwriteError, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
+import { buildFilesWriteRecoveryMessage, buildPatchRecoveryMessage, existingPageOverwriteError, simulatePatchResult, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange, workspaceChangeFromVolumeListing, workspaceChangeFromDirectReads } from "./workspace-change-producer";
 import { checkRequestedLiteral, requestedLiteralFailureMessage, requestedLiteralRepairPrompt } from "./requested-literal";
 import { checkInstructionLeakage, instructionLeakageFailureMessage } from "./instruction-leakage";
@@ -922,13 +922,14 @@ export function deniedWriteKey(
  * results paired with their calls by tool_call_id (the same pairing
  * seedToolCallRecordsFromHistory uses).
  */
-export function seedDeniedWriteKeys(
+/** The denied calls themselves (shared by the exact-key and effect-key seeders). */
+export function collectDeniedCalls(
   messages: LLMMessage[],
   resume: { toolId: string; inputs: Record<string, unknown>; decision: string },
-): Set<string> {
-  const denied = new Set<string>();
+): Array<{ toolId: string; inputs: Record<string, unknown> }> {
+  const calls: Array<{ toolId: string; inputs: Record<string, unknown> }> = [];
   if (resume.decision === "rejected") {
-    denied.add(deniedWriteKey(resume.toolId, resume.inputs));
+    calls.push({ toolId: resume.toolId, inputs: resume.inputs });
   }
   const wireNameToToolId = new Map<string, string>();
   for (const tool of toolRegistry.listEnabled()) {
@@ -960,10 +961,116 @@ export function seedDeniedWriteKeys(
       (m.content ?? "").startsWith("Error: REJECTED:")
     ) {
       const call = callById.get(m.tool_call_id);
-      if (call) denied.add(deniedWriteKey(call.toolId, call.inputs));
+      if (call) calls.push(call);
     }
   }
-  return denied;
+  return calls;
+}
+
+export function seedDeniedWriteKeys(
+  messages: LLMMessage[],
+  resume: { toolId: string; inputs: Record<string, unknown>; decision: string },
+): Set<string> {
+  return new Set(
+    collectDeniedCalls(messages, resume).map((call) =>
+      deniedWriteKey(call.toolId, call.inputs),
+    ),
+  );
+}
+
+/**
+ * Effect identity for a write call (final merge gate, 2026-11-27):
+ * the target path plus a hash of the file content the call WOULD
+ * produce. The exact denied-write key is tool-scoped, so a model
+ * could re-propose the very change the user denied through a
+ * different write tool (deny a files.write of content X to path P,
+ * then apply_patch P into exactly X). Effect keys close that route
+ * across every write tool whose result is computable before
+ * execution: files.write / code.writeFile (the content itself),
+ * apply_patch / code.refactor (simulated against the current file),
+ * site.patch (the section edit applied in memory), and site.compose
+ * (the plan compiled by the same pure compiler the handler runs).
+ * Returns null when the effect cannot be determined — the exact-key
+ * memory still applies, and an indeterminate effect is never treated
+ * as a match. Deliberately narrow: a genuinely different edit to the
+ * same path produces a different effect and is NOT blocked.
+ */
+export async function deniedEffectKey(
+  toolId: string,
+  inputs: Record<string, unknown> | undefined,
+  transport: WorkspaceTransport,
+): Promise<string | null> {
+  if (!inputs) return null;
+  const rawPath = inputs.path;
+  const path =
+    typeof rawPath === "string" && rawPath.trim() ? rawPath.trim() : null;
+  try {
+    if (toolId === "files.write" || toolId === "code.writeFile") {
+      if (!path || typeof inputs.content !== "string") return null;
+      return `effect:${path}:${hashInputs({ content: inputs.content })}`;
+    }
+    if (toolId === "apply_patch" || toolId === "code.refactor") {
+      if (!path || !Array.isArray(inputs.patches)) return null;
+      const { content } = await transport.readFile(path);
+      const result = simulatePatchResult(
+        content,
+        inputs.patches as Array<{ search?: unknown; replace?: unknown }>,
+      );
+      return result === null
+        ? null
+        : `effect:${path}:${hashInputs({ content: result })}`;
+    }
+    if (toolId === "site.patch") {
+      const target = path ?? "index.html";
+      const section = inputs.section;
+      if (typeof section !== "string" || !section.trim()) return null;
+      const { content } = await transport.readFile(target);
+      const { applySectionEdit } = await import("./site-compose");
+      const fields = Object.fromEntries(
+        Object.entries(inputs).filter(
+          ([k]) =>
+            k !== "path" && k !== "projectId" && k !== "section" && k !== "allowOverwrite",
+        ),
+      );
+      const probe = applySectionEdit(content, section, fields);
+      return probe.ok && typeof probe.html === "string"
+        ? `effect:${target}:${hashInputs({ content: probe.html })}`
+        : null;
+    }
+    if (toolId === "site.compose") {
+      const target = path ?? "index.html";
+      const { validateSitePlan, composeSiteHtml } = await import("./site-compose");
+      const planInput =
+        inputs.plan !== undefined
+          ? inputs.plan
+          : Object.fromEntries(
+              Object.entries(inputs).filter(
+                ([k]) =>
+                  k !== "path" && k !== "projectId" && k !== "allowOverwrite" && k !== "pack",
+              ),
+            );
+      const v = validateSitePlan(planInput);
+      if (!v.ok || !v.plan) return null;
+      return `effect:${target}:${hashInputs({ content: composeSiteHtml(v.plan) })}`;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/** Seed the effect-key denied set for a resumed segment (see deniedEffectKey). */
+export async function seedDeniedEffectKeys(
+  messages: LLMMessage[],
+  resume: { toolId: string; inputs: Record<string, unknown>; decision: string },
+  transport: WorkspaceTransport,
+): Promise<Set<string>> {
+  const keys = new Set<string>();
+  for (const call of collectDeniedCalls(messages, resume)) {
+    const key = await deniedEffectKey(call.toolId, call.inputs, transport);
+    if (key) keys.add(key);
+  }
+  return keys;
 }
 
 // site.compose/site.patch generate and edit the canvas page artifact
@@ -3985,6 +4092,18 @@ async function runAgentLoopV2Inner(
         status: "failed",
         error: errMsg.slice(0, 500),
       });
+      // Cancellation that lands DURING the in-flight model call
+      // surfaces here as a thrown abort (callLLMWithTools races the
+      // provider fetch against cfg.signal and throws
+      // UpstreamAbortError). That is a user stop, not a model
+      // failure: settle cancelled — never failed, and never
+      // completed-with-warning on a deliverable check.
+      if (cfg.signal?.aborted) {
+        cancelled = true;
+        cancelReason = "Cancelled by user";
+        finalText = "Stopped — you cancelled this run. Everything completed earlier in this run is preserved.";
+        break;
+      }
       // Emit model failure event with sanitized error (no secrets)
       // NOTE: Use "all-routes" not cfg.model — cfg.model is the user's hint
       // (e.g. "gemini-2.5-flash") which may have been excluded by config
@@ -5929,6 +6048,8 @@ export interface DeferredToolBatchState {
    * refused inside the batch, never executed.
    */
   deniedWriteKeys?: Set<string>;
+  /** Denied-write EFFECT keys (path + resulting-content hash), threaded like the exact keys. */
+  deniedEffectKeys?: Set<string>;
   /** Per-key count of denied-write re-emissions inside the batch. */
   deniedReemissions?: Map<string, number>;
   /** P0 F2: the resume segment's site.compose pack-repair budget. */
@@ -6134,9 +6255,19 @@ export async function executeDeferredToolCalls(
     // is refused here too — the batch is an alternate route and must
     // not become a bypass. First re-emission gets refusal feedback;
     // a second stops the batch honestly via state.failedHonestly.
-    if (!toolDef.readOnly && state.deniedWriteKeys && state.deniedWriteKeys.size > 0) {
-      const deniedKey = deniedWriteKey(toolCall.toolId, toolCall.inputs);
-      if (state.deniedWriteKeys.has(deniedKey)) {
+    if (!toolDef.readOnly && ((state.deniedWriteKeys && state.deniedWriteKeys.size > 0) || (state.deniedEffectKeys && state.deniedEffectKeys.size > 0))) {
+      const exactKey = deniedWriteKey(toolCall.toolId, toolCall.inputs);
+      let deniedKey: string | null =
+        state.deniedWriteKeys && state.deniedWriteKeys.has(exactKey) ? exactKey : null;
+      if (!deniedKey && state.deniedEffectKeys && state.deniedEffectKeys.size > 0) {
+        // Alternate-tool bypass check: the same effective change
+        // (same target path, same resulting content) proposed through
+        // a different write tool is the denied change, whatever tool
+        // carries it.
+        const effectKey = await deniedEffectKey(toolCall.toolId, toolCall.inputs, ctx.transport);
+        if (effectKey && state.deniedEffectKeys.has(effectKey)) deniedKey = effectKey;
+      }
+      if (deniedKey) {
         const reemissionsMap = (state.deniedReemissions ??= new Map<string, number>());
         const reemissions = (reemissionsMap.get(deniedKey) ?? 0) + 1;
         reemissionsMap.set(deniedKey, reemissions);
@@ -6610,6 +6741,10 @@ async function resumeAgentLoopV2Inner(
   // run's history) are refused before validation, marking, or the
   // gate — see the enforcement in the resume loop.
   const deniedWriteKeys = seedDeniedWriteKeys(resume.pausedMessages, resume);
+  // Effect-key half of the denied-write memory: the same denied
+  // change re-proposed through a different write tool is refused too
+  // (see deniedEffectKey).
+  const deniedEffectKeys = await seedDeniedEffectKeys(resume.pausedMessages, resume, transport);
   const deniedReemissions = new Map<string, number>();
   let pendingPatchRejection: { path: string; error: string } | null = null;
   let pendingWriteRejection: { toolId: string; path: string; error: string } | null = null;
@@ -7044,6 +7179,7 @@ async function resumeAgentLoopV2Inner(
       writeRecoveryAttempts: patchRecoveryAttempts,
       writeRecoveryBudget,
       deniedWriteKeys,
+      deniedEffectKeys,
       deniedReemissions,
       packRepairAttempts,
       pendingWriteRejection: null,
@@ -7371,6 +7507,15 @@ async function resumeAgentLoopV2Inner(
         status: "failed",
         error: errMsg.slice(0, 500),
       });
+      // Cancellation during the in-flight model call — same
+      // treatment as the initial loop: a user stop settles
+      // cancelled, never as a model failure.
+      if (cfg.signal?.aborted) {
+        cancelled = true;
+        cancelReason = "Cancelled by user";
+        finalText = "Stopped — you cancelled this run. Everything completed earlier in this run is preserved.";
+        break;
+      }
       localProgress.emit({
         type: "model_failed",
         model: "all-routes",
@@ -7633,9 +7778,18 @@ async function resumeAgentLoopV2Inner(
       // and before the approval gate (no re-asking). The first
       // re-emission gets refusal feedback; a second one stops the
       // run honestly. The denied write never executes.
-      if (!toolDef.readOnly && deniedWriteKeys.size > 0) {
-        const deniedKey = deniedWriteKey(toolCall.toolId, toolCall.inputs);
-        if (deniedWriteKeys.has(deniedKey)) {
+      if (!toolDef.readOnly && (deniedWriteKeys.size > 0 || deniedEffectKeys.size > 0)) {
+        const exactKey = deniedWriteKey(toolCall.toolId, toolCall.inputs);
+        let deniedKey: string | null = deniedWriteKeys.has(exactKey) ? exactKey : null;
+        if (!deniedKey && deniedEffectKeys.size > 0) {
+          // Alternate-tool bypass check: the same effective change
+          // (same target path, same resulting content) proposed
+          // through a different write tool is the denied change,
+          // whatever tool carries it.
+          const effectKey = await deniedEffectKey(toolCall.toolId, toolCall.inputs, transport);
+          if (effectKey && deniedEffectKeys.has(effectKey)) deniedKey = effectKey;
+        }
+        if (deniedKey) {
           const reemissions = (deniedReemissions.get(deniedKey) ?? 0) + 1;
           deniedReemissions.set(deniedKey, reemissions);
           if (reemissions >= 2) {

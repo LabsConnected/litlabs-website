@@ -31,6 +31,7 @@ vi.mock("./llm-tool-calling", async (importOriginal) => ({
 }));
 
 import {
+  deniedEffectKey,
   runAgentLoopV2,
   resumeAgentLoopV2,
   WRITE_RECOVERY_ATTEMPT_LIMIT,
@@ -501,5 +502,362 @@ describe("P0 write-recovery hardening — bounded, denial-safe, cancellable (Lar
     expect(calls).toBe(WRITE_RECOVERY_BOUNCE_BUDGET + 1);
     expect(result.finalText).toContain("No change was made");
     expect(transport.writeFile).not.toHaveBeenCalled();
+  });
+});
+
+describe("Final merge gate — budgets, denial effects, cancellation, settlement, complex workflows", () => {
+  beforeEach(() => {
+    vi.mocked(callLLMWithTools).mockReset();
+  });
+
+  const INVALID_PAGE = [
+    "<!DOCTYPE html>",
+    "<html><head><title>Harbor Lights Coffee</title></head>",
+    "<body><h1>Welcome to {{business_name}}</h1></body></html>",
+  ].join("\n");
+  // PAGE → REBUILD via three line patches (title, style, body line).
+  const REBUILD = [
+    "<!DOCTYPE html>",
+    "<html><head><title>Harbor Lights — Rebuilt</title>",
+    "<style>body { background: #0c0a09; color: #fafaf9; }</style>",
+    "</head><body><h1>Harbor Lights, Reimagined</h1><p>A brand new page, top to bottom.</p></body></html>",
+  ].join("\n");
+  const REBUILD_PATCHES = [
+    { search: "<title>Harbor Lights Coffee</title>", replace: "<title>Harbor Lights — Rebuilt</title>" },
+    { search: "<style>body { background: #ffffff; color: #1c1917; }</style>", replace: "<style>body { background: #0c0a09; color: #fafaf9; }</style>" },
+    { search: "<h1>Harbor Lights Coffee</h1><p>Your daily dose of coastal calm.</p>", replace: "<h1>Harbor Lights, Reimagined</h1><p>A brand new page, top to bottom.</p>" },
+  ];
+
+  const ACT_CFG = {
+    model: "test-model",
+    systemPrompt: "You are LiTT.",
+    userId: "u-test",
+    executionMode: "act",
+    enableBuildFix: false,
+    isStaticWorkspace: true,
+    maxSteps: 40,
+  } as const;
+
+  function actMkdirResume(): ResumeInput {
+    return {
+      pausedMessages: [
+        { role: "user", content: "Build a one-page site for Harbor Lights Coffee and rebuild the home page" },
+        buildAssistantToolCallMessage(
+          [{ toolId: "files.mkdir", toolCallId: "tc-0", inputs: { path: "assets" } }],
+          "Setting up the project.",
+          undefined,
+        ),
+      ],
+      toolId: "files.mkdir",
+      toolCallId: "tc-0",
+      inputs: { path: "assets" },
+      decision: "approved",
+      stepsUsedBeforePause: 1,
+      hadInterveningMutation: false,
+      config: { ...ACT_CFG },
+    };
+  }
+
+  // The real transport implements applyPatch; the disk mock needs
+  // the same surface for patch executions to land on the fake disk.
+  function withApplyPatch(transport: WorkspaceTransport, disk: Map<string, string>) {
+    Object.assign(transport, {
+      applyPatch: vi.fn(async (path: string, patches: Array<{ search: string; replace: string }>) => {
+        const current = disk.get(path);
+        if (current === undefined) throw new Error(`applyPatch failed (404): ${path}`);
+        let next = current;
+        for (const p of patches) {
+          if (!next.includes(p.search)) throw new Error(`applyPatch search not found in ${path}`);
+          next = next.replace(p.search, p.replace);
+        }
+        disk.set(path, next);
+        return { applied: true, patchCount: patches.length };
+      }),
+    });
+  }
+
+  function resumeFromPending(pending: NonNullable<Awaited<ReturnType<typeof resumeAgentLoopV2>>["pendingApproval"]>, decision: "approved" | "rejected"): ResumeInput {
+    return {
+      pausedMessages: pending.pausedMessages,
+      toolId: pending.toolId,
+      toolCallId: pending.toolCallId,
+      inputs: pending.inputs,
+      decision,
+      stepsUsedBeforePause: pending.stepsUsedAtPause ?? 1,
+      hadInterveningMutation: pending.hadInterveningMutationAtPause ?? false,
+      priorToolCalls: pending.priorToolCalls ?? [],
+      config: { ...ACT_CFG },
+    };
+  }
+
+  it("point 1 — rotating TOOLS as well as paths cannot dodge the bounce budget (initial segment)", async () => {
+    const { transport } = diskTransport({ "index.html": PAGE });
+    let calls = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => {
+      calls += 1;
+      // Alternate write tools, fresh path every time: every per-key
+      // attempt count stays at 1, so only the segment budget can stop
+      // this — exactly the reset vector Larry named.
+      return calls % 2 === 1
+        ? toolReply("files.write", { projectId: "p-test", path: `page-${calls}.html`, content: INVALID_PAGE }, `tc-ts-${calls}`)
+        : toolReply("apply_patch", { path: `patch-${calls}.html`, patches: [{ search: "text that is not in the file", replace: "x" }] }, `tc-ts-${calls}`);
+    });
+
+    const result = await runAgentLoopV2("Write pages", transport, { ...BASE_CFG, maxSteps: 40 });
+
+    expect(calls).toBe(WRITE_RECOVERY_BOUNCE_BUDGET + 1);
+    expect(result.cancelled).toBe(true);
+    expect(transport.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("point 1 — a resumed segment is bounded by the same budget (reset only ever follows a user approval decision)", async () => {
+    const { transport } = diskTransport({ "index.html": PAGE });
+    let calls = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => {
+      calls += 1;
+      return toolReply(
+        "files.write",
+        { projectId: "p-test", path: `page-${calls}.html`, content: INVALID_PAGE },
+        `tc-rb-${calls}`,
+      );
+    });
+
+    const result = await resumeAgentLoopV2(
+      { ...actMkdirResume(), config: { ...ACT_CFG, executionMode: "auto" } },
+      transport,
+    );
+
+    expect(calls).toBe(WRITE_RECOVERY_BOUNCE_BUDGET + 1);
+    expect(result.cancelled).toBe(true);
+    expect(transport.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("point 2 — effect identity is shared across write tools, and only for the same resulting content", async () => {
+    const { transport } = diskTransport({ "index.html": PAGE });
+
+    const viaWrite = await deniedEffectKey("files.write", { path: "index.html", content: REBUILD }, transport);
+    const viaDelegate = await deniedEffectKey("code.writeFile", { path: "index.html", content: REBUILD }, transport);
+    const viaPatch = await deniedEffectKey("apply_patch", { path: "index.html", patches: REBUILD_PATCHES }, transport);
+    expect(viaWrite).not.toBeNull();
+    expect(viaDelegate).toBe(viaWrite);
+    expect(viaPatch).toBe(viaWrite);
+
+    // A genuinely different edit to the same path is a different effect.
+    const different = await deniedEffectKey(
+      "apply_patch",
+      { path: "index.html", patches: [{ search: "<h1>Harbor Lights Coffee</h1>", replace: "<h1>Harbor Lights Coffee — Evening Hours</h1>" }] },
+      transport,
+    );
+    expect(different).not.toBeNull();
+    expect(different).not.toBe(viaWrite);
+  });
+
+  it("point 2 — a denied files.write cannot be re-landed via apply_patch, but a different edit still goes through approval", async () => {
+    const { transport, disk } = diskTransport({ "index.html": PAGE });
+    withApplyPatch(transport, disk);
+
+    // Segment A: gate-tripping write bounces once, escalates, pauses.
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolReply("files.write", { projectId: "p-test", path: "index.html", content: REBUILD }, "tc-x-1"))
+      .mockResolvedValueOnce(toolReply("files.write", { projectId: "p-test", path: "index.html", content: REBUILD }, "tc-x-2"));
+    const segmentA = await resumeAgentLoopV2(actMkdirResume(), transport);
+    expect(segmentA.pendingApproval?.toolId).toBe("files.write");
+
+    // Segment B: user DENIES the rebuild. The model re-proposes the
+    // SAME resulting page through apply_patch — refused by effect,
+    // never executed, never re-carded. It then proposes a genuinely
+    // different small edit, which pauses for approval as normal.
+    vi.mocked(callLLMWithTools).mockReset();
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolReply("apply_patch", { path: "index.html", patches: REBUILD_PATCHES }, "tc-x-3"))
+      .mockResolvedValueOnce(toolReply("apply_patch", { path: "index.html", patches: [{ search: "<h1>Harbor Lights Coffee</h1>", replace: "<h1>Harbor Lights Coffee — Evening Hours</h1>" }] }, "tc-x-4"));
+    const segmentB = await resumeAgentLoopV2(resumeFromPending(segmentA.pendingApproval!, "rejected"), transport);
+
+    // The bypass attempt was refused by effect (the pause result
+    // carries the tool log, not final messages): no execution, no
+    // approval card for the denied change.
+    const refusal = segmentB.toolCalls.find((c) => c.toolId === "apply_patch" && !c.success);
+    expect(refusal?.summary).toContain("already rejected by the user in this run");
+    expect(segmentB.pendingApproval?.toolId).toBe("apply_patch");
+    expect(segmentB.pendingApproval?.toolCallId).toBe("tc-x-4");
+    expect(transport.writeFile).not.toHaveBeenCalled();
+    expect(disk.get("index.html")).toBe(PAGE);
+
+    // Segment C: the user approves the DIFFERENT edit — it lands.
+    // The denied rebuild never does.
+    vi.mocked(callLLMWithTools).mockReset();
+    vi.mocked(callLLMWithTools).mockResolvedValueOnce(textReply("Added the evening-hours line."));
+    const segmentC = await resumeAgentLoopV2(resumeFromPending(segmentB.pendingApproval!, "approved"), transport);
+
+    expect(segmentC.finalText).toBe("Added the evening-hours line.");
+    expect(disk.get("index.html")).toContain("Evening Hours");
+    expect(disk.get("index.html")).not.toBe(REBUILD);
+  });
+
+  it("point 3 — an abort during the in-flight model call settles CANCELLED, not as a model failure", async () => {
+    const { transport } = diskTransport({ "index.html": PAGE });
+    const controller = new AbortController();
+    vi.mocked(callLLMWithTools).mockImplementation(
+      (_systemPrompt, _messages, _toolDefs, options) =>
+        new Promise((_resolve, reject) => {
+          // Mirror the real caller: the provider fetch is raced
+          // against the run's signal and an abort rejects the call
+          // (llm-tool-calling.ts → UpstreamAbortError).
+          const sig = options?.signal;
+          const abortError = () => Object.assign(new Error("The operation was aborted"), { name: "UpstreamAbortError" });
+          if (!sig) return; // never settles — the loop must pass its signal
+          if (sig.aborted) {
+            reject(abortError());
+            return;
+          }
+          sig.addEventListener("abort", () => reject(abortError()), { once: true });
+        }),
+    );
+
+    const run = runAgentLoopV2("build a page", transport, {
+      ...BASE_CFG,
+      maxSteps: 40,
+      signal: controller.signal,
+    });
+    await new Promise((r) => setTimeout(r, 25));
+    controller.abort();
+    const result = await run;
+
+    expect(result.cancelled).toBe(true);
+    expect(result.cancelReason).toBe("Cancelled by user");
+    expect(result.runObservability?.outcome).toBe("cancelled");
+    expect(result.finalText).not.toContain("error while reasoning");
+  });
+
+  it("point 3 — an abort during a hanging tool call stops the run before the next model call", async () => {
+    const { transport } = diskTransport({ "index.html": PAGE });
+    const controller = new AbortController();
+    let releaseRead!: (value: { content: string; size: number }) => void;
+    const hangingRead = new Promise<{ content: string; size: number }>((resolve) => {
+      releaseRead = resolve;
+    });
+    vi.mocked(transport.readFile).mockImplementation(() => hangingRead);
+    let calls = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => {
+      calls += 1;
+      return toolReply("files.read", { projectId: "p-test", path: "index.html" }, "tc-hang-1");
+    });
+
+    const run = runAgentLoopV2("read the page", transport, {
+      ...BASE_CFG,
+      maxSteps: 40,
+      signal: controller.signal,
+    });
+    await new Promise((r) => setTimeout(r, 25));
+    controller.abort();
+    releaseRead({ content: PAGE, size: PAGE.length });
+    const result = await run;
+
+    // The registry races the execution against the run's signal
+    // (tool-registry.ts), so the loop's await is interrupted the
+    // moment the abort fires and no further model call is spent.
+    // The handler's own underlying transport work is not killed —
+    // handlers receive no signal parameter (the named residual).
+    expect(calls).toBe(1);
+    expect(result.cancelled).toBe(true);
+    expect(result.cancelReason).toBe("Cancelled by user");
+  });
+
+  it("point 4 — a bounce-budget stop settles exactly once as cancelled, charged only for steps actually run", async () => {
+    const { transport } = diskTransport({ "index.html": PAGE });
+    let calls = 0;
+    vi.mocked(callLLMWithTools).mockImplementation(async () => {
+      calls += 1;
+      return toolReply(
+        "files.write",
+        { projectId: "p-test", path: `page-${calls}.html`, content: INVALID_PAGE },
+        `tc-settle-${calls}`,
+      );
+    });
+
+    const result = await runAgentLoopV2("Write pages", transport, { ...BASE_CFG, maxSteps: 40 });
+
+    expect(result.cancelled).toBe(true);
+    // Settlement (run-settlement.ts, computed once at the loop exit):
+    // a cancelled run settles "cancelled" — the cancelled/failed
+    // semantics under which reservations release and no completion
+    // charge can post.
+    expect(result.runObservability?.outcome).toBe("cancelled");
+    // Steps used == model calls actually made: metering fires per
+    // completed step with this step index, so nothing beyond the
+    // budget is ever metered or settled.
+    expect(result.stepsUsed).toBe(WRITE_RECOVERY_BOUNCE_BUDGET + 1);
+    expect(calls).toBe(WRITE_RECOVERY_BOUNCE_BUDGET + 1);
+    // Exactly one terminal event — no double settlement signal.
+    const terminal = result.events.filter((e) => e.type === "cancelled" || e.type === "finished");
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0].type).toBe("cancelled");
+  });
+
+  it("point 5 — a complex multi-file workflow with bounces and an escalation completes within the limits", async () => {
+    const ABOUT = [
+      "<!DOCTYPE html>",
+      "<html><head><title>About — Harbor Lights</title></head>",
+      "<body><h1>About Harbor Lights</h1><p>Our story.</p></body></html>",
+    ].join("\n");
+    const CSS = "body { margin: 0; font-family: sans-serif; }\n";
+    const NEW_HOME = [
+      "<!DOCTYPE html>",
+      "<html><head><title>Harbor Lights — New Home</title>",
+      "<style>body { background: #111111; color: #eeeeee; }</style>",
+      "</head><body><h1>Welcome to the New Harbor Lights</h1><p>Fresh look, same coffee.</p></body></html>",
+    ].join("\n");
+    const MENU_V1 = [
+      "<!DOCTYPE html>",
+      "<html><head><title>Harbor Lights — Menu</title>",
+      "<style>body { background: #ffffff; color: #1c1917; }</style>",
+      "</head><body><h1>Menu</h1><p>Coffee $4, pastries $5.</p></body></html>",
+    ].join("\n");
+    const MENU_V2 = [
+      "<!DOCTYPE html>",
+      "<html><head><title>Harbor Lights — Menu, Redesigned</title>",
+      "<style>body { background: #0c0a09; color: #fafaf9; }</style>",
+      "</head><body><h1>The New Menu</h1><p>Espresso $3, croissants $4.</p></body></html>",
+    ].join("\n");
+
+    const { transport, disk } = diskTransport({ "index.html": PAGE });
+    withApplyPatch(transport, disk);
+    vi.mocked(callLLMWithTools)
+      // 1–2. Two clean writes (new files).
+      .mockResolvedValueOnce(toolReply("files.write", { projectId: "p-test", path: "about.html", content: ABOUT }, "tc-w-1"))
+      .mockResolvedValueOnce(toolReply("files.write", { projectId: "p-test", path: "styles.css", content: CSS }, "tc-w-2"))
+      // 3. A correctable write: placeholder content bounces…
+      .mockResolvedValueOnce(toolReply("files.write", { projectId: "p-test", path: "index.html", content: INVALID_PAGE }, "tc-w-3"))
+      // 4. …and the corrected, declared overwrite lands.
+      .mockResolvedValueOnce(toolReply("files.write", { projectId: "p-test", path: "index.html", content: NEW_HOME, allowOverwrite: true }, "tc-w-4"))
+      // 5. A patch whose search text is absent bounces…
+      .mockResolvedValueOnce(toolReply("apply_patch", { path: "about.html", patches: [{ search: "text that is not on the page", replace: "x" }] }, "tc-w-5"))
+      // 6. …and the corrected patch lands.
+      .mockResolvedValueOnce(toolReply("apply_patch", { path: "about.html", patches: [{ search: "<h1>About Harbor Lights</h1>", replace: "<h1>About Harbor Lights Coffee</h1>" }] }, "tc-w-6"))
+      // 7. A clean write of a second page.
+      .mockResolvedValueOnce(toolReply("files.write", { projectId: "p-test", path: "menu.html", content: MENU_V1 }, "tc-w-7"))
+      // 8. An undeclared overwrite of that page bounces at the
+      //    overwrite gate (fresh recovery key for this path)…
+      .mockResolvedValueOnce(toolReply("files.write", { projectId: "p-test", path: "menu.html", content: MENU_V2 }, "tc-w-8"))
+      // 9. …and its re-emission escalates (marked as the declared
+      //    recovery overwrite) and lands — in ACT mode this same
+      //    escalation is what reaches the approval checkpoint
+      //    (route.resume-wiring.test.ts pins that gate entry).
+      .mockResolvedValueOnce(toolReply("files.write", { projectId: "p-test", path: "menu.html", content: MENU_V2 }, "tc-w-9"))
+      .mockResolvedValueOnce(textReply("Site built."));
+
+    const result = await runAgentLoopV2("Build the Harbor Lights site", transport, { ...BASE_CFG, maxSteps: 40 });
+
+    expect(result.cancelled).toBe(false);
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.finalText).toBe("Site built.");
+    expect(disk.get("about.html")).toContain("About Harbor Lights Coffee");
+    expect(disk.get("styles.css")).toBe(CSS);
+    expect(disk.get("index.html")).toBe(NEW_HOME);
+    expect(disk.get("menu.html")).toBe(MENU_V2);
+    // Exactly the three scripted bounces — well inside the budget.
+    const bounces = result.toolCalls.filter((c) => !c.success);
+    expect(bounces).toHaveLength(3);
+    expect(vi.mocked(callLLMWithTools)).toHaveBeenCalledTimes(10);
   });
 });
