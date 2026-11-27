@@ -5,6 +5,7 @@ import { generateText } from "@/lib/llm";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getUserByClerkId } from "@/lib/user-db";
 import { Supermemory } from "supermemory";
+import { toSupermemoryMetadata } from "@/lib/studio/memory-service";
 import { getStudioContext, buildCapabilityContextForChat } from "@/lib/capabilities/studio-context";
 import { detectAndExecuteTool } from "@/lib/litt-intelligence/tool-executor";
 import {
@@ -39,9 +40,9 @@ async function recallMemories(
   try {
     if (hasSupermemory()) {
       try {
-        const results = (await getSupermemory().search.memories({
-          q: query,
-          containerTag: `${userId}:conversation`,
+        const results = (await getSupermemory().search(`${userId}:conversation`, {
+          query,
+          searchMode: "memories",
           limit,
         })) as {
           memories?: { metadata?: { supabaseMemoryId?: string }; content?: string }[];
@@ -83,7 +84,7 @@ async function persistMemory(
   try {
     const scope = options.scope || "conversation";
     const source = options.source || "agent-chat";
-    const containerTag = scope ? `${userId}:${scope}` : userId;
+    const namespace = scope ? `${userId}:${scope}` : userId;
 
     const { data: record, error: insertError } = await supabaseAdmin
       .from("memories")
@@ -113,12 +114,11 @@ async function persistMemory(
           supabaseMemoryId: record.id,
         };
         if (options.agentId) metadata.agentId = options.agentId;
-        const result = (await getSupermemory().add({
+        const result = (await getSupermemory().add(namespace, {
           content,
-          containerTag,
-          metadata,
-        })) as { id?: string; memoryId?: string; memory_id?: string; externalId?: string };
-        supermemoryId = result.id || result.memoryId || result.memory_id || result.externalId || null;
+          metadata: toSupermemoryMetadata(metadata),
+        })) as { id?: string };
+        supermemoryId = result.id ?? null;
       } catch (_err) {
       }
     }
