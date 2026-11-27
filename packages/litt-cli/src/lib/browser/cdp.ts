@@ -388,16 +388,31 @@ export class CdpBrowser {
     })()`);
   }
 
-  /** Click an element resolved from snapshot().elements[].selector via real mouse events. */
+  /**
+   * Click an element resolved from snapshot().elements[].selector via real
+   * mouse events. Small local models frequently guess semantic selectors
+   * ("#submit", ".login-btn") that don't exist; when the CSS lookup
+   * misses, fall back to matching the selector text against element
+   * labels (innerText / aria-label / placeholder / value) so a guessed
+   * name still lands on the intended control.
+   */
   async click(selector: string): Promise<void> {
     const point = await this.evaluate<{ x: number; y: number } | null>(`(() => {
-      const el = document.querySelector(${JSON.stringify(selector)});
+      let el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) {
+        const want = ${JSON.stringify(selector)}.replace(/^[#.]/, '').toLowerCase();
+        const candidates = document.querySelectorAll('a,button,input,textarea,select,[role=button],[role=link]');
+        el = [...candidates].find((c) => {
+          const label = ((c.innerText || '') + ' ' + (c.value || '') + ' ' + (c.getAttribute('aria-label') || '') + ' ' + (c.getAttribute('placeholder') || '')).toLowerCase();
+          return label.includes(want);
+        }) || null;
+      }
       if (!el) return null;
       el.scrollIntoView({ block: 'center' });
       const r = el.getBoundingClientRect();
       return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
     })()`);
-    if (!point) throw new Error(`click target not found: ${selector}`);
+    if (!point) throw new Error(`click target not found: ${selector}${await this.availableHint()}`);
     await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y }, this.sessionId);
     await this.send("Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: "left", clickCount: 1 }, this.sessionId);
     await this.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: "left", clickCount: 1 }, this.sessionId);
@@ -409,18 +424,48 @@ export class CdpBrowser {
     await this.send("Input.insertText", { text }, this.sessionId);
   }
 
-  /** Focus a field by selector, then type into it. */
+  /** Focus a field by selector, then type into it. Same label fallback as click(). */
   async fill(selector: string, text: string): Promise<void> {
     const ok = await this.evaluate<boolean>(`(() => {
-      const el = document.querySelector(${JSON.stringify(selector)});
+      let el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) {
+        const want = ${JSON.stringify(selector)}.replace(/^[#.]/, '').toLowerCase();
+        const fields = document.querySelectorAll('input,textarea,select,[contenteditable=true]');
+        el = [...fields].find((c) => {
+          const label = ((c.innerText || '') + ' ' + (c.value || '') + ' ' + (c.getAttribute('aria-label') || '') + ' ' + (c.getAttribute('placeholder') || '') + ' ' + (c.name || '') + ' ' + (c.id || '')).toLowerCase();
+          return label.includes(want);
+        }) || null;
+      }
       if (!el) return false;
       el.scrollIntoView({ block: 'center' });
       el.focus();
       if (el.select) try { el.select(); } catch {}
       return document.activeElement === el;
     })()`);
-    if (!ok) throw new Error(`fill target not found or not focusable: ${selector}`);
+    if (!ok) throw new Error(`fill target not found or not focusable: ${selector}${await this.availableHint()}`);
     await this.type(text);
+  }
+
+  /** Short list of live selectors, appended to not-found errors so the model can self-correct in one retry. */
+  private async availableHint(): Promise<string> {
+    try {
+      const sels = await this.evaluate<string[]>(`(() => {
+        const out = [];
+        for (const el of document.querySelectorAll('a[href],button,input,textarea,select,[role=button],[role=link]')) {
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) continue;
+          if (el.id) { out.push('#' + CSS.escape(el.id)); continue; }
+          const t = (el.tagName || '').toLowerCase();
+          const label = ((el.innerText || el.value || el.getAttribute('aria-label') || el.placeholder || '') + '').replace(/\\s+/g, ' ').trim().slice(0, 40);
+          out.push(label ? t + '["' + label + '"]' : t);
+          if (out.length >= 12) break;
+        }
+        return out;
+      })()`);
+      return sels.length ? `. Available on page: ${sels.join(", ")}` : "";
+    } catch {
+      return "";
+    }
   }
 
   async scroll(deltaY: number): Promise<void> {
