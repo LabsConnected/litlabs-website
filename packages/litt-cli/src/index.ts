@@ -55,6 +55,7 @@ import { runCommand } from "./commands/run.js";
 import { runsCommand } from "./commands/runs.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { askCommand } from "./commands/ask.js";
+import { createAskOutput, parseAskArgs } from "./lib/ask-output.js";
 import { repairCommand } from "./commands/repair.js";
 import { missionCommand } from "./commands/mission.js";
 import { explainCommand } from "./commands/explain.js";
@@ -415,6 +416,14 @@ async function main(): Promise<number> {
   let command = dispatch.command!;
   let rest = dispatch.rest;
   const mode = dispatch.mode;
+  const askArgs = command === "ask" ? parseAskArgs(rest) : undefined;
+  const structuredAsk = askArgs && askArgs.format !== "text" ? askArgs : undefined;
+  if (structuredAsk?.conflict || (structuredAsk && !structuredAsk.question)) return askCommand(rest);
+  if (structuredAsk && dispatch.useRemote) {
+    const message = "Structured ask output is available for the local CLI host.";
+    console.error(message);
+    return createAskOutput(structuredAsk.format).finish(1, "error", { message });
+  }
 
   // ─── Nested command resolution ──────────────────────────────────
   // Maps two-word commands to their canonical hyphenated handler:
@@ -535,6 +544,9 @@ async function main(): Promise<number> {
       if (command !== "cockpit" && command !== "shell" && command !== "tui") {
         console.error(`${c.red}✗${c.reset} Authentication required.`);
         console.error(`${c.dim}  Run 'litt login' to sign in, then try again.${c.reset}`);
+        if (structuredAsk) {
+          return createAskOutput(structuredAsk.format).finish(1, "error", { message: "Authentication required." });
+        }
         return 1;
       }
 
@@ -654,7 +666,7 @@ async function main(): Promise<number> {
   if (SESSION_COMMANDS.has(command)) {
     const startCwd = resolveProjectCwd(dispatch.cwd);
     let projectRoot = detectProject(startCwd).rootDir;
-    if (!detectProject(startCwd).hasPackageJson || detectProject(startCwd).isSelfInstall) {
+    if (!structuredAsk && (!detectProject(startCwd).hasPackageJson || detectProject(startCwd).isSelfInstall)) {
       const resolved = await resolveActiveProject({ cwd: startCwd });
       if (resolved) {
         projectRoot = resolved.project.rootDir;
@@ -888,6 +900,8 @@ Examples:
   litt inspect
   echo "TypeError: Cannot read property 'x' of undefined" | litt explain
   litt ask "How do I fix the TypeScript error in src/app/page.tsx?"
+  litt ask --json "Summarize this project"
+  litt ask --jsonl "Inspect the project status"
 `);
 }
 

@@ -106,6 +106,27 @@ async function runAsk(): Promise<void> {
 }
 
 describe("ask tool-result reporting (regression for 4becca17)", () => {
+  it("emits an ordered JSONL stream and one terminal result without human formatting", async () => {
+    scriptedModelDeltas = ["The model is streaming this answer in real time."];
+    const session = createRuntimeSession({ cwd: process.cwd(), mode: "act" });
+    expect(await askCommand(["--jsonl", "hello"], session)).toBe(0);
+    const events = writtenChunks().trim().split("\n").map((line) => JSON.parse(line));
+    expect(events.map((event) => event.sequence)).toEqual(events.map((_, i) => i + 1));
+    expect(events.filter((event) => event.type === "model.delta").map((event) => event.text).join(""))
+      .toBe(scriptedModelDeltas.join(""));
+    expect(events.filter((event) => event.type === "run.result")).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({ version: 1, type: "run.result", termination: "complete", exitCode: 0 });
+    expect(loggedLines()).toBe("");
+  });
+
+  it("emits a single JSON failure for an empty question", async () => {
+    expect(await askCommand(["--json"])).toBe(1);
+    expect(JSON.parse(writtenChunks())).toMatchObject({
+      version: 1, type: "run.result", termination: "error", exitCode: 1,
+    });
+    expect(loggedLines()).toBe("");
+  });
+
   it("a successful tool reports its actual message, not a generic line", async () => {
     await runAsk();
     const emitter = capturedOptions!.emitter as (event: RuntimeEvent) => void;
