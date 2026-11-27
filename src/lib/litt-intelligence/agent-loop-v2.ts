@@ -1407,6 +1407,18 @@ async function runCompletionChecks(opts: {
   const projectId = ctx?.projectId ?? opts.cfg.qualityLoop?.projectId;
   const userId = ctx?.userId ?? opts.cfg.userId ?? opts.cfg.qualityLoop?.userId;
   const conversationId = ctx?.conversationId ?? opts.cfg.conversationId ?? null;
+  if (!projectId || !userId) {
+    studioLog(`agent-loop:completion_checks_skipped:${opts.loop}`, { errorClass: "no_project_context" });
+    // No project context: this run is not a project build, so there
+    // is no Checks panel or Jobs tab for it and nothing to persist
+    // against. The skip stays logged (ACC-08 observability) but
+    // carries no closing note — the loud-note rule covers project
+    // builds whose checks could not run or could not be saved.
+    // The module import stays BELOW this guard: loading the checks
+    // stack (Supabase clients and all) is wasted work — and a real
+    // async boundary — for runs that can never use it.
+    return {};
+  }
   let checksModule: typeof import("@/lib/projects/project-checks");
   try {
     checksModule = await import("@/lib/projects/project-checks");
@@ -1434,15 +1446,6 @@ async function runCompletionChecks(opts: {
     unavailableCheckSetFromError,
     ProjectChecksUnavailableError,
   } = checksModule;
-  if (!projectId || !userId) {
-    studioLog(`agent-loop:completion_checks_skipped:${opts.loop}`, { errorClass: "no_project_context" });
-    // No project context: this run is not a project build, so there
-    // is no Checks panel or Jobs tab for it and nothing to persist
-    // against. The skip stays logged (ACC-08 observability) but
-    // carries no closing note — the loud-note rule covers project
-    // builds whose checks could not run or could not be saved.
-    return {};
-  }
   try {
     const outcome = await runAllProjectChecks({ projectId, userId });
     for (const check of outcome.checks) {
