@@ -60,6 +60,12 @@ import {
 import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from "../lib/model-runtime.js";
 import { TelemetryStore, loadModelPrefs, getDefaultPrefsPath } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
+import {
+  determineRoutingClass,
+  profilePreference,
+  recordLatency,
+  type RoutingClass,
+} from "../lib/latency-routing.js";
 import { matchLocalFastPath } from "../lib/local-fast-lane.js";
 import {
   matchMachineLane,
@@ -197,6 +203,7 @@ function routeForTarget(
   lane: LocalLaneStatus | null,
   input: string,
   requestedOverride?: string | null,
+  profileHint?: "fast" | "smart" | "long" | null,
 ): RoutedModel {
   const policy = resolveRoutePolicy(store, signedIn);
   if (policy.kind === "local-required") {
@@ -210,7 +217,7 @@ function routeForTarget(
       requestedOverride ?? requestedLocalModel(store.state.selectedModel),
     );
   }
-  return modelRuntime.route(store.state.routingMode, store.state.selectedModel, input);
+  return modelRuntime.route(store.state.routingMode, store.state.selectedModel, input, profileHint);
 }
 
 /** The local-vs-catalog policy for the cockpit's current state. */
@@ -2375,6 +2382,15 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // executionTarget="remote" means this gate never engages.
     const intent = classifyIntent(input);
     const isMission = opts?.forceMission === true || intent === "mission";
+    // Latency-aware routing class — determined once per turn, steers
+    // AUTO catalog selection via profileHint → taskKind, and labels the
+    // turn's latency telemetry. Explicit FIXED pins still win inside
+    // route(); LOCAL lanes never consult the catalog.
+    const routingClass: RoutingClass = determineRoutingClass(
+      isMission ? "mission" : intent === "read" || opts?.forceRead === true ? "read" : "chat",
+      input,
+    );
+    const profileHint = profilePreference(routingClass);
 
     // ─── Deterministic local-tool missions — ALL users ──────────────
     // A mission that decomposes into canonical local tools (git status,
@@ -2562,6 +2578,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         const gateway = session.getGateway();
         const cwd = session.getCwd();
         perf.mark("utility_lookup_start");
+        const utilityStartMs = Date.now();
         const lookup = await executeUtilityLookup(utilityMatch, async (toolId, args) => {
           const r = await gateway.execute({
             toolId,
@@ -2574,6 +2591,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         });
         perf.mark("utility_lookup_end");
         if (lookup.satisfied) {
+          recordLatency("utility-lane", routingClass, Date.now() - utilityStartMs, true);
           store.actions.addChatMessage({ role: "user", content: input, ts: Date.now(), status: "complete" });
           store.actions.addChatMessage({ role: "assistant", content: lookup.text, ts: Date.now(), status: "complete", servedModel: "utility-lane" });
           store.actions.addActivity({
@@ -2678,6 +2696,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // call in this turn (including the catch block) must target
         // THIS id specifically (see ChatTranscriptStore invariant 7).
         let readAssistantMsgId: string | null = null;
+        // Latency telemetry — model id + call start are only populated
+        // once the optional synthesis model call actually fires, so a
+        // tool-only error is never recorded as a model failure.
+        let synthModelId: string | null = null;
+        let synthStartMs = 0;
         try {
           const gateway = session.getGateway();
           const cwd = session.getCwd();
@@ -2720,7 +2743,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             const synthesisPrompt = opts?.forceRead === true
               ? formatInspectionForSynthesis(readResults, inspectFocus)
               : formatReadResultsForSynthesis(input, readResults);
-            const routed = routeForTarget(store, modelRuntime, signedIn, localLane, synthesisPrompt);
+            const routed = routeForTarget(store, modelRuntime, signedIn, localLane, synthesisPrompt, profileHint);
             store.actions.setActiveModel(routed.label);
             await awaitRemoteReady(store, client, store.state.executionTarget);
             const adapter = resolveModelProvider(store.state.executionTarget, client, routed);
@@ -2735,6 +2758,8 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               servedModel: routed.label,
             });
             let synthesized = "";
+            synthModelId = routed.id;
+            synthStartMs = Date.now();
             const modelResult = await adapter.stream(
               [{ role: "user", content: synthesisPrompt }],
               (event) => {
@@ -2746,6 +2771,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               },
             );
             perf.mark("finalize");
+            recordLatency(routed.id, routingClass, Date.now() - synthStartMs, true);
             store.actions.finalizeAssistantMessage(readAssistantMsgId!, {
               content: synthesized || modelResult.content || "No synthesis produced.",
               status: "complete",
@@ -2787,6 +2813,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           });
         } catch (err) {
           const errText = err instanceof Error ? err.message : String(err);
+          if (synthModelId) {
+            recordLatency(synthModelId, routingClass, Date.now() - synthStartMs, false);
+          }
           perf.mark("finalize");
           if (readAssistantMsgId) {
             store.actions.finalizeAssistantMessage(readAssistantMsgId, {
@@ -2856,6 +2885,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // this turn (including the catch block) must target THIS id
         // specifically (see ChatTranscriptStore invariant 7).
         let chatAssistantMsgId: string | null = null;
+        // Latency telemetry — populated at the agent-loop boundary so a
+        // routing/planning failure never records a fake model failure.
+        let chatModelId: string | null = null;
+        let chatStartMs = 0;
         try {
           // ─── CANONICAL PATH — one brain, one RuntimeStore ───
           // Reuse the session's canonical ExecutionGateway + RuntimeStore.
@@ -2864,20 +2897,21 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           const gateway = session.getGateway();
           const tools = gateway.getTools();
           const agentStore = session.getStore();
-          const routed = routeForTarget(store, modelRuntime, signedIn, localLane, modelInput);
+          const routed = routeForTarget(store, modelRuntime, signedIn, localLane, modelInput, profileHint);
         perf.mark("route");
           // Routing trace — requested (brain/policy) vs resolved (route()).
           // The brain label is the configured policy identity; the resolved
           // label is what route() actually picked for this input. If they
           // differ, fallbackReason explains why (AUTO selection, escalation,
-          // availability fallback, etc.).
+          // availability fallback, etc.). The routing class suffix shows
+          // which latency-aware lane steered AUTO selection.
           const requestedModel = modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
           store.actions.addActivity({
             id: `act_${Date.now()}_route`,
             ts: Date.now(),
             type: "info",
             tag: "ROUTE",
-            text: `${routed.label}`,
+            text: `${routed.label} · ${routingClass}`,
           });
           // Set the CONFIGURED model label — the actual ACTIVE model is
           // confirmed after streaming sees the runtime response model.
@@ -2952,6 +2986,8 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           const toolCallFilter = createToolCallStreamFilter();
 
           const chatAbort = beginAbort();
+          chatModelId = routed.id;
+          chatStartMs = Date.now();
           const result = await runAgentLoop(modelInput, {
             model, tools, shell: session.getShell(),
             gateway,
@@ -3000,6 +3036,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               }
             },
           });
+          // Canonical latency record — the same durationMs the transcript
+          // shows; model.activeModel reflects any mid-run escalation swap.
+          recordLatency(
+            model.activeModel ?? routed.id,
+            routingClass,
+            result.durationMs,
+            result.termination === "complete",
+          );
           const chatTail = toolCallFilter.flush();
           if (chatTail && chatAssistantMsgId) {
             store.actions.appendAssistantDelta(chatAssistantMsgId, chatTail);
@@ -3061,6 +3105,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           });
         } catch (err) {
           const errText = `Agent error: ${err instanceof Error ? err.message : String(err)}`;
+          if (chatModelId && chatStartMs) {
+            recordLatency(chatModelId, routingClass, Date.now() - chatStartMs, false);
+          }
           store.actions.addActivity({
             id: `act_${Date.now()}_err`,
             ts: Date.now(), type: "error", tag: "ERROR",
@@ -3151,6 +3198,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       // this turn (including the catch block) must target THIS id
       // specifically (see ChatTranscriptStore invariant 7).
       let missionAssistantMsgId: string | null = null;
+      // Latency telemetry — populated at the agent-loop boundary so a
+      // routing/planning failure never records a fake model failure.
+      let missionModelId: string | null = null;
+      let missionModelStartMs = 0;
       try {
         // ─── CANONICAL PATH — one brain, one RuntimeStore ───
         const gateway = session.getGateway();
@@ -3192,16 +3243,19 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         const routed = routeForTarget(
           store, modelRuntime, signedIn, localLane, modelInput,
           resolveMissionLocalModelRequest(localLane, store.state.selectedModel),
+          profileHint,
         );
         perf.mark("route");
         // Routing trace — requested (brain/policy) vs resolved (route()).
+        // The routing class suffix shows which latency-aware lane
+        // steered AUTO selection (same convention as the CHAT path).
         const requestedModel = modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
         store.actions.addActivity({
           id: `act_${Date.now()}_route`,
           ts: Date.now(),
           type: "info",
           tag: "ROUTE",
-          text: `${routed.label}`,
+          text: `${routed.label} · ${routingClass}`,
         });
         // Set the CONFIGURED model label — the actual ACTIVE model is
         // confirmed after streaming sees the runtime response model.
@@ -3429,6 +3483,8 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // request and all tool rounds happen inside runAgentLoop. This
         // separates planning (plan_start → plan_end) from execution.
         perf.mark("agent_loop_start");
+        missionModelId = routed.id;
+        missionModelStartMs = Date.now();
 
         // Cancel during planning must not roll into execution.
         if (missionAbort.aborted) {
@@ -3683,6 +3739,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             }
           },
         });
+        // Canonical latency record — the same durationMs the transcript
+        // shows; model.activeModel reflects any mid-run escalation swap.
+        recordLatency(
+          model.activeModel ?? routed.id,
+          routingClass,
+          result.durationMs,
+          result.termination === "complete",
+        );
         const missionTail = toolCallFilter.flush();
         if (missionTail && missionAssistantMsgId) {
           store.actions.appendAssistantDelta(missionAssistantMsgId, missionTail);
@@ -3898,6 +3962,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         const errText = err instanceof MissionPlanningError
           ? err.message
           : `Agent error: ${err instanceof Error ? err.message : String(err)}`;
+        if (missionModelId && missionModelStartMs) {
+          recordLatency(missionModelId, routingClass, Date.now() - missionModelStartMs, false);
+        }
         store.actions.addActivity({
           id: `act_${Date.now()}_err`,
           ts: Date.now(), type: "error", tag: "ERROR",

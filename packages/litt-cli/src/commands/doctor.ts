@@ -234,6 +234,8 @@ export async function doctorCommand(args: string[]): Promise<number> {
     if (buildCheck.rebuildCommand) {
       console.log(`${c.dim}  Rebuild: ${buildCheck.rebuildCommand}${c.reset}`);
     }
+  } else if (buildCheck.status === "dirty-build" || buildCheck.status === "unbundled") {
+    fail(buildCheck.message);
   } else if (buildCheck.status === "no-build-meta") {
     warn("No build metadata (dist/.build-meta.json) — run a build first");
   } else if (buildCheck.status === "no-source-sha") {

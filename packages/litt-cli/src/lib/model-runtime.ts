@@ -49,6 +49,8 @@ import {
   type LocalModelResolution,
 } from "./local-model-resolution.js";
 
+import { profileToTaskKind } from "./latency-routing.js";
+
 import type { LocalLaneStatus } from "./local-lane.js";
 
 import type { RoutingMode } from "../ink/cockpit-store.js";
@@ -129,9 +131,20 @@ export class ModelRuntime {
   /**
    * Route a model for the given CLI mode + input.
    * Returns a RoutedModel compatible with the old controller shape.
+   *
+   * `profileHint` is the latency-aware routing profile ("fast"|"smart"|"long")
+   * from determineRoutingClass()/profilePreference(). It steers AUTO
+   * selection only — pinned/ask/budget/max explicit choices still win,
+   * and routeLocal() never sees it (local picks from installed models).
    */
-  route(mode: RoutingMode, selectedModel: string | null, input: string): RoutedModel {
+  route(
+    mode: RoutingMode,
+    selectedModel: string | null,
+    input: string,
+    profileHint?: "fast" | "smart" | "long" | null,
+  ): RoutedModel {
     const routingInput: RoutingInput = { message: input };
+    if (profileHint) routingInput.taskKind = profileToTaskKind(profileHint);
     const options = cliModeToRouteOptions(mode, selectedModel);
     // FIXED mode = strict pinned (fail clearly if unavailable)
     if (mode === "fixed") {

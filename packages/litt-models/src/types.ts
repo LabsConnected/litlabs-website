@@ -227,6 +227,13 @@ export interface RoutingInput {
   hasImageAttachments?: boolean;
   /** Estimated prompt + context tokens (for context-window filtering). */
   estimatedContextTokens?: number;
+  /**
+   * Optional caller-supplied task classification. When set, routeModel()
+   * uses it instead of the built-in message heuristics — richer upstream
+   * classifiers (intent/routing-class layers) can steer AUTO selection
+   * without forking the router. Omitted = heuristic classifyTask().
+   */
+  taskKind?: TaskKind;
 }
 
 export interface RoutingResult {

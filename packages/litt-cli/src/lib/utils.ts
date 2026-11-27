@@ -5,7 +5,7 @@
 import { execFileSync, spawnSync, type SpawnSyncOptionsWithStringEncoding } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve, dirname, basename } from "node:path";
-import { fileURLToPath } from "node:url";
+import { getCliPackageDir as getCliPackageDirFromMeta } from "./build-metadata.js";
 
 // ANSI colors (no dependency needed — use raw codes)
 export const c = {
@@ -194,9 +194,10 @@ let cliPackageDir: string | null | undefined;
 function getCliPackageDir(): string | null {
   if (cliPackageDir !== undefined) return cliPackageDir;
   try {
-    // dist/lib/utils.js → dist → package root (packages/litt-cli)
-    const here = dirname(fileURLToPath(import.meta.url));
-    cliPackageDir = resolve(here, "..");
+    // Canonical resolver lives in build-metadata.ts — it anchors on the
+    // directory actually named "dist" so bundled (dist/index.js) and
+    // tsc (dist/lib/*.js) layouts both resolve to the package root.
+    cliPackageDir = getCliPackageDirFromMeta();
   } catch {
     cliPackageDir = null;
   }

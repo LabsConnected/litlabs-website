@@ -33,7 +33,7 @@ import {
 } from "node:fs";
 
 import { homedir } from "node:os";
-import { dirname, join, normalize, resolve } from "node:path";
+import { basename, dirname, join, normalize, resolve } from "node:path";
 import { createConnection } from "node:net";
 import { fileURLToPath } from "node:url";
 
@@ -67,12 +67,22 @@ function getLiTTHome(): string {
 function getLiTTRepoRoot(): string {
   const currentFile = fileURLToPath(import.meta.url);
 
-  // dist/commands/desktop.js
-  // -> dist
-  // -> litt-cli
-  // -> packages
-  // -> repo root
-  return resolve(dirname(currentFile), "..", "..", "..", "..");
+  // The module's depth varies by how the entry was produced — a fixed
+  // 4-level walk overshoots under the bundled layout:
+  //   tsc emit     → dist/commands/desktop.js
+  //   esbuild      → dist/index.js (inlined) or dist/chunks/*.js (split)
+  //   vitest/tsx   → src/commands/desktop.ts (no dist at all)
+  // Anchor on the directory actually named "dist": its parent is the
+  // package root, then packages → repo root.
+  const start = dirname(currentFile);
+  let dir = start;
+  while (basename(dir) !== "dist" && dirname(dir) !== dir) {
+    dir = dirname(dir);
+  }
+  const pkgDir = basename(dir) === "dist"
+    ? dirname(dir)
+    : resolve(start, "..", ".."); // src/commands → src → package root
+  return resolve(pkgDir, "..", ".."); // package root → packages → repo
 }
 
 function normalizePath(value: string): string {

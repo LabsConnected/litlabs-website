@@ -24,6 +24,7 @@
  */
 
 import type { RoutedModel } from "./model-runtime.js";
+import type { TaskKind } from "@litt/models";
 import { classifyMissionComplexity } from "./mission-complexity.js";
 
 // ─── Types ─────────────────────────────────────────────────────────
@@ -132,5 +133,23 @@ export function profilePreference(routingClass: RoutingClass): "fast" | "smart" 
     case "CHAT_FAST": return "fast"; // casual conversation
     case "MISSION_STANDARD": return "smart"; // standard mission
     case "MISSION_DEEP": return "long"; // complex mission, strong model
+  }
+}
+
+/**
+ * Map a latency-routing profile hint onto the @litt/models TaskKind the
+ * AUTO router selects for. The router still owns selection (health,
+ * availability, cost); this only steers which task bucket it picks from.
+ *   "fast"  → fast tier / quick-answer default
+ *   "smart" → balanced coding default
+ *   "long"  → max/deep reasoning tier
+ */
+export function profileToTaskKind(
+  profile: "fast" | "smart" | "long",
+): TaskKind {
+  switch (profile) {
+    case "fast": return "fast";
+    case "smart": return "coding";
+    case "long": return "reasoning";
   }
 }
