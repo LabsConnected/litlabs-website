@@ -1897,8 +1897,12 @@ function filterEnv(provided?: Record<string, string>): Record<string, string> | 
 // ─── Secret redaction (defense-in-depth) ──────────────────────────
 
 const SECRET_PATTERNS: readonly RegExp[] = [
-  /\b(sk-[a-zA-Z0-9]{20,})\b/g,
-  /\b(pk_[a-zA-Z0-9]{20,})\b/g,
+  // `_` and `-` are legal inside modern key bodies (sk-proj-…, sk-or-v1-…,
+  // pk_live_…); a pattern without them stops at the first separator and
+  // leaves the rest of the key in the clear.
+  /\b(sk-[a-zA-Z0-9_-]{20,})\b/g,
+  /\b([sr]k_(?:live|test)_[a-zA-Z0-9]{20,})\b/g,
+  /\b(pk_[a-zA-Z0-9_-]{20,})\b/g,
   /\b(Bearer\s+[a-zA-Z0-9._-]{20,})\b/gi,
   /\b(eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,})\b/g,
   /\b(secret|password|passwd|token|api_key|apikey|access_key)\s*[:=]\s*["']?([a-zA-Z0-9+/=_-]{16,})["']?/gi,

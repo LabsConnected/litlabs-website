@@ -474,6 +474,27 @@ export function hasAnyNativeProviderKey(): boolean {
   return false;
 }
 
+/**
+ * The credential to send to a provider's OWN endpoint: its primary
+ * envKey, then provider-native alt keys (e.g. GOOGLE_API_KEY for
+ * Gemini). OPENROUTER_API_KEY is never returned — it appears in many
+ * providers' altEnvKeys only so the credential resolver can mark them
+ * servable VIA OpenRouter; sending it to a native endpoint would leak an
+ * OpenRouter credential to a third party.
+ */
+export function nativeProviderApiKey(
+  def: { envKey?: string; altEnvKeys?: string[] } | undefined,
+): string | undefined {
+  if (!def) return undefined;
+  const keys = [def.envKey, ...(def.altEnvKeys ?? [])]
+    .filter((k): k is string => !!k && k !== "OPENROUTER_API_KEY");
+  for (const k of keys) {
+    const v = process.env[k];
+    if (v) return v;
+  }
+  return undefined;
+}
+
 export class OpenRouterModelProvider implements ModelProvider {
   /** This adapter always serves via OpenRouter (source truth for the controller). */
   readonly providerId = "openrouter" as const;
@@ -905,6 +926,7 @@ export function openAiCompatibleLocalEndpoint(
 export const OPENAI_COMPATIBLE_NATIVE_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>([
   "openai",
   "xai",
+  "google",
   "openagents",
   "deepseek",
   "kimi",
@@ -1268,7 +1290,13 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
    */
   private authHeaders(base: Record<string, string> = {}): Record<string, string> {
     if (this._credentialless) return base;
-    return { ...base, "Authorization": `Bearer ${this._apiKey}` };
+    const headers: Record<string, string> = { ...base, "Authorization": `Bearer ${this._apiKey}` };
+    // Google's native endpoints (modelsUrl health check) authenticate
+    // via x-goog-api-key; the OpenAI-compatible chat route takes Bearer.
+    // Send both so either surface works. The key is always the Google
+    // key resolved by nativeProviderApiKey() — never an OpenRouter key.
+    if (this.providerId === "google") headers["x-goog-api-key"] = this._apiKey;
+    return headers;
   }
 }
 
@@ -1356,7 +1384,9 @@ export function resolveProviderAdapter(
   // 1. Native OpenAI-compatible provider with a direct key → native adapter.
   if (OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has(servedBy)) {
     const def = getProvider(servedBy);
-    const apiKey = def?.envKey ? process.env[def.envKey] : undefined;
+    // Provider-native alt keys count (e.g. GOOGLE_API_KEY for Gemini);
+    // OPENROUTER_API_KEY never does — see nativeProviderApiKey().
+    const apiKey = nativeProviderApiKey(def);
     if (def?.chatUrl && apiKey) {
       const modelId = routed.providerModelId ?? routed.openRouterModelId;
       if (!modelId) {
@@ -1388,9 +1418,7 @@ export function resolveProviderAdapter(
     const nativeDef = OPENAI_COMPATIBLE_NATIVE_PROVIDERS.has(servedBy)
       ? getProvider(servedBy)
       : undefined;
-    const nativeKeyConfigured = !!(
-      nativeDef?.envKey && process.env[nativeDef.envKey]
-    );
+    const nativeKeyConfigured = !!nativeProviderApiKey(nativeDef);
     if (nativeDef && !nativeKeyConfigured && !openRouterFallbackAllowed()) {
       const envKeyName = nativeDef.envKey ?? servedBy.toUpperCase() + "_API_KEY";
       throw new Error(

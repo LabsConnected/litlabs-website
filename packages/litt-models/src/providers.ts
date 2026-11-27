@@ -35,6 +35,14 @@ export interface ProviderDefinition {
    * only as fallback defaults.
    */
   dynamicEndpoint?: "ollama";
+  /**
+   * True → the provider ITSELF is unverified (e.g. a third-party gateway
+   * whose endpoint and model lineup have not been independently
+   * confirmed). Distinct from per-model `verified`: every catalog entry
+   * on an unverified provider must be `manualOnly` and must not carry
+   * recommendation metadata until the provider is verified.
+   */
+  unverified?: boolean;
 }
 
 /**
@@ -60,8 +68,16 @@ export const PROVIDERS: ProviderDefinition[] = [
     id: "google",
     label: "Google",
     envKey: "GEMINI_API_KEY",
+    // OPENROUTER_API_KEY here only lets the credential resolver mark
+    // Gemini as servable VIA OpenRouter (servedBy="openrouter"). It is
+    // never a credential for Google's own endpoints — resolveProviderAdapter
+    // filters it out of the native key lookup.
     altEnvKeys: ["GOOGLE_API_KEY", "OPENROUTER_API_KEY"],
     modelsUrl: "https://generativelanguage.googleapis.com/v1beta/models",
+    // Gemini's official OpenAI-compatible route — speaks /chat/completions
+    // and accepts Bearer <api key> (or x-goog-api-key), so the shared
+    // OpenAI-compatible adapter can serve Gemini BYOK directly.
+    chatUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
   },
   {
     id: "xai",
@@ -109,9 +125,15 @@ export const PROVIDERS: ProviderDefinition[] = [
   {
     id: "openagents",
     label: "OpenAgents",
+    // UNVERIFIED third-party gateway (flagged in the 2026-10-23 cockpit
+    // review — not yet independently confirmed). OPENAGENTS_API_KEY only:
+    // no altEnvKeys, so an OpenRouter key can never be sent to this
+    // endpoint. Every catalog entry is manualOnly — never auto-selected
+    // or used as a silent fallback; explicit /model pick required.
     envKey: "OPENAGENTS_API_KEY",
     modelsUrl: "https://api-gateway.openagents.org/v1/models",
     chatUrl: "https://api-gateway.openagents.org/v1/chat/completions",
+    unverified: true,
   },
   {
     id: "openrouter",
