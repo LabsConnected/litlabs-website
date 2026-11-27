@@ -436,7 +436,7 @@ export async function listFiles(
       data: {},
     };
   }
-  const root = resolved.resolvedPath;
+  const root = resolved.realTarget;
 
   if (!fs.existsSync(root)) {
     return {
@@ -488,7 +488,7 @@ export async function readFile(
       data: {},
     };
   }
-  const root = resolved.resolvedPath;
+  const root = resolved.realTarget;
 
   if (!fs.existsSync(root)) {
     return {
@@ -562,11 +562,24 @@ export async function writeFile(
     };
   }
 
-  const root = resolved.resolvedPath;
+  const root = resolved.realTarget;
 
   try {
     fs.mkdirSync(path.dirname(root), { recursive: true });
-    fs.writeFileSync(root, content, "utf8");
+    // Open with O_NOFOLLOW (where the platform defines it — POSIX only,
+    // not Windows) so that if the leaf was swapped for a symlink in the
+    // gap between the containment check above and this write, the open
+    // fails instead of silently following it outside the sandbox. root
+    // is already the fully resolved, symlink-free realTarget, so this
+    // closes the TOCTOU window the old resolvedPath-based write left open.
+    const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC
+      | (fs.constants.O_NOFOLLOW ?? 0);
+    const fd = fs.openSync(root, flags, 0o644);
+    try {
+      fs.writeSync(fd, content, 0, "utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
     return {
       status: "success",
       success: true,
@@ -947,7 +960,7 @@ export function isSafePath(filePath: string): boolean {
 export function resolveSandboxedPath(
   cwd: string,
   relativePath: string,
-): { ok: true; resolvedPath: string } | { ok: false; reason: string } {
+): { ok: true; resolvedPath: string; realTarget: string } | { ok: false; reason: string } {
   if (!isSafePath(relativePath)) {
     return {
       ok: false,
@@ -966,10 +979,28 @@ export function resolveSandboxedPath(
 
   // Walk up to the deepest existing ancestor, collecting the
   // not-yet-existing tail segments to rejoin afterward.
+  //
+  // Uses lstat, not existsSync: existsSync follows symlinks and reports
+  // false for a DANGLING symlink (one whose target doesn't exist yet),
+  // which would make this loop treat an actual symlink entry as "nothing
+  // here yet" and fold it straight into the safe-to-create remainder —
+  // skipping the symlink containment check below entirely. lstat reports
+  // on the path entry itself, dangling or not, so a symlink is always
+  // detected as "existing" here and gets resolved (and rejected if it
+  // can't be, e.g. because it's dangling — fail closed) rather than
+  // silently treated as a plain future file path.
   let existing = resolvedPath;
   const remainder: string[] = [];
   for (;;) {
-    if (fs.existsSync(existing)) break;
+    try {
+      fs.lstatSync(existing);
+      break;
+    } catch {
+      // No entry at all (ENOENT) — keep walking up. Any other lstat
+      // error is treated the same way as the pre-existing code did with
+      // existsSync: fails closed later, either when realpathSync throws
+      // on the eventual existing ancestor, or via the containment check.
+    }
     const parent = path.dirname(existing);
     if (parent === existing) break; // filesystem root — cwd should have matched first
     remainder.unshift(path.basename(existing));
@@ -992,5 +1023,14 @@ export function resolveSandboxedPath(
     };
   }
 
-  return { ok: true, resolvedPath };
+  // realTarget is the symlink-free, fully resolved path actually checked
+  // for containment above. resolvedPath is kept only for display/error
+  // messages — callers MUST perform their real fs.* I/O against
+  // realTarget, not resolvedPath. Using resolvedPath for I/O re-opens the
+  // exact TOCTOU gap this function exists to close: if any symlink along
+  // resolvedPath is swapped after this check returns, a later syscall on
+  // resolvedPath would silently follow the new target, while realTarget —
+  // already fully resolved to a symlink-free absolute path — cannot be
+  // redirected that way.
+  return { ok: true, resolvedPath, realTarget };
 }
