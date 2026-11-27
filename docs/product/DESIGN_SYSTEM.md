@@ -1,3 +1,5 @@
+> **Reconciliation notice (2026-11-26):** This document describes the Glass OS shell system. The founder-approved standard for the Studio's current design program is LiTT Signature (light default, one green accent #2FBF5A, no pink), and generated customer sites follow per-customer style recipes — see `STUDIO-PRODUCT-SPEC.md`. The coexistence of two design authorities is logged as conflict C-1 in `CAPABILITY-AUDIT.md` and is resolved in Phase 1 (Unified design system) of `IMPLEMENTATION-ROADMAP.md`. Until then, this document is reference material, not the governing standard for new design-program work.
+
 # Design System — Glass OS
 
 ## Overview
