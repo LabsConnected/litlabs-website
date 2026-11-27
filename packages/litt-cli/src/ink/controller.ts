@@ -2761,7 +2761,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             const synthesisPrompt = opts?.forceRead === true
               ? formatInspectionForSynthesis(readResults, inspectFocus)
               : formatReadResultsForSynthesis(input, readResults);
-            const routed = routeForTarget(store, modelRuntime, signedIn, localLane, synthesisPrompt, profileHint);
+            const routed = routeForTarget(store, modelRuntime, signedIn, localLane, synthesisPrompt, undefined, profileHint);
             store.actions.setActiveModel(routed.label);
             await awaitRemoteReady(store, client, store.state.executionTarget);
             const adapter = resolveModelProvider(store.state.executionTarget, client, routed);
@@ -2926,7 +2926,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           const gateway = session.getGateway();
           const tools = gateway.getTools();
           const agentStore = session.getStore();
-          const routed = routeForTarget(store, modelRuntime, signedIn, localLane, modelInput, profileHint);
+          const routed = routeForTarget(store, modelRuntime, signedIn, localLane, modelInput, undefined, profileHint);
         perf.mark("route");
           // Routing trace — requested (brain/policy) vs resolved (route()).
           // The brain label is the configured policy identity; the resolved
