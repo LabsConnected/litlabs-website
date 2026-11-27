@@ -1665,6 +1665,21 @@ export async function runAgentLoop(
   const MAX_UNKNOWN_TOOL_RETRIES = 3;
   let unknownToolRetries = 0;
 
+  // ─── Stagnation guard ────────────────────────────────────────────
+  // Count consecutive rounds that produced NO new successful tool
+  // evidence — every executed call either failed or repeated a
+  // tool+inputs signature that already succeeded earlier in this run.
+  // Small local models can fall into re-verification loops (navigate →
+  // snapshot → screenshot → repeat) that burn the entire round budget
+  // without adding information. After STALE_EVIDENCE_NUDGE_AT stale
+  // rounds we inject a one-time instruction to answer from the evidence
+  // already collected; the round budget and truthful max_rounds summary
+  // still bound the run — nothing is auto-completed.
+  const STALE_EVIDENCE_NUDGE_AT = 3;
+  const seenSuccessKeys = new Set<string>();
+  let staleEvidenceRounds = 0;
+  let staleEvidenceNudged = false;
+
   // ─── Mutation completion tracking ────────────────────────────────
   // When the user explicitly requests an edit/mutation, the run cannot
   // report success unless observable mutation evidence exists. We track
@@ -2576,6 +2591,26 @@ export async function runAgentLoop(
       recordToolOutcome(call, entry!, execResults[i]);
     }
 
+    // ─── Stagnation accounting ──────────────────────────────────────
+    // A round counts as stale when it produced no successful call with
+    // a signature not already seen. Successful signatures are recorded
+    // so exact repeats (which filterRedundantToolCalls may re-dispatch
+    // in the no-prose fallback) still count as stale, not new evidence.
+    {
+      let roundHadNewEvidence = false;
+      for (let i = 0; i < execResults.length; i++) {
+        const { call } = callsToExecute[i];
+        const result = execResults[i].result;
+        if (!result.success) continue;
+        const key = `${call.toolId}::${JSON.stringify(call.inputs)}`;
+        if (!seenSuccessKeys.has(key)) {
+          seenSuccessKeys.add(key);
+          roundHadNewEvidence = true;
+        }
+      }
+      staleEvidenceRounds = roundHadNewEvidence ? 0 : staleEvidenceRounds + 1;
+    }
+
     // ─── Mid-round timeout check ────────────────────────────────────
     // Check the total timeout AFTER tool execution too, so a long-running
     // tool call (e.g. project.check taking 20s) doesn't let the loop run
@@ -2600,12 +2635,23 @@ export async function runAgentLoop(
     // conversation. For parallel execution, all results are combined
     // into a single user message so the model sees all evidence at once.
     messages.push({ role: "assistant", content: modelContent });
-    messages.push({
-      role: "user",
-      content: execResults
-        .map(({ result }, i) => renderToolResult(callsToExecute[i].entry!, result))
-        .join("\n\n"),
-    });
+    const toolResultContent = execResults
+      .map(({ result }, i) => renderToolResult(callsToExecute[i].entry!, result))
+      .join("\n\n");
+    if (staleEvidenceRounds >= STALE_EVIDENCE_NUDGE_AT && !staleEvidenceNudged) {
+      staleEvidenceNudged = true;
+      messages.push({
+        role: "user",
+        content:
+          toolResultContent +
+          `\n\nNOTE: your last ${staleEvidenceRounds} rounds produced no new successful ` +
+          `tool evidence — the calls either failed or repeated results you already have. ` +
+          `Do not keep re-running the same inspections. Give your final answer now from ` +
+          `the evidence above, or state plainly what is still missing and why.`,
+      });
+    } else {
+      messages.push({ role: "user", content: toolResultContent });
+    }
   }
 
   if (rounds >= maxRounds && termination === "complete") {
