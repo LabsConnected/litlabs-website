@@ -64,6 +64,26 @@ function fakeStore(): DeploymentStore & { rows: DeploymentRecord[]; files: Map<s
           (r.status === "building" || r.status === "deploying"),
       ) ?? null;
     },
+    async findFailedByContentHash(projectId, contentHash) {
+      return [...rows].reverse().find(
+        (r) => r.projectId === projectId && r.contentHash === contentHash && r.status === "failed",
+      ) ?? null;
+    },
+    async readPublishedFile(id, path, options) {
+      // Mirrors the real serving gate: `ready` rows serve; a `deploying`
+      // row serves ONLY to its own verification token; nothing else does.
+      const row = rows.find((r) => r.id === id);
+      if (!row) return null;
+      const tokenOk =
+        row.status === "deploying" &&
+        !!options?.verificationToken &&
+        options.verificationToken === row.verificationToken;
+      if (row.status !== "ready" && !tokenOk) return null;
+      const file = (files.get(id) ?? []).find(
+        (f) => (f as { path: string }).path === path,
+      ) as { content: string; contentType: string; encoding: "utf-8" | "base64" } | undefined;
+      return file ? { content: file.content, contentType: file.contentType, encoding: file.encoding } : null;
+    },
     async findById(id) {
       return rows.find((r) => r.id === id) ?? null;
     },
@@ -82,6 +102,7 @@ function fakeStore(): DeploymentStore & { rows: DeploymentRecord[]; files: Map<s
         contentHash: input.contentHash ?? null,
         errorClass: null,
         errorMessage: null,
+        verificationToken: input.verificationToken ?? null,
       };
       rows.push(row);
       return row;
@@ -526,12 +547,19 @@ describe("L. live URL must be independently verified before success", () => {
   it("fetches the public URL before marking it verified", async () => {
     const store = fakeStore();
     const calls: string[] = [];
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       calls.push(String(input));
-      // The serving route only answers `ready` rows — at verification time
-      // the row must already be ready, but NOT yet urlVerified.
-      expect(store.rows[0].status).toBe("ready");
+      // Verification happens while the row is still `deploying` — NOT
+      // ready. The serving route answers the fetch only because it
+      // carries the deployment's own verification token. (The old flow
+      // flipped the row to `ready` first, publicly serving unverified
+      // content to break the ready-gate circle — the 2026-09-13
+      // circularity the publication-integrity fix removes.)
+      expect(store.rows[0].status).toBe("deploying");
       expect(store.rows[0].urlVerified).toBe(false);
+      expect(new Headers(init?.headers).get("x-litt-deploy-verification")).toBe(
+        store.rows[0].verificationToken,
+      );
       return new Response("ok", { status: 200 });
     });
 
@@ -547,15 +575,21 @@ describe("L. live URL must be independently verified before success", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("regression: verifies through the ready-gated serving path", async () => {
+  it("regression: verifies through the token-gated serving path", async () => {
     const store = fakeStore();
-    // Mimics the real /sites/[deploymentId] route: the row is served only
-    // while status === "ready". Verifying before publishing can never pass.
-    const fetchImpl = vi.fn(async () =>
-      store.rows[0]?.status === "ready"
+    // Mimics the real /sites/[deploymentId] route: a deployment serves
+    // while `ready`, or while `deploying` ONLY to a request carrying
+    // its own verification token — never to the public early.
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const row = store.rows[0];
+      const token = new Headers(init?.headers).get("x-litt-deploy-verification");
+      const serves =
+        row?.status === "ready" ||
+        (row?.status === "deploying" && !!token && token === row.verificationToken);
+      return serves
         ? new Response("<h1>Ember Roast</h1>", { status: 200 })
-        : new Response("not found", { status: 404 }),
-    );
+        : new Response("not found", { status: 404 });
+    });
 
     const result = await deployUserProject({
       userId: "user_owner",
@@ -570,7 +604,7 @@ describe("L. live URL must be independently verified before success", () => {
     expect(store.rows[0].status).toBe("ready");
   });
 
-  it("reverts ready to failed when the public URL does not serve", async () => {
+  it("marks the deployment failed when the public URL does not serve", async () => {
     const store = fakeStore();
     const fetchImpl = vi.fn(async () => new Response("nope", { status: 404 }));
     const result = await deployUserProject({
@@ -854,15 +888,21 @@ describe("J. a duplicate deploy of identical content does not republish", () => 
     expect(store.rows).toHaveLength(2);
   });
 
-  it("does not reuse a failed deployment", async () => {
+  it("repairs the failed deployment on a same-content retry instead of minting a second row", async () => {
+    // Publication integrity (2026-11-27): a retry of the same logical
+    // publish after a failure used to create a SECOND deployment row.
+    // The failed row is repaired in place — same id, one row total.
     const store = fakeStore();
     const failing = vi.fn(async () => new Response("no", { status: 500 }));
-    await deployUserProject({
+    const first = await deployUserProject({
       userId: "user_owner",
       projectId: "proj_ember",
       transport: fakeTransport(),
       hosting: fakeHosting(),
     }, { store, fetchImpl: failing as unknown as typeof fetch });
+    expect(first.ok).toBe(false);
+    expect(store.rows).toHaveLength(1);
+    expect(store.rows[0].status).toBe("failed");
 
     const retry = await deployUserProject({
       userId: "user_owner",
@@ -872,7 +912,11 @@ describe("J. a duplicate deploy of identical content does not republish", () => 
     }, { store, fetchImpl: reachableFetch });
 
     expect(retry.ok).toBe(true);
-    expect(store.rows).toHaveLength(2);
+    if (!retry.ok || first.ok) return;
+    expect(retry.deploymentId).toBe(first.deploymentId);
+    expect(store.rows).toHaveLength(1);
+    expect(store.rows[0].status).toBe("ready");
+    expect(store.rows[0].errorClass).toBeNull();
   });
 });
 
@@ -1104,7 +1148,12 @@ describe("LiTT Hosting backend", () => {
     expect(store.rows).toHaveLength(0);
   });
 
-  it("infrastructure URL-resolution failure marks the deployment failed with the real error", async () => {
+  it("infrastructure URL-resolution failure leaves NO deployment row and no stored files", async () => {
+    // Publication integrity (2026-11-27): resolution used to run AFTER
+    // putFiles, so this failure left stored files under a failed row
+    // claiming file_count 0 and no URL (the 2026-11-04 signature).
+    // Resolution now runs before any write — the failure leaves
+    // nothing behind, and the REAL error still surfaces.
     const store = fakeStore();
     const broken: import("./litt-hosting").HostingBackend = {
       isConfigured: () => ({ ok: true }),
@@ -1122,13 +1171,11 @@ describe("LiTT Hosting backend", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.publicUrl).toBe(null);
+    expect(result.deploymentId).toBe(null);
     // The REAL infrastructure error surfaces — no fake URL, no fake success.
     expect(result.message).toContain("service not found");
-    expect(store.rows).toHaveLength(1);
-    expect(store.rows[0].status).toBe("failed");
-    expect(store.rows[0].publicUrl).toBe(null);
-    expect(store.rows[0].urlVerified).toBe(false);
-    expect(store.rows[0].errorMessage).toContain("service not found");
+    expect(store.rows).toHaveLength(0);
+    expect(store.files.size).toBe(0);
   });
 
   it("persists the infrastructure-resolved live URL and verifies it", async () => {
@@ -1181,5 +1228,180 @@ describe("LiTT Hosting backend", () => {
     expect(second.publicUrl).toBe(first.publicUrl);
     expect(second.publicUrl).not.toContain("other-infra");
     expect(store.rows).toHaveLength(1);
+  });
+});
+
+/* ── P0 publication integrity (Larry's addendum, 2026-11-27) ──────
+ * Regression tests shaped like the three historical failure classes
+ * the read-only inspection confirmed still possible on main d8246e6d:
+ * the 2026-09-13 verification race, the 2026-11-04 "Not Authorized"
+ * ordering, and the failed-publish second-row gap. */
+
+describe("P0. publication verification integrity", () => {
+  const request = () => ({
+    userId: "user_owner",
+    projectId: "proj_ember",
+    transport: fakeTransport(),
+    hosting: fakeHosting(),
+  });
+
+  it("(a) transient verification failures are retried and the deployment ends ready — never stamped failed, never ready early", async () => {
+    const store = fakeStore();
+    const statusesSeen: string[] = [];
+    let attempts = 0;
+    const fetchImpl = vi.fn(async () => {
+      attempts += 1;
+      statusesSeen.push(store.rows[0].status);
+      // The Sep-13 shape: the artifact is stored, but the serving path
+      // answers 404, then a 503 blip, before it can see the deployment.
+      if (attempts === 1) return new Response("not yet", { status: 404 });
+      if (attempts === 2) return new Response("blip", { status: 503 });
+      return new Response("<h1>Ember Roast</h1>", { status: 200 });
+    });
+
+    const result = await deployUserProject(request(), {
+      store,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(attempts).toBe(3);
+    // During every attempt the row was still `deploying`: unverified
+    // content was never publicly servable under the `ready` gate.
+    expect(statusesSeen).toEqual(["deploying", "deploying", "deploying"]);
+    expect(store.rows[0].status).toBe("ready");
+    expect(store.rows[0].urlVerified).toBe(true);
+    expect(store.rows[0].errorClass).toBeNull();
+  });
+
+  it("(b) base-URL resolution failure ('Not Authorized') creates no row, stores no files, and classifies as authorization", async () => {
+    const store = fakeStore();
+    const unauthorized: import("./litt-hosting").HostingBackend = {
+      isConfigured: () => ({ ok: true }),
+      resolveBaseUrl: async () => {
+        throw new Error("Hosting infrastructure error: Not Authorized.");
+      },
+    };
+
+    const result = await deployUserProject(
+      { ...request(), hosting: unauthorized },
+      { store, fetchImpl: reachableFetch },
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errorClass).toBe("authorization");
+    expect(result.errorClass).not.toBe("unknown");
+    expect(result.retryable).toBe(false);
+    expect(result.deploymentId).toBe(null);
+    expect(store.rows).toHaveLength(0);
+    expect(store.files.size).toBe(0);
+  });
+
+  it("(c) a failed publish retried with identical content repairs the same row — exactly one row, counts consistent with stored files", async () => {
+    const store = fakeStore();
+    const down = vi.fn(async () => new Response("no", { status: 404 }));
+    const first = await deployUserProject(request(), {
+      store,
+      fetchImpl: down as unknown as typeof fetch,
+    });
+    expect(first.ok).toBe(false);
+    if (first.ok) return;
+    expect(store.rows).toHaveLength(1);
+    const failedRow = store.rows[0];
+    expect(failedRow.status).toBe("failed");
+    // The recorded counts match the files actually stored — the Nov-4
+    // mismatch (file_count 0 over stored files) cannot recur, because
+    // the counts are written with the `deploying` update, before
+    // verification runs.
+    expect(failedRow.fileCount).toBe(2);
+    expect(failedRow.fileCount).toBe((store.files.get(failedRow.id) ?? []).length);
+    expect(failedRow.publicUrl).toContain(failedRow.id);
+
+    const retry = await deployUserProject(request(), { store, fetchImpl: reachableFetch });
+    expect(retry.ok).toBe(true);
+    if (!retry.ok) return;
+    // One row for the logical publish, repaired — not a second row.
+    expect(retry.deploymentId).toBe(first.deploymentId);
+    expect(store.rows).toHaveLength(1);
+    expect(store.rows[0].status).toBe("ready");
+    expect(store.rows[0].urlVerified).toBe(true);
+    expect(store.rows[0].errorClass).toBeNull();
+    expect(store.rows[0].errorMessage).toBeNull();
+    expect(store.rows[0].fileCount).toBe(2);
+  });
+
+  it("(d) an artifact that never reads back from storage fails permanently — validation class, not unknown, not retryable", async () => {
+    const store = fakeStore();
+    // The write is accepted but the files never become readable — the
+    // artifact is genuinely absent, not merely unpropagated.
+    store.readPublishedFile = async () => null;
+    const fetchImpl = vi.fn(async () => new Response("ok", { status: 200 }));
+
+    const result = await deployUserProject(request(), {
+      store,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errorClass).toBe("validation");
+    expect(result.errorClass).not.toBe("unknown");
+    expect(result.retryable).toBe(false);
+    expect(store.rows[0].status).toBe("failed");
+    expect(store.rows[0].errorClass).toBe("validation");
+    // HTTP verification is never reached — there is nothing to serve.
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("(d2) a URL that never answers fails as temporary 'unavailable' after bounded retries — not unknown, not unbounded", async () => {
+    const store = fakeStore();
+    let attempts = 0;
+    const fetchImpl = vi.fn(async () => {
+      attempts += 1;
+      return new Response("no", { status: 404 });
+    });
+
+    const result = await deployUserProject(request(), {
+      store,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errorClass).toBe("unavailable");
+    expect(result.errorClass).not.toBe("unknown");
+    expect(result.retryable).toBe(true);
+    expect(store.rows[0].status).toBe("failed");
+    expect(store.rows[0].errorClass).toBe("unavailable");
+    // Bounded: the test env pins 4 delays → exactly 5 attempts, then stop.
+    expect(attempts).toBe(5);
+  });
+
+  it("pins the Sep-18 class: unstorable content fails validation before any row exists", async () => {
+    // A lone surrogate in a text file is exactly what Postgres's JSON
+    // parser rejected with 22P05 after a row existed. validateArtifact
+    // (unchanged by this fix round) rejects it before persistence —
+    // this test pins that the fence still stands in the new flow.
+    const transport = fakeTransport({
+      async readFile(path: string) {
+        if (path === "index.html") {
+          const content = "<!doctype html><title>x</title>\uD800";
+          return { content, size: content.length };
+        }
+        return { content: "body{}", size: 6 };
+      },
+    });
+    const store = fakeStore();
+    const result = await deployUserProject(
+      { ...request(), transport },
+      { store, fetchImpl: reachableFetch },
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errorClass).toBe("validation");
+    expect(store.rows).toHaveLength(0);
+    expect(store.files.size).toBe(0);
   });
 });

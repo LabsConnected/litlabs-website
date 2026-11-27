@@ -463,6 +463,16 @@ export function describeDeploymentFailure(error: unknown): DescribedFailure {
   const raw = error instanceof Error ? error.message : String(error);
   const safe = redact(raw);
 
+  // Infrastructure credential refusals — e.g. the hosting provider's
+  // "Not Authorized" (the 2026-11-04 failed publishes). These are
+  // authorization failures, not mysteries: they will fail again
+  // identically until the credential or configuration changes, and
+  // recording them as "unknown" hid exactly that. Checked first
+  // because the messages ("Hosting infrastructure error: …") match
+  // none of the older patterns.
+  if (/not authorized|unauthori[sz]ed|permission denied/i.test(raw)) {
+    return { errorClass: "authorization", message: safe, retryable: false };
+  }
   // Validation and authorization failures will fail again identically.
   if (/required|must contain|unsafe|duplicate|too large|too many|not found|forbidden|mismatch|invalid/i.test(raw)) {
     return {
@@ -471,8 +481,21 @@ export function describeDeploymentFailure(error: unknown): DescribedFailure {
       retryable: false,
     };
   }
-  // Transport/provider problems may succeed on a retry.
-  if (/fetch failed|ECONNREFUSED|ETIMEDOUT|socket hang up|network|timeout|502|503|504/i.test(raw)) {
+  // Verification-window unavailability: the artifact was stored, but
+  // the serving path did not answer when the deploy service verified
+  // the live URL. Temporary by construction — the bounded verification
+  // retries run BEFORE a failure is recorded under this class, so a
+  // row carrying it outlived the whole retry window (a propagation lag
+  // or serving blip, e.g. the 2026-09-13 "not reachable" publishes),
+  // which is a different fact from a permanently broken artifact and
+  // must not be recorded as "unknown" or as permanent.
+  if (/not reachable|verification failed/i.test(raw)) {
+    return { errorClass: "unavailable", message: safe, retryable: true };
+  }
+  // Transport/provider problems may succeed on a retry. Any 5xx counts:
+  // the old pattern listed only 502/503/504, so a 500 fell through to
+  // "unknown" while the deploy result's own retryable flag said true.
+  if (/fetch failed|ECONNREFUSED|ETIMEDOUT|socket hang up|network|timeout|\b5\d\d\b/i.test(raw)) {
     return { errorClass: "transport", message: safe, retryable: true };
   }
   return { errorClass: "unknown", message: safe, retryable: false };

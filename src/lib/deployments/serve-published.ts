@@ -41,8 +41,15 @@ export async function publishedFileResponse(opts: {
   deploymentId: string;
   mountBase: string;
   requestPath: string;
+  /**
+   * The deploy service's per-publish verification token, when the
+   * request carries one. It opens serving for that one `deploying`
+   * deployment so the publish can be verified BEFORE it is marked
+   * ready (see readPublishedFile). Absent for every normal visitor.
+   */
+  verificationToken?: string | null;
 }): Promise<NextResponse> {
-  const { deploymentId, mountBase, requestPath } = opts;
+  const { deploymentId, mountBase, requestPath, verificationToken } = opts;
 
   // Resolve the request path against the artifact. Returns null for any
   // traversal attempt, including percent-encoded ones.
@@ -53,7 +60,9 @@ export async function publishedFileResponse(opts: {
 
   let file: Awaited<ReturnType<typeof readPublishedFile>>;
   try {
-    file = await readPublishedFile(deploymentId, artifactPath);
+    file = verificationToken
+      ? await readPublishedFile(deploymentId, artifactPath, { verificationToken })
+      : await readPublishedFile(deploymentId, artifactPath);
   } catch {
     // Never leak storage errors to a public visitor. Retry-After marks
     // this as propagation/blip latency rather than a permanent failure —

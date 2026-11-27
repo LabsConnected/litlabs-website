@@ -28,7 +28,7 @@ import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage
 export type { LLMMessage };
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
 import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
-import { buildPatchRecoveryMessage, existingPageOverwriteError, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
+import { buildFilesWriteRecoveryMessage, buildPatchRecoveryMessage, existingPageOverwriteError, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange, workspaceChangeFromVolumeListing, workspaceChangeFromDirectReads } from "./workspace-change-producer";
 import { checkRequestedLiteral, requestedLiteralFailureMessage, requestedLiteralRepairPrompt } from "./requested-literal";
 import { checkInstructionLeakage, instructionLeakageFailureMessage } from "./instruction-leakage";
@@ -383,6 +383,16 @@ export interface AgentToolCallLogEntry {
    * Absent when not checked or not checkable for this tool.
    */
   persisted?: boolean;
+  /**
+   * P0 F1: set when the loop refused this call BEFORE execution
+   * (unknown tool or failed input validation). The call never ran, so
+   * its failure is a steering event the model can correct — not an
+   * execution failure. The build-verification stamp consults this: a
+   * bounced call is not evidence that a build failed.
+   */
+  bounced?: boolean;
+  /** For a bounced entry: whether the refused tool is read-only. */
+  bouncedReadOnly?: boolean;
 }
 
 /**
@@ -566,6 +576,15 @@ interface ToolCallRecord {
   // leave success undefined — unknown, never a proven success.
   success?: boolean;
   mutating?: boolean;
+  /**
+   * P0 F1: the call was refused BEFORE execution (unknown tool or
+   * failed input validation) and fed back as a correctable tool
+   * result. Bounced records make repeated identical invalid calls
+   * visible to detectRepeatedCalls, but they are NOT executions: the
+   * gated-repeat breaker (which counts executions of gated mutations)
+   * skips them.
+   */
+  bounced?: boolean;
 }
 
 // Canonical JSON for hashing: object keys sorted recursively, so two
@@ -622,6 +641,9 @@ export function countGatedRepeatExecutions(
   let count = 0;
   for (let i = records.length - 1; i >= 0; i--) {
     const record = records[i];
+    // P0 F1: a bounced call never executed and never entered a gate —
+    // it neither counts as an execution nor resets the streak.
+    if (record.bounced) continue;
     if (record.toolId === toolId && record.inputsHash === inputsHash) {
       // A successful same-tool execution ends the streak: anything older
       // belongs to a request that already completed.
@@ -885,6 +907,23 @@ function hasLandedBuildWrite(calls: AgentToolCallLogEntry[]): boolean {
   return calls.some((call) => call.success && isFileWritingTool(call.toolId) && call.persisted !== false);
 }
 
+/**
+ * P0 F1 (production runs c2963c68 / 8efba402, 2026-11-27): true when
+ * the log HAS failure entries and every one of them is a read-only
+ * call the loop refused before execution (an input-validation
+ * bounce). A bounced call never ran — it is steering feedback, not
+ * build failure evidence. When a workspace write verifiably landed
+ * alongside only such bounces, the build-verification stamp must not
+ * settle the run failed on its diff channel alone: in both production
+ * runs the page file was written while the persisted diff evidence
+ * came back empty, and the stamp converted a correctable tool error
+ * into a failed build with no completion message.
+ */
+function onlyBouncedReadOnlyFailures(calls: AgentToolCallLogEntry[]): boolean {
+  const failed = calls.filter((call) => !call.success);
+  return failed.length > 0 && failed.every((call) => call.bounced === true && call.bouncedReadOnly === true);
+}
+
 function unverifiedBuildMessage(change: WorkspaceChangeEvidence | undefined): string | undefined {
   if (change?.status === "changed") return undefined;
   return change?.status === "unchanged"
@@ -960,6 +999,27 @@ export function buildPatchRecoveryForceMessage(rejection: { path: string; error:
     `Rejection detail: ${rejection.error} ` +
     `Your last reply contained no tool call, so the requested edit is still not done and this run cannot finish yet. ` +
     `Recover now — do not answer in prose: either (1) emit a corrected apply_patch for ${path} whose search text is copied ` +
+    `verbatim from the current file content provided in the rejection feedback (a short search string that appears exactly ` +
+    `once), re-reading the file with files.read first if you need the exact bytes, or (2) use files.write to write the ` +
+    `complete corrected contents of ${path}.`
+  );
+}
+
+/**
+ * The files.write counterpart of buildPatchRecoveryForceMessage
+ * (P0 F2): the corrective step injected when a response that follows
+ * a files.write rejection contains no tool call. Same shape — the
+ * rejection detail plus the two recovery routes (a patch derived
+ * from the current file content the rejection feedback carried, or a
+ * corrected full write).
+ */
+export function buildWriteRecoveryForceMessage(rejection: { toolId: string; path: string; error: string }): string {
+  const path = rejection.path || "the requested file";
+  return (
+    `Your ${rejection.toolId} for ${path} was rejected before execution — no file was changed. ` +
+    `Rejection detail: ${rejection.error} ` +
+    `Your last reply contained no tool call, so the requested edit is still not done and this run cannot finish yet. ` +
+    `Recover now — do not answer in prose: either (1) emit apply_patch for ${path} whose search text is copied ` +
     `verbatim from the current file content provided in the rejection feedback (a short search string that appears exactly ` +
     `once), re-reading the file with files.read first if you need the exact bytes, or (2) use files.write to write the ` +
     `complete corrected contents of ${path}.`
@@ -2618,6 +2678,7 @@ function recordRejectedToolCall(
   log: AgentToolCallLogEntry[] | undefined,
   toolCall: { toolCallId: string; toolId: string },
   error: string,
+  opts?: { readOnly?: boolean },
 ): void {
   progress.emit({
     type: "tool_result",
@@ -2626,7 +2687,352 @@ function recordRejectedToolCall(
     summary: error,
     durationMs: 0,
   });
-  log?.push({ toolId: toolCall.toolId, success: false, summary: error, mutating: false });
+  log?.push({ toolId: toolCall.toolId, success: false, summary: error, mutating: false, bounced: true, bouncedReadOnly: opts?.readOnly });
+}
+
+/**
+ * The escalated form of an input-validation bounce, fed back when the
+ * SAME call (same tool + same inputs) has already been refused
+ * repeatedly: the plain error did not teach the correction, so the
+ * nudge names the pattern and the two ways out — correct the argument
+ * or move on without the call. Mirrors buildReadLoopNudgeResult's
+ * steering for repeated executed calls.
+ */
+function buildValidationBounceNudgeResult(toolCall: ToolCallRequest, error: string): ToolCallResult {
+  return {
+    toolCallId: toolCall.toolCallId,
+    toolId: toolCall.toolId,
+    result: null,
+    success: false,
+    error:
+      `${error} This exact ${toolCall.toolId} call has been refused repeatedly with identical inputs — ` +
+      `emitting it again unchanged will be refused again. Do NOT repeat it: correct the argument the ` +
+      `error names, or continue the task without this call.`,
+  };
+}
+
+interface RejectionBounceContext {
+  toolCallRecords: ToolCallRecord[];
+  llmMessages: LLMMessage[];
+  toolCallLog: AgentToolCallLogEntry[];
+  localProgress: ProgressEmitter;
+  stepsUsed: number;
+  hasInterveningMutation: boolean;
+  readLoopNudges: number;
+}
+
+type RejectionBounceOutcome =
+  | { kind: "fed-back"; readLoopNudges: number }
+  | { kind: "stop"; readLoopNudges: number; cancelReason: string; finalText: string };
+
+/**
+ * P0 F1 — feed a pre-execution rejection (unknown tool or failed
+ * input validation) back to the model as a correctable tool result,
+ * with the steering the executed path already has:
+ *
+ *   - the tool's own correction hint (toolDef.validationHint) rides
+ *     the result, so the correction the tool would have taught is not
+ *     lost to the validation interception;
+ *   - the bounce is recorded in toolCallRecords, so the identical-
+ *     repeat detector can see it (before this, rejected calls were
+ *     invisible to every breaker and a weak model could repeat the
+ *     same invalid call until a generic closing path ended the run —
+ *     production run c2963c68, 2026-11-27);
+ *   - identical bounces are bounded by the same nudge-then-honest-
+ *     stop ladder as repeated executed calls (READ_LOOP_NUDGE_MAX):
+ *     once detectRepeatedCalls trips, the next bounces carry the
+ *     escalated nudge, and when the nudge budget is spent the caller
+ *     stops the run with a real closing message instead of silence.
+ *
+ * The validation itself is untouched — the same inputs are refused
+ * the same way; only the feedback and the bounding change.
+ */
+function bounceRejectedToolCall(
+  ctx: RejectionBounceContext,
+  toolCall: ToolCallRequest,
+  toolDef: LiTTToolDefinition | undefined,
+  error: string,
+): RejectionBounceOutcome {
+  const inputsHash = hashInputs(toolCall.inputs);
+  const hint = toolDef?.validationHint?.(toolCall.inputs);
+  const modelError = hint ? `${error} ${hint}` : error;
+
+  if (detectRepeatedCalls(ctx.toolCallRecords, toolCall.toolId, inputsHash, ctx.hasInterveningMutation)) {
+    if (ctx.readLoopNudges < READ_LOOP_NUDGE_MAX) {
+      ctx.localProgress.emit({
+        type: "status",
+        summary: `Repeated invalid ${toolCall.toolId} — nudging the model to correct the inputs instead of repeating them`,
+      });
+      ctx.llmMessages.push(buildToolResultMessage(buildValidationBounceNudgeResult(toolCall, modelError)));
+      recordRejectedToolCall(ctx.localProgress, ctx.toolCallLog, toolCall, error, { readOnly: toolDef?.readOnly });
+      return { kind: "fed-back", readLoopNudges: ctx.readLoopNudges + 1 };
+    }
+    return {
+      kind: "stop",
+      readLoopNudges: ctx.readLoopNudges,
+      cancelReason:
+        `Repeated invalid tool call detected: ${toolCall.toolId} was refused repeatedly with identical inputs ` +
+        `that fail validation (${error}) and the model did not correct them`,
+      finalText:
+        `I stopped: I kept trying to call ${toolCall.toolId} with inputs it cannot accept — ${error} — ` +
+        `and could not correct them. Those attempts changed nothing, and everything completed earlier ` +
+        `in this run is preserved — try again to continue.`,
+    };
+  }
+
+  const result: ToolCallResult = {
+    toolCallId: toolCall.toolCallId,
+    toolId: toolCall.toolId,
+    result: null,
+    success: false,
+    error: modelError,
+  };
+  ctx.llmMessages.push(buildToolResultMessage(result));
+  recordRejectedToolCall(ctx.localProgress, ctx.toolCallLog, toolCall, error, { readOnly: toolDef?.readOnly });
+  ctx.toolCallRecords.push({
+    toolId: toolCall.toolId,
+    inputsHash,
+    resultHash: hashResult(null),
+    step: ctx.stepsUsed,
+    success: false,
+    mutating: toolDef ? !toolDef.readOnly : false,
+    bounced: true,
+  });
+  return { kind: "fed-back", readLoopNudges: ctx.readLoopNudges };
+}
+
+/**
+ * Patch-recovery fallback marking: when an apply_patch for a path was
+ * rejected earlier in this segment, the loop's own recovery guidance
+ * offers files.write of the complete corrected contents as the
+ * sanctioned fallback — a loop-directed overwrite derived from the
+ * current file content the rejection feedback supplied, not a blind
+ * regeneration. Mark it as a declared overwrite so the full-overwrite
+ * gate (pre-approval check + handler floor) lets the recovery land;
+ * without this the gate refuses the very fallback the loop instructed
+ * (ACC-01 F2 follow-on). Runs BEFORE the permission check, in every
+ * segment that validates writes (initial + resume; the deferred batch
+ * executes already-approved inputs and never rewrites them).
+ */
+function markPatchRecoveryOverwrite(toolCall: ToolCallRequest, writeRecoveryAttempts: Map<string, number>): void {
+  if (
+    (toolCall.toolId === "files.write" || toolCall.toolId === "site.compose") &&
+    toolCall.inputs?.allowOverwrite !== true &&
+    (writeRecoveryAttempts.get(
+      `apply_patch:${typeof toolCall.inputs?.path === "string" ? toolCall.inputs.path : "index.html"}`,
+    ) ?? 0) > 0
+  ) {
+    toolCall.inputs = { ...toolCall.inputs, allowOverwrite: true };
+  }
+}
+
+// ─── Pre-approval write validation (shared per-call path) ─────────
+
+interface WriteValidationEnv {
+  transport: WorkspaceTransport;
+  llmMessages: LLMMessage[];
+  toolCallLog: AgentToolCallLogEntry[];
+  localProgress: ProgressEmitter;
+  /**
+   * Recovery counters keyed `${toolId}:${path}` — one map per segment
+   * chain; the deferred batch threads the resume segment's map
+   * through its shared state so attempts accumulate across it.
+   */
+  writeRecoveryAttempts: Map<string, number>;
+  /** site.compose pack-repair budget (§4.3.3) as a mutable holder. */
+  packRepairAttempts: { count: number };
+  /**
+   * The run's selected topic pack, when the segment resolved one.
+   * The deferred batch passes null — an explicit pack argument on the
+   * call still applies there, exactly as in the loops.
+   */
+  topicPackCtx: TopicPackRunContext | null;
+  /**
+   * Record a rejection the model still has to answer: if its next
+   * response contains no tool call, the owning loop's zero-tool-call
+   * branch forces a bounded recovery instead of closing the run.
+   */
+  notePendingRejection: (rejection: { toolId: string; path: string; error: string }) => void;
+}
+
+type WriteValidationOutcome =
+  | { kind: "clear" }
+  | { kind: "bounced" }
+  | { kind: "stop"; cancelReason: string; finalText: string };
+
+/**
+ * Pre-approval write sanity — ONE implementation for every execution
+ * context (initial loop, deferred batch, resumed loop). P0 F2
+ * (production run 8efba402, 2026-11-27): this validation used to exist
+ * only in the initial segment, so after an approval pause a corrected
+ * (or repeated) files.write was never pre-validated — it went
+ * straight to the handler, whose execution-time overwrite gate killed
+ * the resumed run post-approval instead of steering the model while
+ * steering was still possible. The gate's own rationale (below) is
+ * that a dead write must be refused BEFORE approval freezes the
+ * inputs; that protection now survives the pause.
+ *
+ * What is rejected is unchanged — the same validators, the same
+ * order, the same scope. Only WHERE it runs changed (parity), plus
+ * the recovery treatment files.write bounces receive (F2): the
+ * recovery counter already counted every write tool; files.write now
+ * also gets the current-file recovery message and the pending-
+ * rejection state apply_patch always had.
+ */
+async function runPreApprovalWriteValidation(
+  env: WriteValidationEnv,
+  toolCall: ToolCallRequest,
+): Promise<WriteValidationOutcome> {
+  const { transport, llmMessages, toolCallLog, localProgress, topicPackCtx } = env;
+
+  // An apply_patch or files.write whose inputs are provably invalid
+  // (unresolved template placeholders like [PERSON_NAME] or {{token}},
+  // or a patch search string that cannot match the target file) must
+  // never become an Approve/Reject card — the approval freezes the
+  // inputs, so approving a dead write can only fail on resume or
+  // persist the token verbatim. Feed the error back as a tool result
+  // so the model re-reads and regenerates.
+  let writeError =
+    toolCall.toolId === "apply_patch"
+      ? await validateApplyPatchInputs(toolCall.inputs, transport)
+      : toolCall.toolId === "files.write"
+        ? validateFilesWriteInputs(toolCall.inputs)
+        : null;
+  // Full-overwrite gate (all lanes since ACC-01 F2): a files.write
+  // or site.compose that replaces an existing page must declare
+  // allowOverwrite or take the apply_patch path — whole-document
+  // regeneration is how models silently drop the requested edit.
+  // This was small-lane-only until the paid-beta acceptance, where
+  // a cloud model answered a one-line edit by regenerating the
+  // whole page as a generic template and the write landed. Running
+  // the gate pre-approval matters: the approval freezes the
+  // inputs, so a dead overwrite refused only at execution time
+  // kills the resumed run instead of steering the model to patch.
+  if (
+    !writeError &&
+    (toolCall.toolId === "files.write" || toolCall.toolId === "site.compose")
+  ) {
+    writeError = await existingPageOverwriteError(toolCall.inputs, transport);
+    if (writeError) writeError = `${toolCall.toolId} ${writeError}`;
+  }
+  // site.compose plan validation runs pre-approval too — the approval
+  // freezes the plan, so a malformed one can only die post-approval
+  // ("approved workspace operation failed"). Feeding the errors back
+  // lets the model fix the plan and re-emit instead.
+  if (!writeError && toolCall.toolId === "site.compose") {
+    const { validateSitePlan } = await import("./site-compose");
+    const planInput =
+      toolCall.inputs.plan !== undefined
+        ? toolCall.inputs.plan
+        : Object.fromEntries(
+            Object.entries(toolCall.inputs).filter(([k]) => k !== "path" && k !== "projectId" && k !== "allowOverwrite" && k !== "pack"),
+          );
+    // Topic packs (§4.3.3): validate against the pack as well.
+    // The explicit tool argument wins; otherwise the run's
+    // selected pack applies. Checklist-only (Next.js) runs skip
+    // compose enforcement entirely (§4.6.4).
+    let composePack: import("./topic-packs/types").TopicPack | undefined;
+    if (topicPacksEnabled()) {
+      const { getPack } = await import("./topic-packs");
+      composePack =
+        getPack(typeof toolCall.inputs.pack === "string" ? toolCall.inputs.pack : undefined) ??
+        (topicPackCtx && !topicPackCtx.checklistOnly ? topicPackCtx.pack : undefined);
+    }
+    const v = validateSitePlan(planInput, composePack ? { pack: composePack } : undefined);
+    if (!v.ok) {
+      const isPackFailure =
+        !!composePack && v.errors.some((e) => e.startsWith(`${composePack.id} pack:`));
+      if (isPackFailure) env.packRepairAttempts.count += 1;
+      if (isPackFailure && composePack && env.packRepairAttempts.count > 2) {
+        // Bounded repair (§4.3.3): two fix attempts were already
+        // fed back. Refuse the call and require the honest
+        // pack-incomplete report — never a silent thin ship.
+        writeError =
+          `site.compose pack-incomplete: the ${composePack.id} pack repair limit (2 attempts) is exhausted ` +
+          `and the plan is still incomplete — ${v.errors.join("; ")}. ` +
+          `Do NOT present this site as finished. Tell the user plainly that the site is incomplete ` +
+          `and name the missing pieces, or fix ALL of them in one corrected plan.`;
+      } else {
+        writeError = `site.compose invalid plan: ${v.errors.join("; ")} — fix the plan and emit it again.`;
+      }
+    }
+  }
+  // site.patch dry-run: read the target and run the splice in memory —
+  // a missing region or no-op edit must fail here with feedback, not
+  // post-approval where the run dies with "approved workspace
+  // operation failed".
+  if (!writeError && toolCall.toolId === "site.patch") {
+    const patchPath =
+      typeof toolCall.inputs.path === "string" && toolCall.inputs.path.trim()
+        ? toolCall.inputs.path.trim()
+        : "index.html";
+    const section = toolCall.inputs.section;
+    if (typeof section !== "string" || !section.trim()) {
+      writeError = 'site.patch requires "section" (e.g. "hero", "footer", "features-1")';
+    } else {
+      try {
+        const { content } = await transport.readFile(patchPath);
+        const { applySectionEdit } = await import("./site-compose");
+        const fields = Object.fromEntries(
+          Object.entries(toolCall.inputs).filter(([k]) => k !== "path" && k !== "projectId" && k !== "section" && k !== "allowOverwrite"),
+        );
+        const probe = applySectionEdit(content, section, fields);
+        if (!probe.ok) writeError = `site.patch failed: ${probe.error}`;
+      } catch {
+        writeError = `site.patch: cannot read ${patchPath} — files.read it first or check the path.`;
+      }
+    }
+  }
+  if (!writeError) return { kind: "clear" };
+
+  const recoveryKey = `${toolCall.toolId}:${String(toolCall.inputs.path ?? "")}`;
+  const recoveryAttempt = (env.writeRecoveryAttempts.get(recoveryKey) ?? 0) + 1;
+  env.writeRecoveryAttempts.set(recoveryKey, recoveryAttempt);
+  const recoveryMessage = toolCall.toolId === "apply_patch"
+    ? await buildPatchRecoveryMessage(toolCall.inputs, transport, writeError, recoveryAttempt)
+    : toolCall.toolId === "files.write"
+      ? await buildFilesWriteRecoveryMessage(toolCall.inputs, transport, writeError, recoveryAttempt)
+      : writeError;
+  const result: ToolCallResult = {
+    toolCallId: toolCall.toolCallId,
+    toolId: toolCall.toolId,
+    result: null,
+    success: false,
+    error: recoveryMessage,
+  };
+  llmMessages.push(buildToolResultMessage(result));
+  const invalidWriteSummary =
+    toolCall.toolId === "apply_patch"
+      ? recoveryAttempt >= 2
+        ? "Invalid patch repeated after disk re-read; stopped without mutation"
+        : "Invalid patch re-read from disk; regenerate or use files.write"
+      : `${toolCall.toolId} rejected pre-approval — model retries with corrected inputs`;
+  toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: invalidWriteSummary, mutating: false });
+  localProgress.emit({
+    type: "tool_result",
+    toolId: toolCall.toolId,
+    success: false,
+    summary: invalidWriteSummary,
+    durationMs: 0,
+  });
+  if (toolCall.toolId === "apply_patch" && recoveryAttempt >= 2) {
+    return {
+      kind: "stop",
+      cancelReason: "The model repeated an unsafe patch after the file was re-read; no mutation was executed",
+      finalText: "I could not safely apply that change after re-reading the current file. No mutation was executed.",
+    };
+  }
+  if (toolCall.toolId === "apply_patch" || toolCall.toolId === "files.write") {
+    // A rejection the model still has to answer: if its next
+    // response contains no tool call, the zero-tool-call branch
+    // forces a bounded recovery instead of closing the run.
+    env.notePendingRejection({
+      toolId: toolCall.toolId,
+      path: String(toolCall.inputs.path ?? ""),
+      error: writeError,
+    });
+  }
+  return { kind: "bounced" };
 }
 
 /**
@@ -2985,6 +3391,12 @@ async function runAgentLoopV2Inner(
   // consumed by the zero-tool-call branch (MAX_PATCH_RECOVERY_FORCES).
   let pendingPatchRejection: { path: string; error: string } | null = null;
   let patchRecoveryForcesUsed = 0;
+  // P0 F2: the files.write counterpart — the latest files.write
+  // rejection no file-writing response has answered yet, with its own
+  // force budget. Set by the shared pre-approval write validation;
+  // consumed by the same zero-tool-call branch.
+  let pendingWriteRejection: { toolId: string; path: string; error: string } | null = null;
+  let writeRecoveryForcesUsed = 0;
 
   // Collect progress events
   const localProgress = new ProgressEmitter((event) => {
@@ -3172,8 +3584,10 @@ async function runAgentLoopV2Inner(
   );
   // Topic packs (§4.3.3): bounded pack-repair attempts per run — after
   // two failed pack validations the compose call is refused with the
-  // honest pack-incomplete report instead of looping forever.
-  let packRepairAttempts = 0;
+  // honest pack-incomplete report instead of looping forever. A holder
+  // object: the shared write validation (runPreApprovalWriteValidation)
+  // increments it through the run's WriteValidationEnv.
+  const packRepairAttempts = { count: 0 };
   let completedDeployment: CompletedDeployment | null = null;
   // Round 14: images generated during this run, for the inline chat
   // render appended at the tail (readChatImageOutcome).
@@ -3465,12 +3879,30 @@ async function runAgentLoopV2Inner(
         llmMessages.push({ role: "user", origin: "internal", content: buildPatchRecoveryForceMessage(pendingPatchRejection) });
         continue;
       }
+      // P0 F2: the same forced recovery for a files.write rejection —
+      // a prose finish after a bounced write can never be a legitimate
+      // final answer in a capability-guarded run either.
+      if (
+        pendingWriteRejection &&
+        cfg.buildCapabilityGuard != null &&
+        writeRecoveryForcesUsed < MAX_PATCH_RECOVERY_FORCES
+      ) {
+        writeRecoveryForcesUsed++;
+        localProgress.emit({
+          type: "status",
+          summary:
+            "The model's write was rejected and its reply contained no recovery action — requiring a corrected write or patch...",
+        });
+        llmMessages.push({ role: "assistant", content: zeroCallText });
+        llmMessages.push({ role: "user", origin: "internal", content: buildWriteRecoveryForceMessage(pendingWriteRejection) });
+        continue;
+      }
       const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
         // Small lane exists to mutate files: until a mutation lands, a
         // prose-only reply can never be the final answer — bounded nudges
         // then an honest failure, never a silent fake-complete.
         requiredToolCallPending:
-          !pendingPatchRejection && (
+          !pendingPatchRejection && !pendingWriteRejection && (
             (cfg.buildCapabilityGuard != null && !hasLandedBuildWrite(toolCallLog) && !shellMutationVerified) ||
             ((cfg.requireToolCallOnFirstStep === true || isLocalSmallLane()) && !emittedToolCalls && !hasInterveningMutation)
           ),
@@ -3539,6 +3971,9 @@ async function runAgentLoopV2Inner(
     // records the fresh rejection; if it lands, the rejection is answered.
     if (pendingPatchRejection && llmResponse.toolCalls.some((c) => isFileWritingTool(c.toolId))) {
       pendingPatchRejection = null;
+    }
+    if (pendingWriteRejection && llmResponse.toolCalls.some((c) => isFileWritingTool(c.toolId))) {
+      pendingWriteRejection = null;
     }
 
     // Emit a reasoning summary for tool-calling steps (what LiTT is about to do)
@@ -3609,15 +4044,19 @@ async function runAgentLoopV2Inner(
 
       if (!toolDef) {
         const error = `Unknown tool: ${toolCall.toolId}`;
-        const result: ToolCallResult = {
-          toolCallId: toolCall.toolCallId,
-          toolId: toolCall.toolId,
-          result: null,
-          success: false,
+        const bounce = bounceRejectedToolCall(
+          { toolCallRecords, llmMessages, toolCallLog, localProgress, stepsUsed, hasInterveningMutation, readLoopNudges },
+          toolCall,
+          undefined,
           error,
-        };
-        llmMessages.push(buildToolResultMessage(result));
-        recordRejectedToolCall(localProgress, toolCallLog, toolCall, error);
+        );
+        readLoopNudges = bounce.readLoopNudges;
+        if (bounce.kind === "stop") {
+          cancelled = true;
+          cancelReason = bounce.cancelReason;
+          finalText = bounce.finalText;
+          break;
+        }
         continue;
       }
 
@@ -3641,18 +4080,25 @@ async function runAgentLoopV2Inner(
         }
       }
 
-      // Validate inputs
+      // Validate inputs — a refusal here is a correctable bounce, not
+      // a run failure (P0 F1): the model gets the error plus the tool's
+      // own correction hint, the bounce enters the repeated-call
+      // ledger, and identical repeats are bounded by the nudge ladder.
       const validationError = toolRegistry.validateInputs(toolCall.toolId, toolCall.inputs);
       if (validationError) {
-        const result: ToolCallResult = {
-          toolCallId: toolCall.toolCallId,
-          toolId: toolCall.toolId,
-          result: null,
-          success: false,
-          error: validationError,
-        };
-        llmMessages.push(buildToolResultMessage(result));
-        recordRejectedToolCall(localProgress, toolCallLog, toolCall, validationError);
+        const bounce = bounceRejectedToolCall(
+          { toolCallRecords, llmMessages, toolCallLog, localProgress, stepsUsed, hasInterveningMutation, readLoopNudges },
+          toolCall,
+          toolDef,
+          validationError,
+        );
+        readLoopNudges = bounce.readLoopNudges;
+        if (bounce.kind === "stop") {
+          cancelled = true;
+          cancelReason = bounce.cancelReason;
+          finalText = bounce.finalText;
+          break;
+        }
         continue;
       }
 
@@ -3710,24 +4156,8 @@ async function runAgentLoopV2Inner(
         }
       }
 
-      // Patch-recovery fallback: when an apply_patch for this path was
-      // rejected earlier in this run, the loop's own recovery guidance
-      // offers files.write of the complete corrected contents as the
-      // sanctioned fallback — a loop-directed overwrite derived from
-      // the current file content the rejection feedback supplied, not a
-      // blind regeneration. Mark it as a declared overwrite so the
-      // full-overwrite gate (pre-approval check + handler floor) lets
-      // the recovery land; without this the gate refuses the very
-      // fallback the loop instructed (ACC-01 F2 follow-on).
-      if (
-        (toolCall.toolId === "files.write" || toolCall.toolId === "site.compose") &&
-        toolCall.inputs?.allowOverwrite !== true &&
-        (patchRecoveryAttempts.get(
-          `apply_patch:${typeof toolCall.inputs?.path === "string" ? toolCall.inputs.path : "index.html"}`,
-        ) ?? 0) > 0
-      ) {
-        toolCall.inputs = { ...toolCall.inputs, allowOverwrite: true };
-      }
+      // Patch-recovery fallback marking (see markPatchRecoveryOverwrite).
+      markPatchRecoveryOverwrite(toolCall, patchRecoveryAttempts);
 
       // Check permissions
       const permInfo = toPermissionInfo(toolDef);
@@ -3812,150 +4242,36 @@ async function runAgentLoopV2Inner(
         continue;
       }
 
-      // Pre-approval write sanity: an apply_patch or files.write whose
-      // inputs are provably invalid (unresolved template placeholders like
-      // [PERSON_NAME] or {{token}}, or a patch search string that cannot
-      // match the target file) must never become an Approve/Reject card —
-      // the approval freezes the inputs, so approving a dead write can only
-      // fail on resume or persist the token verbatim. Feed the error back
-      // as a tool result so the model re-reads and regenerates.
+      // Pre-approval write sanity (shared per-call path — see
+      // runPreApprovalWriteValidation): a provably invalid write must
+      // never become an Approve/Reject card, because the approval
+      // freezes the inputs. Runs in every execution context.
       if (permResult.allowed) {
-        let writeError =
-          toolCall.toolId === "apply_patch"
-            ? await validateApplyPatchInputs(toolCall.inputs, transport)
-            : toolCall.toolId === "files.write"
-              ? validateFilesWriteInputs(toolCall.inputs)
-              : null;
-        // Full-overwrite gate (all lanes since ACC-01 F2): a files.write
-        // or site.compose that replaces an existing page must declare
-        // allowOverwrite or take the apply_patch path — whole-document
-        // regeneration is how models silently drop the requested edit.
-        // This was small-lane-only until the paid-beta acceptance, where
-        // a cloud model answered a one-line edit by regenerating the
-        // whole page as a generic template and the write landed. Running
-        // the gate pre-approval matters: the approval freezes the
-        // inputs, so a dead overwrite refused only at execution time
-        // kills the resumed run instead of steering the model to patch.
-        if (
-          !writeError &&
-          (toolCall.toolId === "files.write" || toolCall.toolId === "site.compose")
-        ) {
-          writeError = await existingPageOverwriteError(toolCall.inputs, transport);
-          if (writeError) writeError = `${toolCall.toolId} ${writeError}`;
-        }
-        // site.compose plan validation runs pre-approval too — the approval
-        // freezes the plan, so a malformed one can only die post-approval
-        // ("approved workspace operation failed"). Feeding the errors back
-        // lets the model fix the plan and re-emit instead.
-        if (!writeError && toolCall.toolId === "site.compose") {
-          const { validateSitePlan } = await import("./site-compose");
-          const planInput =
-            toolCall.inputs.plan !== undefined
-              ? toolCall.inputs.plan
-              : Object.fromEntries(
-                  Object.entries(toolCall.inputs).filter(([k]) => k !== "path" && k !== "projectId" && k !== "allowOverwrite" && k !== "pack"),
-                );
-          // Topic packs (§4.3.3): validate against the pack as well.
-          // The explicit tool argument wins; otherwise the run's
-          // selected pack applies. Checklist-only (Next.js) runs skip
-          // compose enforcement entirely (§4.6.4).
-          let composePack: import("./topic-packs/types").TopicPack | undefined;
-          if (topicPacksEnabled()) {
-            const { getPack } = await import("./topic-packs");
-            composePack =
-              getPack(typeof toolCall.inputs.pack === "string" ? toolCall.inputs.pack : undefined) ??
-              (topicPackCtx && !topicPackCtx.checklistOnly ? topicPackCtx.pack : undefined);
-          }
-          const v = validateSitePlan(planInput, composePack ? { pack: composePack } : undefined);
-          if (!v.ok) {
-            const isPackFailure =
-              !!composePack && v.errors.some((e) => e.startsWith(`${composePack.id} pack:`));
-            if (isPackFailure) packRepairAttempts += 1;
-            if (isPackFailure && composePack && packRepairAttempts > 2) {
-              // Bounded repair (§4.3.3): two fix attempts were already
-              // fed back. Refuse the call and require the honest
-              // pack-incomplete report — never a silent thin ship.
-              writeError =
-                `site.compose pack-incomplete: the ${composePack.id} pack repair limit (2 attempts) is exhausted ` +
-                `and the plan is still incomplete — ${v.errors.join("; ")}. ` +
-                `Do NOT present this site as finished. Tell the user plainly that the site is incomplete ` +
-                `and name the missing pieces, or fix ALL of them in one corrected plan.`;
-            } else {
-              writeError = `site.compose invalid plan: ${v.errors.join("; ")} — fix the plan and emit it again.`;
-            }
-          }
-        }
-        // site.patch dry-run: read the target and run the splice in memory —
-        // a missing region or no-op edit must fail here with feedback, not
-        // post-approval where the run dies with "approved workspace
-        // operation failed".
-        if (!writeError && toolCall.toolId === "site.patch") {
-          const patchPath =
-            typeof toolCall.inputs.path === "string" && toolCall.inputs.path.trim()
-              ? toolCall.inputs.path.trim()
-              : "index.html";
-          const section = toolCall.inputs.section;
-          if (typeof section !== "string" || !section.trim()) {
-            writeError = 'site.patch requires "section" (e.g. "hero", "footer", "features-1")';
-          } else {
-            try {
-              const { content } = await transport.readFile(patchPath);
-              const { applySectionEdit } = await import("./site-compose");
-              const fields = Object.fromEntries(
-                Object.entries(toolCall.inputs).filter(([k]) => k !== "path" && k !== "projectId" && k !== "section" && k !== "allowOverwrite"),
-              );
-              const probe = applySectionEdit(content, section, fields);
-              if (!probe.ok) writeError = `site.patch failed: ${probe.error}`;
-            } catch {
-              writeError = `site.patch: cannot read ${patchPath} — files.read it first or check the path.`;
-            }
-          }
-        }
-        if (writeError) {
-          const recoveryKey = `${toolCall.toolId}:${String(toolCall.inputs.path ?? "")}`;
-          const recoveryAttempt = (patchRecoveryAttempts.get(recoveryKey) ?? 0) + 1;
-          patchRecoveryAttempts.set(recoveryKey, recoveryAttempt);
-          const recoveryMessage = toolCall.toolId === "apply_patch"
-            ? await buildPatchRecoveryMessage(toolCall.inputs, transport, writeError, recoveryAttempt)
-            : writeError;
-          const result: ToolCallResult = {
-            toolCallId: toolCall.toolCallId,
-            toolId: toolCall.toolId,
-            result: null,
-            success: false,
-            error: recoveryMessage,
-          };
-          llmMessages.push(buildToolResultMessage(result));
-          const invalidWriteSummary =
-            toolCall.toolId === "apply_patch"
-              ? recoveryAttempt >= 2
-                ? "Invalid patch repeated after disk re-read; stopped without mutation"
-                : "Invalid patch re-read from disk; regenerate or use files.write"
-              : `${toolCall.toolId} rejected pre-approval — model retries with corrected inputs`;
-          toolCallLog.push({ toolId: toolCall.toolId, success: false, summary: invalidWriteSummary, mutating: false });
-          localProgress.emit({
-            type: "tool_result",
-            toolId: toolCall.toolId,
-            success: false,
-            summary: invalidWriteSummary,
-            durationMs: 0,
-          });
-          if (toolCall.toolId === "apply_patch" && recoveryAttempt >= 2) {
-            cancelled = true;
-            cancelReason = "The model repeated an unsafe patch after the file was re-read; no mutation was executed";
-            finalText = "I could not safely apply that change after re-reading the current file. No mutation was executed.";
-            break;
-          }
-          if (toolCall.toolId === "apply_patch") {
-            // A rejection the model still has to answer: if its next
-            // response contains no tool call, the zero-tool-call branch
-            // forces a bounded recovery instead of closing the run.
-            pendingPatchRejection = {
-              path: String(toolCall.inputs.path ?? ""),
-              error: writeError,
-            };
-          }
-          continue;
+        const writeOutcome = await runPreApprovalWriteValidation(
+          {
+            transport,
+            llmMessages,
+            toolCallLog,
+            localProgress,
+            writeRecoveryAttempts: patchRecoveryAttempts,
+            packRepairAttempts,
+            topicPackCtx,
+            notePendingRejection: (rejection) => {
+              if (rejection.toolId === "apply_patch") {
+                pendingPatchRejection = { path: rejection.path, error: rejection.error };
+              } else if (rejection.toolId === "files.write") {
+                pendingWriteRejection = rejection;
+              }
+            },
+          },
+          toolCall,
+        );
+        if (writeOutcome.kind === "bounced") continue;
+        if (writeOutcome.kind === "stop") {
+          cancelled = true;
+          cancelReason = writeOutcome.cancelReason;
+          finalText = writeOutcome.finalText;
+          break;
         }
       }
 
@@ -4856,9 +5172,19 @@ async function runAgentLoopV2Inner(
   if (workspaceChange) {
     localProgress.emit({ type: "workspace_change", ...workspaceChange });
   }
-  const buildVerificationFailure = cfg.buildCapabilityGuard && !cancelled && !failedHonestly
+  const unverifiedBuild = cfg.buildCapabilityGuard && !cancelled && !failedHonestly
     ? unverifiedBuildMessage(workspaceChange)
     : undefined;
+  // P0 F1: the stamp judges only the diff channel. When a workspace
+  // write verifiably landed (read-back evidence in the log) and the
+  // run's ONLY failure entries are read-only calls bounced before
+  // execution, the diff channel is what failed — not the build — so
+  // the stamp stands down and the bounces remain ordinary failure
+  // contributors instead of settling the run failed.
+  const buildVerificationFailure =
+    unverifiedBuild && hasLandedBuildWrite(toolCallLog) && onlyBouncedReadOnlyFailures(toolCallLog)
+      ? undefined
+      : unverifiedBuild;
   if (buildVerificationFailure) failedHonestly = buildVerificationFailure;
   // Round 11: settle from the run's evidence (run-settlement.ts). A
   // wrap-up route failure after the deliverable landed settles
@@ -5388,6 +5714,21 @@ export interface DeferredToolBatchState {
    * merges it into its own checkpoint-failure record.
    */
   checkpointError?: string;
+  /**
+   * P0 F2: the resume segment's write-recovery counters, threaded
+   * through the batch so the shared pre-approval write validation
+   * accumulates attempts across the boundary instead of restarting.
+   */
+  writeRecoveryAttempts?: Map<string, number>;
+  /** P0 F2: the resume segment's site.compose pack-repair budget. */
+  packRepairAttempts?: { count: number };
+  /**
+   * P0 F2: a files.write bounce inside the batch leaves its pending
+   * rejection here; the resume path reads it back so its
+   * zero-tool-call branch can force the same bounded recovery as a
+   * bounce in the live loop.
+   */
+  pendingWriteRejection?: { toolId: string; path: string; error: string } | null;
 }
 
 export interface DeferredToolBatchContext {
@@ -5479,29 +5820,35 @@ export async function executeDeferredToolCalls(
 
     if (!toolDef) {
       const error = `Unknown tool: ${toolCall.toolId}`;
-      const result: ToolCallResult = {
-        toolCallId: toolCall.toolCallId,
-        toolId: toolCall.toolId,
-        result: null,
-        success: false,
+      const bounce = bounceRejectedToolCall(
+        { toolCallRecords: ctx.toolCallRecords, llmMessages: ctx.llmMessages, toolCallLog: ctx.toolCallLog, localProgress: ctx.localProgress, stepsUsed: ctx.stepsUsed, hasInterveningMutation: state.hasInterveningMutation, readLoopNudges: state.readLoopNudges ?? 0 },
+        toolCall,
+        undefined,
         error,
-      };
-      ctx.llmMessages.push(buildToolResultMessage(result));
-      recordRejectedToolCall(ctx.localProgress, ctx.toolCallLog, toolCall, error);
+      );
+      state.readLoopNudges = bounce.readLoopNudges;
+      if (bounce.kind === "stop") {
+        state.cancelled = true;
+        state.cancelReason = bounce.cancelReason;
+        break;
+      }
       continue;
     }
 
     const validationError = toolRegistry.validateInputs(toolCall.toolId, toolCall.inputs);
     if (validationError) {
-      const result: ToolCallResult = {
-        toolCallId: toolCall.toolCallId,
-        toolId: toolCall.toolId,
-        result: null,
-        success: false,
-        error: validationError,
-      };
-      ctx.llmMessages.push(buildToolResultMessage(result));
-      recordRejectedToolCall(ctx.localProgress, ctx.toolCallLog, toolCall, validationError);
+      const bounce = bounceRejectedToolCall(
+        { toolCallRecords: ctx.toolCallRecords, llmMessages: ctx.llmMessages, toolCallLog: ctx.toolCallLog, localProgress: ctx.localProgress, stepsUsed: ctx.stepsUsed, hasInterveningMutation: state.hasInterveningMutation, readLoopNudges: state.readLoopNudges ?? 0 },
+        toolCall,
+        toolDef,
+        validationError,
+      );
+      state.readLoopNudges = bounce.readLoopNudges;
+      if (bounce.kind === "stop") {
+        state.cancelled = true;
+        state.cancelReason = bounce.cancelReason;
+        break;
+      }
       continue;
     }
 
@@ -5589,6 +5936,36 @@ export async function executeDeferredToolCalls(
         reason: permResult.reason ?? "Permission denied",
       });
       continue;
+    }
+
+    // P0 F2: pre-approval write validation runs in the deferred batch
+    // too (shared per-call path — see runPreApprovalWriteValidation):
+    // a deferred write that is provably invalid bounces with recovery
+    // feedback BEFORE it can become a nested approval card or die at
+    // the handler post-approval. The batch has no topic-pack context
+    // of its own; an explicit pack argument on the call still applies.
+    const writeOutcome = await runPreApprovalWriteValidation(
+      {
+        transport: ctx.transport,
+        llmMessages: ctx.llmMessages,
+        toolCallLog: ctx.toolCallLog,
+        localProgress: ctx.localProgress,
+        writeRecoveryAttempts: (state.writeRecoveryAttempts ??= new Map<string, number>()),
+        packRepairAttempts: (state.packRepairAttempts ??= { count: 0 }),
+        topicPackCtx: null,
+        notePendingRejection: (rejection) => {
+          if (rejection.toolId === "files.write") {
+            state.pendingWriteRejection = rejection;
+          }
+        },
+      },
+      toolCall,
+    );
+    if (writeOutcome.kind === "bounced") continue;
+    if (writeOutcome.kind === "stop") {
+      state.cancelled = true;
+      state.cancelReason = writeOutcome.cancelReason;
+      break;
     }
 
     // ACC-07: the owning run's build scope covers in-scope deferred
@@ -5932,7 +6309,10 @@ async function resumeAgentLoopV2Inner(
   // the resume rebuilds cfg, so re-resolve the pack deterministically
   // from the original user message (selection is deterministic, and
   // the project record carries the stored pack as a fallback).
-  await applyTopicPackContext(cfg, resumeUserMessage, transport);
+  // P0 F2: keep the resolved topic-pack context — the shared write
+  // validation validates site.compose plans against the run's pack in
+  // this segment too (the initial segment always passed it).
+  const topicPackCtx = await applyTopicPackContext(cfg, resumeUserMessage, transport);
 
   // ── Run observability on resume (Part J, D) ──
   // P0 R5: when the paused record carried the run's logical identity,
@@ -5961,6 +6341,17 @@ async function resumeAgentLoopV2Inner(
   // granted by approving the scope-granting gate).
   const buildScopeAuthorized = resume.buildScopeApproved === true;
   const executedMutations = new Map<string, ExecutedMutation>();
+  // P0 F2: write-recovery state for the shared pre-approval write
+  // validation (runPreApprovalWriteValidation) — the resume segment
+  // runs the same validation as the initial segment, so it needs the
+  // same counters and pending-rejection state. The deferred batch
+  // threads these through its shared state.
+  const patchRecoveryAttempts = new Map<string, number>();
+  const packRepairAttempts = { count: 0 };
+  let pendingPatchRejection: { path: string; error: string } | null = null;
+  let pendingWriteRejection: { toolId: string; path: string; error: string } | null = null;
+  let patchRecoveryForcesUsed = 0;
+  let writeRecoveryForcesUsed = 0;
 
   const localProgress = new ProgressEmitter((event) => {
     events.push(event);
@@ -6387,6 +6778,9 @@ async function resumeAgentLoopV2Inner(
       completedDeployment,
       chatImages,
       readLoopNudges,
+      writeRecoveryAttempts: patchRecoveryAttempts,
+      packRepairAttempts,
+      pendingWriteRejection: null,
     };
     const deferredResult = await executeDeferredToolCalls(resume.deferredToolCalls, {
       availableTools: resumeOfferableTools,
@@ -6421,6 +6815,11 @@ async function resumeAgentLoopV2Inner(
     batchHasMutation = deferredState.batchHasMutation;
     completedDeployment = deferredState.completedDeployment;
     readLoopNudges = deferredState.readLoopNudges ?? readLoopNudges;
+    // P0 F2: a files.write bounced inside the deferred batch leaves
+    // its pending rejection for this segment's zero-tool-call branch.
+    if (deferredState.pendingWriteRejection) {
+      pendingWriteRejection = deferredState.pendingWriteRejection;
+    }
     // P0 R1: a checkpoint failure inside the deferred batch is this
     // segment's failure too.
     if (!checkpointCreationError && deferredState.checkpointError) {
@@ -6755,13 +7154,49 @@ async function resumeAgentLoopV2Inner(
         continue;
       }
       const zeroCallText = llmResponse.text ?? "";
+      // P0 F2: forced recovery after a bounced write — the resume
+      // segment previously had NO recovery force at all, so a prose
+      // reply after a rejection closed the run with the edit undone.
+      // Mirrors the initial segment's patch/write forces exactly.
+      if (
+        pendingPatchRejection &&
+        cfg.buildCapabilityGuard != null &&
+        patchRecoveryForcesUsed < MAX_PATCH_RECOVERY_FORCES
+      ) {
+        patchRecoveryForcesUsed++;
+        localProgress.emit({
+          type: "status",
+          summary:
+            "The model's patch was rejected and its reply contained no recovery action — requiring a corrected patch or files.write...",
+        });
+        llmMessages.push({ role: "assistant", content: zeroCallText });
+        llmMessages.push({ role: "user", origin: "internal", content: buildPatchRecoveryForceMessage(pendingPatchRejection) });
+        continue;
+      }
+      if (
+        pendingWriteRejection &&
+        cfg.buildCapabilityGuard != null &&
+        writeRecoveryForcesUsed < MAX_PATCH_RECOVERY_FORCES
+      ) {
+        writeRecoveryForcesUsed++;
+        localProgress.emit({
+          type: "status",
+          summary:
+            "The model's write was rejected and its reply contained no recovery action — requiring a corrected write or patch...",
+        });
+        llmMessages.push({ role: "assistant", content: zeroCallText });
+        llmMessages.push({ role: "user", origin: "internal", content: buildWriteRecoveryForceMessage(pendingWriteRejection) });
+        continue;
+      }
       const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
         // Small lane exists to mutate files: until a mutation lands, a
         // prose-only reply can never be the final answer — bounded nudges
         // then an honest failure, never a silent fake-complete.
         requiredToolCallPending:
-          (cfg.buildCapabilityGuard != null && !hasLandedBuildWrite(toolCallLog) && !shellMutationVerified) ||
-          ((cfg.requireToolCallOnFirstStep === true || isLocalSmallLane()) && !emittedToolCalls && !hasInterveningMutation),
+          !pendingPatchRejection && !pendingWriteRejection && (
+            (cfg.buildCapabilityGuard != null && !hasLandedBuildWrite(toolCallLog) && !shellMutationVerified) ||
+            ((cfg.requireToolCallOnFirstStep === true || isLocalSmallLane()) && !emittedToolCalls && !hasInterveningMutation)
+          ),
         // Prose approval-asks can only stall a turn that was dispatched
         // to execute: on chat/plan turns the same wording is a valid
         // final answer, not a missing tool call. Execution intent rides
@@ -6815,6 +7250,17 @@ async function resumeAgentLoopV2Inner(
       harvestStageMarkers(qualitySession, [{ role: "assistant" as const, content: llmResponse.text ?? "" }]);
     }
 
+    // P0 F2: a response carrying any file-writing call IS the model's
+    // recovery attempt for a pending write rejection — clear the
+    // pending state (mirrors the initial segment). If that attempt is
+    // itself rejected, the validation below records the fresh one.
+    if (pendingPatchRejection && llmResponse.toolCalls.some((c) => isFileWritingTool(c.toolId))) {
+      pendingPatchRejection = null;
+    }
+    if (pendingWriteRejection && llmResponse.toolCalls.some((c) => isFileWritingTool(c.toolId))) {
+      pendingWriteRejection = null;
+    }
+
     let batchHasMutation = false;
     const logBeforeBatch = toolCallLog.length;
 
@@ -6823,29 +7269,37 @@ async function resumeAgentLoopV2Inner(
 
       if (!toolDef) {
         const error = `Unknown tool: ${toolCall.toolId}`;
-        const result: ToolCallResult = {
-          toolCallId: toolCall.toolCallId,
-          toolId: toolCall.toolId,
-          result: null,
-          success: false,
+        const bounce = bounceRejectedToolCall(
+          { toolCallRecords, llmMessages, toolCallLog, localProgress, stepsUsed, hasInterveningMutation, readLoopNudges },
+          toolCall,
+          undefined,
           error,
-        };
-        llmMessages.push(buildToolResultMessage(result));
-        recordRejectedToolCall(localProgress, toolCallLog, toolCall, error);
+        );
+        readLoopNudges = bounce.readLoopNudges;
+        if (bounce.kind === "stop") {
+          cancelled = true;
+          cancelReason = bounce.cancelReason;
+          finalText = bounce.finalText;
+          break;
+        }
         continue;
       }
 
       const validationError = toolRegistry.validateInputs(toolCall.toolId, toolCall.inputs);
       if (validationError) {
-        const result: ToolCallResult = {
-          toolCallId: toolCall.toolCallId,
-          toolId: toolCall.toolId,
-          result: null,
-          success: false,
-          error: validationError,
-        };
-        llmMessages.push(buildToolResultMessage(result));
-        recordRejectedToolCall(localProgress, toolCallLog, toolCall, validationError);
+        const bounce = bounceRejectedToolCall(
+          { toolCallRecords, llmMessages, toolCallLog, localProgress, stepsUsed, hasInterveningMutation, readLoopNudges },
+          toolCall,
+          toolDef,
+          validationError,
+        );
+        readLoopNudges = bounce.readLoopNudges;
+        if (bounce.kind === "stop") {
+          cancelled = true;
+          cancelReason = bounce.cancelReason;
+          finalText = bounce.finalText;
+          break;
+        }
         continue;
       }
 
@@ -6897,6 +7351,11 @@ async function resumeAgentLoopV2Inner(
         localProgress.emit({ type: "status", summary: failedHonestly });
         break;
       }
+
+      // P0 F2: patch-recovery fallback marking (see
+      // markPatchRecoveryOverwrite) — before the permission check,
+      // exactly as in the initial segment.
+      markPatchRecoveryOverwrite(toolCall, patchRecoveryAttempts);
 
       const permInfo = toPermissionInfo(toolDef);
       const permResult = permissionEngine.check(permInfo, toolCall.inputs, cfg.executionMode, availableCapabilities);
@@ -6969,6 +7428,42 @@ async function resumeAgentLoopV2Inner(
           durationMs: 0,
         });
         continue;
+      }
+
+      // P0 F2: pre-approval write validation (shared per-call path —
+      // see runPreApprovalWriteValidation). This segment previously
+      // had NONE: after an approval pause, a files.write that trips
+      // the overwrite gate went straight to the handler and killed
+      // the resumed run post-approval (production run 8efba402). Now
+      // it bounces here with the same recovery feedback as before the
+      // pause — before any checkpoint or nested approval card.
+      if (permResult.allowed) {
+        const writeOutcome = await runPreApprovalWriteValidation(
+          {
+            transport,
+            llmMessages,
+            toolCallLog,
+            localProgress,
+            writeRecoveryAttempts: patchRecoveryAttempts,
+            packRepairAttempts,
+            topicPackCtx,
+            notePendingRejection: (rejection) => {
+              if (rejection.toolId === "apply_patch") {
+                pendingPatchRejection = { path: rejection.path, error: rejection.error };
+              } else if (rejection.toolId === "files.write") {
+                pendingWriteRejection = rejection;
+              }
+            },
+          },
+          toolCall,
+        );
+        if (writeOutcome.kind === "bounced") continue;
+        if (writeOutcome.kind === "stop") {
+          cancelled = true;
+          cancelReason = writeOutcome.cancelReason;
+          finalText = writeOutcome.finalText;
+          break;
+        }
       }
 
       // Create the pre-mutation checkpoint BEFORE the approval gate, ahead of
@@ -7718,9 +8213,16 @@ async function resumeAgentLoopV2Inner(
   if (workspaceChange) {
     localProgress.emit({ type: "workspace_change", ...workspaceChange });
   }
-  const buildVerificationFailure = cfg.buildCapabilityGuard && !cancelled && !failedHonestly
+  const unverifiedBuild = cfg.buildCapabilityGuard && !cancelled && !failedHonestly
     ? unverifiedBuildMessage(workspaceChange)
     : undefined;
+  // P0 F1: identical stand-down to the initial loop — a verifiably
+  // landed write plus only bounced read-only failures is not an
+  // unverified build (see onlyBouncedReadOnlyFailures).
+  const buildVerificationFailure =
+    unverifiedBuild && hasLandedBuildWrite(toolCallLog) && onlyBouncedReadOnlyFailures(toolCallLog)
+      ? undefined
+      : unverifiedBuild;
   if (buildVerificationFailure) failedHonestly = buildVerificationFailure;
   // Round 11: settle from the run's evidence (run-settlement.ts) —
   // identical rule to the initial loop. The lion proof's failed run was

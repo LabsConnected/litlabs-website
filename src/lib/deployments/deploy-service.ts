@@ -26,7 +26,7 @@
  *   silently deploying the wrong thing.
  */
 
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import {
   validateArtifact,
@@ -91,6 +91,13 @@ export interface DeploymentRecord {
   errorClass: string | null;
   errorMessage: string | null;
   /**
+   * Per-publish verification token. While the deployment is `deploying`,
+   * the serving read answers only requests carrying this token, so the
+   * deploy service can verify the live URL BEFORE the row is marked
+   * ready. Optional — absent on records built before the column existed.
+   */
+  verificationToken?: string | null;
+  /**
    * External provider's site identifier for non-LiTT targets (e.g. the
    * Netlify site id when target is "netlify"). Null for LiTT Hosting
    * deployments. Lets a re-deploy update the SAME external site instead
@@ -111,6 +118,7 @@ export interface DeploymentCreateInput {
   target: string;
   contentHash?: string | null;
   externalSiteId?: string | null;
+  verificationToken?: string | null;
 }
 
 export interface DeploymentStore {
@@ -121,6 +129,24 @@ export interface DeploymentStore {
    * instead of publishing twice.
    */
   findInFlightByContentHash(projectId: string, contentHash: string): Promise<DeploymentRecord | null>;
+  /**
+   * Newest FAILED deployment for this project+content. Optional: stores
+   * that implement it let a same-content retry REPAIR the failed row
+   * instead of minting a second row for the same logical publish.
+   */
+  findFailedByContentHash?(projectId: string, contentHash: string): Promise<DeploymentRecord | null>;
+  /**
+   * Read one file of a deployment's stored snapshot through the same
+   * gate the public serving route uses. Optional: when present, the
+   * deploy service verifies the artifact reads back from storage (with
+   * the verification token while `deploying`) before it verifies the
+   * public URL. Stores without it get HTTP verification only.
+   */
+  readPublishedFile?(
+    deploymentId: string,
+    path: string,
+    options?: { verificationToken?: string | null },
+  ): Promise<{ content: string; contentType: string; encoding?: string | null } | null>;
   findById(id: string): Promise<DeploymentRecord | null>;
   create(input: DeploymentCreateInput): Promise<DeploymentRecord>;
   update(id: string, patch: Partial<DeploymentRecord>): Promise<DeploymentRecord>;
@@ -313,14 +339,144 @@ export async function waitForDeploymentResolved(
   }
 }
 
+/** Header carrying the per-publish verification token to the serving route. */
+export const DEPLOY_VERIFICATION_HEADER = "x-litt-deploy-verification";
+
+// Bounded verification retries with backoff. The old flow verified with
+// ONE fetch issued immediately after the status flip: any transient
+// 404/503 — a file row or status not yet visible to the serving
+// process — permanently failed a deployment whose artifact was fully
+// stored (the six 2026-09-13 publishes). Six attempts over ~15 s ride
+// out the propagation window; only a failure that outlives the whole
+// window is recorded, classified temporary ("unavailable") or
+// permanent according to what actually failed (see the classifier).
+const VERIFY_DELAYS_MS = [500, 1000, 2000, 4000, 8000] as const;
+
+// LITT_DEPLOY_VERIFY_DELAYS_MS (comma-separated ms) substitutes the
+// ladder — for tests that must exercise the full retry path without
+// sleeping for real seconds. Production uses the ladder above.
+function verificationDelays(): readonly number[] {
+  const raw = process.env.LITT_DEPLOY_VERIFY_DELAYS_MS;
+  if (!raw) return VERIFY_DELAYS_MS;
+  const parsed = raw.split(",").map((s) => Number(s.trim())).filter((n) => Number.isFinite(n) && n >= 0);
+  return parsed.length > 0 ? parsed : VERIFY_DELAYS_MS;
+}
+
+type VerificationOutcome =
+  | { ok: true }
+  | { ok: false; errorClass: string; message: string; retryable: boolean };
+
+/**
+ * Verify a `deploying` deployment is actually servable, with bounded
+ * retries. Two phases per attempt:
+ *
+ *   1. Artifact read-back — the stored index.html must read back
+ *      through the serving gate (token-authorized while `deploying`).
+ *      This is the "actual artifact" half of verification: it proves
+ *      the snapshot persisted, not just that some URL answers.
+ *   2. Serving check — the public URL must answer 2xx to a request
+ *      carrying the verification token. The serving route answers a
+ *      `deploying` deployment ONLY to that token, so the deployment is
+ *      never publicly servable as `ready` before it is verified, and
+ *      the row flips to `ready` only after this returns ok.
+ *
+ * A store read that still finds no artifact on the FINAL attempt is a
+ * permanent failure (the write did not land — class "validation",
+ * not retryable, never "unknown"). Serving failures that outlive the
+ * window keep their described class ("unavailable" for a URL that
+ * never answered, transport for network errors) and stay retryable:
+ * the artifact exists, so a later publish attempt can succeed — and
+ * now repairs this same row instead of minting a second one.
+ */
+async function verifyDeploymentServing(args: {
+  store: DeploymentStore;
+  deploymentId: string;
+  publicUrl: string;
+  fetchImpl: typeof fetch;
+  verificationToken: string;
+}): Promise<VerificationOutcome> {
+  const { store, deploymentId, publicUrl, fetchImpl, verificationToken } = args;
+  const delays = verificationDelays();
+  let lastFailure: VerificationOutcome & { ok: false } = {
+    ok: false,
+    errorClass: "unavailable",
+    message: `Deployment verification failed: ${publicUrl} is not reachable.`,
+    retryable: true,
+  };
+
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    if (attempt > 0) await deploySleep(delays[attempt - 1]);
+
+    // Phase 1 — artifact read-back (when the store supports it).
+    if (store.readPublishedFile) {
+      let stored: Awaited<ReturnType<NonNullable<DeploymentStore["readPublishedFile"]>>>;
+      try {
+        stored = await store.readPublishedFile(deploymentId, "index.html", { verificationToken });
+      } catch (err) {
+        const described = describeDeploymentFailure(err);
+        lastFailure = { ok: false, ...described };
+        continue;
+      }
+      if (!stored) {
+        lastFailure = {
+          ok: false,
+          errorClass: "validation",
+          message:
+            "Deployment verification failed: the published files could not be read back " +
+            "from storage, so the deployment cannot be served.",
+          retryable: false,
+        };
+        continue;
+      }
+    }
+
+    // Phase 2 — serving check over HTTP, token-gated.
+    let response: Response;
+    try {
+      response = await fetchImpl(publicUrl, {
+        method: "GET",
+        redirect: "follow",
+        headers: { [DEPLOY_VERIFICATION_HEADER]: verificationToken },
+      });
+    } catch (err) {
+      const described = describeDeploymentFailure(err);
+      lastFailure = { ok: false, ...described };
+      continue;
+    }
+    if (response.ok) return { ok: true };
+
+    const described = describeDeploymentFailure(
+      new Error(
+        `Deployment verification failed: ${publicUrl} is not reachable (HTTP ${response.status}).`,
+      ),
+    );
+    lastFailure = { ok: false, ...described };
+  }
+
+  return lastFailure;
+}
+
 /**
  * Deploy the user's project and return a verified public URL.
  *
- * Ordering is deliberate: the row is marked ready BEFORE the public URL is
- * fetched because the serving route only answers `ready` deployments — the
- * fetch is what proves the URL actually serves. Success is still claimed
- * only after that fetch returns 2xx; a failed fetch reverts the row to
- * `failed` so it stops serving and is never reported as live.
+ * Ordering is deliberate, and each step exists because of a recorded
+ * production failure:
+ *
+ *   1. Everything fallible that does not need the deployment row —
+ *      hosting configuration, artifact validation, publish gates, and
+ *      the hosting base-URL resolution (a live infrastructure call) —
+ *      completes BEFORE any write. A resolution failure (the
+ *      2026-11-04 "Not Authorized" publishes) therefore leaves no
+ *      deployment row and no stored files behind, instead of a failed
+ *      row claiming file_count 0 over files that were in fact stored.
+ *   2. Files are stored and the row moves to `deploying` with its
+ *      public URL and true file counts.
+ *   3. The deployment is verified WHILE `deploying`: the serving route
+ *      answers it only to this publish's verification token, so
+ *      unverified content is never publicly servable as `ready`, and
+ *      verification runs with bounded retries instead of one immediate
+ *      fetch (the 2026-09-13 race).
+ *   4. Only a verified deployment flips to `ready` (+ urlVerified).
  */
 /**
  * Record a dedupe-reused publish as the project's newest publish
@@ -473,20 +629,80 @@ export async function deployUserProject(
     }
   }
 
-  // ── Create the deployment and store the snapshot ──
-  let record: DeploymentRecord;
+  // ── Resolve the live URL BEFORE any write ──
+  // The URL comes from the actual infrastructure (never caller input,
+  // never a guess), and resolving it is a live infrastructure call that
+  // can fail — on 2026-11-04 the provider answered "Not Authorized".
+  // It used to run AFTER the files were stored but BEFORE the update
+  // that sets fileCount/publicUrl, so its failure left stored files
+  // under a failed row claiming file_count 0 and no URL. Resolved here
+  // — after the dedupe reads, before the first write — its failure
+  // leaves no deployment row and no stored files behind.
+  let baseUrl: string;
   try {
-    record = await store.create({
-      userId,
-      projectId,
-      workspaceId: transport.workspaceId,
-      status: "building",
-      target: DEPLOY_TARGET,
-      contentHash,
-    });
+    baseUrl = (await hosting.resolveBaseUrl()).replace(/\/+$/, "");
   } catch (err) {
     return failure(null, err);
   }
+
+  // ── Failed-publish repair ──
+  // A same-content retry after a FAILED publish is the same logical
+  // publish: repair the failed row (fresh verification token, cleared
+  // error, snapshot rewritten by putFiles below, restamped as the
+  // newest publish event) instead of minting a second row. Skipped
+  // when an in-flight deployment was found above and fell through —
+  // that row is a concurrent attempt, and falling through to a fresh
+  // deploy there is the established behavior. Only the owner's own
+  // row is ever repaired, and only ever the newest failed one.
+  const verificationToken = randomBytes(24).toString("base64url");
+  let record: DeploymentRecord | null = null;
+  let repairing = false;
+  if (!inFlight && store.findFailedByContentHash) {
+    let failedRow: DeploymentRecord | null = null;
+    try {
+      failedRow = await store.findFailedByContentHash(projectId, contentHash);
+    } catch {
+      // A lookup failure must not block the publish — fall through to
+      // a fresh create, exactly as if no failed row existed.
+    }
+    if (failedRow && failedRow.userId === userId) {
+      try {
+        record = await store.update(failedRow.id, {
+          status: "building",
+          verificationToken,
+          publicUrl: null,
+          urlVerified: false,
+          fileCount: 0,
+          totalBytes: 0,
+          errorClass: null,
+          errorMessage: null,
+          createdAt: new Date().toISOString(),
+        });
+        repairing = true;
+      } catch {
+        record = null;
+      }
+    }
+  }
+
+  // ── Create the deployment and store the snapshot ──
+  if (!record) {
+    try {
+      record = await store.create({
+        userId,
+        projectId,
+        workspaceId: transport.workspaceId,
+        status: "building",
+        target: DEPLOY_TARGET,
+        contentHash,
+        verificationToken,
+      });
+    } catch (err) {
+      return failure(null, err);
+    }
+  }
+
+  const publicUrl = `${baseUrl}/sites/${record.id}/`;
 
   try {
     await store.putFiles(
@@ -500,32 +716,6 @@ export async function deployUserProject(
       })),
     );
 
-    // ── Resolve the live URL from LiTT Hosting's infrastructure ──
-    // The URL comes from the actual infrastructure (never caller input,
-    // never a guess). A resolution failure marks the deployment failed
-    // with the REAL infrastructure error — never a fake URL.
-    let publicUrl: string;
-    try {
-      const baseUrl = await hosting.resolveBaseUrl();
-      publicUrl = `${baseUrl.replace(/\/+$/, "")}/sites/${record.id}/`;
-    } catch (err) {
-      const described = describeDeploymentFailure(err);
-      await store.update(record.id, {
-        status: "failed",
-        errorClass: described.errorClass,
-        errorMessage: described.message,
-      });
-      return {
-        ok: false,
-        deploymentId: record.id,
-        status: "failed",
-        publicUrl: null,
-        errorClass: described.errorClass,
-        message: described.message,
-        retryable: described.retryable,
-      };
-    }
-
     await store.update(record.id, {
       status: "deploying",
       publicUrl,
@@ -533,49 +723,38 @@ export async function deployUserProject(
       totalBytes: validation.totalBytes,
     });
 
-    // The serving route only answers `ready` rows — publish before the
-    // live-URL check or the fetch can never observe the site. A failed
-    // fetch below reverts the row to `failed`.
-    await store.update(record.id, { status: "ready" });
-
-    // ── Verify the live URL before claiming success ──
-    let response: Response;
-    try {
-      response = await fetchImpl(publicUrl, { method: "GET", redirect: "follow" });
-    } catch (err) {
+    // ── Verify BEFORE the deployment is marked ready ──
+    // The serving route answers this `deploying` deployment only to
+    // the verification token, so the public URL is proven servable
+    // (and the artifact proven readable from storage) while nothing
+    // unverified is publicly live. Bounded retries ride out the
+    // propagation window that killed the 2026-09-13 publishes.
+    const verification = await verifyDeploymentServing({
+      store,
+      deploymentId: record.id,
+      publicUrl,
+      fetchImpl,
+      verificationToken,
+    });
+    if (!verification.ok) {
       await store.update(record.id, {
         status: "failed",
         urlVerified: false,
-        errorClass: "transport",
-        errorMessage: describeDeploymentFailure(err).message,
-      });
-      return failure(record.id, err);
-    }
-
-    if (!response.ok) {
-      const err = new Error(
-        `Deployment verification failed: ${publicUrl} is not reachable (HTTP ${response.status}).`,
-      );
-      const described = describeDeploymentFailure(err);
-      await store.update(record.id, {
-        status: "failed",
-        urlVerified: false,
-        errorClass: described.errorClass,
-        errorMessage: described.message,
+        errorClass: verification.errorClass,
+        errorMessage: verification.message,
       });
       return {
         ok: false,
         deploymentId: record.id,
         status: "failed",
         publicUrl: null,
-        errorClass: described.errorClass,
-        message: described.message,
-        // A 5xx may pass on retry; a 4xx will not.
-        retryable: response.status >= 500,
+        errorClass: verification.errorClass,
+        message: verification.message,
+        retryable: verification.retryable,
       };
     }
 
-    await store.update(record.id, { urlVerified: true });
+    await store.update(record.id, { status: "ready", urlVerified: true });
 
     return {
       ok: true,
@@ -588,7 +767,7 @@ export async function deployUserProject(
       workspaceId: transport.workspaceId,
       fileCount: validation.files.length,
       totalBytes: validation.totalBytes,
-      reused: false,
+      reused: repairing,
     };
   } catch (err) {
     const described = describeDeploymentFailure(err);

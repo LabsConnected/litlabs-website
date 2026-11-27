@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
  * the latest ready snapshot first. Both keep working.
  */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ deploymentId: string; path?: string[] }> },
 ) {
   const { deploymentId, path } = await params;
@@ -37,5 +37,10 @@ export async function GET(
     deploymentId,
     mountBase: `/sites/${deploymentId}`,
     requestPath,
+    // The deploy service's verification request carries the deployment's
+    // per-publish token so a `deploying` deployment can be verified
+    // before it is marked ready; ordinary visitors never send it and
+    // are served exactly as before (ready deployments only).
+    verificationToken: request.headers.get("x-litt-deploy-verification"),
   });
 }

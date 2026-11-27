@@ -331,6 +331,14 @@ defineAction({
   argsSchema: z.object({
     selector: z.string().optional().describe("CSS selector (NOT supported by the snapshot backend)"),
   }),
+  // The handler's own correction, surfaced when schema validation
+  // refuses the call before the handler can teach it (a non-string
+  // selector never reaches the execute below).
+  validationHint: (args) =>
+    args.selector !== undefined
+      ? "preview.inspect does not support selector-scoped inspection: the browser.snapshot backend " +
+        "returns the full page's visible text. Call without a selector."
+      : undefined,
   resultType: stationResultSchema,
   mutating: false,
   execute: async (args, ctx): Promise<StationResult> => {
@@ -365,6 +373,11 @@ defineAction({
   argsSchema: z.object({
     fullPage: z.boolean().optional().describe("Full-page capture (NOT supported by the backend)"),
   }),
+  validationHint: (args) =>
+    args.fullPage !== undefined
+      ? "preview.screenshot does not support fullPage: the backend captures the viewport only. " +
+        "Call without fullPage."
+      : undefined,
   resultType: stationResultSchema,
   mutating: false,
   execute: async (args, ctx): Promise<StationResult> => {

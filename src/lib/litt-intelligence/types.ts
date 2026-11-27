@@ -299,6 +299,16 @@ export interface LiTTToolDefinition {
   idempotent: boolean;
   readOnly: boolean;
   enabled: boolean;
+  /**
+   * Optional model-facing correction guidance for an input-validation
+   * bounce. The loop's schema check refuses a malformed call before the
+   * tool can run, so the correction the tool itself would have taught
+   * (e.g. preview.inspect's "Call without a selector") never reaches the
+   * model. When this returns a string for the refused inputs, the loop
+   * appends it to the validation error fed back as the tool result —
+   * the tool's own words, surfaced through the existing result channel.
+   */
+  validationHint?: (inputs: Record<string, unknown>) => string | undefined;
 }
 
 // ─── Action Loop ────────────────────────────────────────────────

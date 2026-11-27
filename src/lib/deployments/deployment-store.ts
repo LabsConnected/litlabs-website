@@ -38,6 +38,8 @@ interface DeploymentRow {
   error_message: string | null;
   /** Added by the netlify_deployment_external_site migration; absent on older rows/DBs. */
   external_site_id?: string | null;
+  /** Added by the deployment_verification_token migration; absent on older rows/DBs. */
+  verification_token?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -58,6 +60,7 @@ function rowToRecord(row: DeploymentRow): DeploymentRecord {
     errorClass: row.error_class,
     errorMessage: row.error_message,
     externalSiteId: row.external_site_id ?? null,
+    verificationToken: row.verification_token ?? null,
     createdAt: row.created_at ?? null,
     updatedAt: row.updated_at ?? null,
   };
@@ -75,6 +78,7 @@ function patchToRow(patch: Partial<DeploymentRecord>): Record<string, unknown> {
   if (patch.errorClass !== undefined) row.error_class = patch.errorClass;
   if (patch.errorMessage !== undefined) row.error_message = patch.errorMessage;
   if (patch.externalSiteId !== undefined) row.external_site_id = patch.externalSiteId;
+  if (patch.verificationToken !== undefined) row.verification_token = patch.verificationToken;
   // created_at is the publish-event stamp every "newest publish"
   // lookup orders by. Its one legitimate rewrite is the republish
   // restamp: when a deploy REUSES an existing deployment (identical
@@ -122,6 +126,28 @@ export const supabaseDeploymentStore: DeploymentStore = {
     return data ? rowToRecord(data as DeploymentRow) : null;
   },
 
+  async findFailedByContentHash(projectId, contentHash) {
+    const db = requireDb();
+    const { data, error } = await db
+      .from(TABLE)
+      .select("*")
+      .eq("project_id", projectId)
+      .eq("content_hash", contentHash)
+      .eq("status", "failed")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(`Deployment lookup failed: ${error.message}`);
+    return data ? rowToRecord(data as DeploymentRow) : null;
+  },
+
+  // The deploy service's artifact read-back verification rides the same
+  // read path the public route uses (readPublishedFile below), so what
+  // the verifier can read is exactly what a visitor would be served.
+  async readPublishedFile(deploymentId, path, options) {
+    return readPublishedFile(deploymentId, path, options);
+  },
+
   async findById(id) {
     const db = requireDb();
     const { data, error } = await db
@@ -143,16 +169,22 @@ export const supabaseDeploymentStore: DeploymentStore = {
       target: input.target,
       content_hash: input.contentHash ?? null,
     };
-    const withSite =
-      input.externalSiteId != null
-        ? { ...baseRow, external_site_id: input.externalSiteId }
-        : baseRow;
-    const { data, error } = await db.from(TABLE).insert(withSite).select().single();
-    if (error?.code === "PGRST204" && input.externalSiteId != null) {
-      // The external_site_id migration may not be applied yet — retry
-      // without it (same precedent as putFiles' encoding retry). The
-      // deployment proceeds; the site id simply isn't persisted, and the
-      // Netlify adapter's deterministic name lookup still finds the site.
+    let fullRow: Record<string, unknown> = baseRow;
+    if (input.externalSiteId != null) {
+      fullRow = { ...fullRow, external_site_id: input.externalSiteId };
+    }
+    if (input.verificationToken != null) {
+      fullRow = { ...fullRow, verification_token: input.verificationToken };
+    }
+    const { data, error } = await db.from(TABLE).insert(fullRow).select().single();
+    if (error?.code === "PGRST204" && fullRow !== baseRow) {
+      // A newer optional column's migration may not be applied yet —
+      // retry without it (same precedent as putFiles' encoding retry).
+      // The deployment proceeds; the column simply isn't persisted (a
+      // missing verification token means the token gate never opens and
+      // verification falls back to polling the store read, and the
+      // Netlify adapter's deterministic name lookup still finds a site
+      // whose id wasn't persisted).
       const { data: retryData, error: retryError } = await db
         .from(TABLE)
         .insert(baseRow)
@@ -223,6 +255,18 @@ export interface PublishedFile {
  *
  * Only `ready` deployments serve: a building/deploying/failed deployment has
  * no business answering public requests.
+ *
+ * ONE exception, and it is the break in the old ready-before-verify
+ * circle: a `deploying` deployment serves to a request carrying that
+ * deployment's own per-publish verification token. The deploy service
+ * verifies the live URL BEFORE flipping the row to `ready`; without
+ * this gate the verifier's fetch could only succeed by marking the
+ * deployment ready first — publicly serving unverified content and
+ * letting one transient fetch failure stamp it permanently failed
+ * (the 2026-09-13 publishes). The token is minted per publish, stored
+ * on the row, and never accepted for any other status; without it a
+ * `deploying` deployment answers exactly what it answered before:
+ * nothing.
  */
 // Bounded retries on transient store errors — a PostgREST blip seconds
 // after deploy must not surface as a public 503/404 for an asset that
@@ -266,16 +310,32 @@ async function readWithRetries<R extends { error: unknown }>(
 export async function readPublishedFile(
   deploymentId: string,
   path: string,
+  options?: { verificationToken?: string | null },
 ): Promise<PublishedFile | null> {
   if (!supabaseAdmin) return null;
 
-  const { data: deployment, error: deploymentError } = await readWithRetries(() =>
-    supabaseAdmin
+  // Two literal selects — the verification_token column may not be
+  // applied yet (its migration lands with this change, but code and
+  // migration can arrive in either order). PostgREST surfaces a
+  // missing select column as PGRST204 / 42703; both mean exactly "the
+  // column is absent", in which case the token gate simply never
+  // opens — the safe direction.
+  const readDeploymentRow = async () => {
+    const withToken = await supabaseAdmin
       .from(TABLE)
-      .select("id,status")
+      .select("id,status,verification_token")
       .eq("id", deploymentId)
-      .maybeSingle(),
-  );
+      .maybeSingle();
+    if (withToken.error?.code === "PGRST204" || withToken.error?.code === "42703") {
+      return supabaseAdmin
+        .from(TABLE)
+        .select("id,status")
+        .eq("id", deploymentId)
+        .maybeSingle();
+    }
+    return withToken;
+  };
+  const { data: deployment, error: deploymentError } = await readWithRetries(readDeploymentRow);
   if (deploymentError) {
     // A non-UUID deploymentId cannot match the uuid primary key — Postgres
     // raises 22P02 (invalid_text_representation). That is a malformed
@@ -291,7 +351,22 @@ export async function readPublishedFile(
     throw new Error(`Deployment lookup failed: ${deploymentError.message}`);
   }
   if (!deployment) return null;
-  if ((deployment as { status: string }).status !== "ready") return null;
+  const deploymentRow = deployment as { status: string; verification_token?: string | null };
+  if (deploymentRow.status !== "ready") {
+    // Verification-pending exception (see the doc comment above): only
+    // `deploying`, only with this deployment's own token. Every other
+    // non-ready status — and every tokenless or wrong-token request —
+    // serves nothing, exactly as before.
+    const presented = options?.verificationToken;
+    const authorized =
+      deploymentRow.status === "deploying" &&
+      typeof presented === "string" &&
+      presented.length > 0 &&
+      typeof deploymentRow.verification_token === "string" &&
+      deploymentRow.verification_token.length > 0 &&
+      presented === deploymentRow.verification_token;
+    if (!authorized) return null;
+  }
 
   // Two literal selects — PostgREST's type-level parser needs the literal
   // column string, a dynamic one degrades to ParserError.

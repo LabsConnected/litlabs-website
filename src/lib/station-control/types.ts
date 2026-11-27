@@ -82,6 +82,15 @@ export interface StationAction<Args extends z.ZodType = z.ZodType, Result = unkn
   resultType: z.ZodType<Result>;
   mutating: boolean;
   requiresApproval?: boolean;
+  /**
+   * Model-facing correction guidance surfaced when a call's arguments
+   * are refused by schema validation before this action can run — the
+   * loop appends it to the validation error it feeds back, so an
+   * unsupported-argument correction the action itself teaches (e.g.
+   * "Call without a selector") survives the interception. Copied onto
+   * the advertised LiTTToolDefinition.validationHint.
+   */
+  validationHint?: (args: Record<string, unknown>) => string | undefined;
   execute: (args: z.infer<Args>, ctx: StationExecutionContext) => Promise<Result>;
 }
 
