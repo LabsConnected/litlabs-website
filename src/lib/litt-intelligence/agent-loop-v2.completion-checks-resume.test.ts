@@ -85,6 +85,17 @@ vi.mock("@/lib/projects/project-checks", () => {
       `Note: the automatic checks ran for this build, but their results could not be ` +
       `saved — the Checks panel and the Jobs tab will show them as not run. You can ` +
       `run the checks again from the Checks panel.`,
+    completionChecksNotConfiguredNote: () =>
+      `IMPORTANT — the automatic checks ran for this build, but none of them are ` +
+      `configured for this project (it has no build, test, lint or audit scripts, ` +
+      `and no configured equivalents for the rest), so nothing actually verified ` +
+      `the finished site. Treat this build as unchecked: the Checks panel and the ` +
+      `Jobs tab show every check as "Not configured" with the run's time, and the ` +
+      `checks will run for real once the project has scripts configured.`,
+    completionChecksPartiallyNotConfiguredNote: (notConfigured: Array<{ label: string }>) =>
+      `Note: some automatic checks are not configured for this project and did not ` +
+      `run: ${notConfigured.map((c) => c.label).join(", ")}. The checks that did run passed — their results are in the ` +
+      `Checks panel and the Jobs tab.`,
     completionChecksUnavailableNotSavedNote: (reason: string) =>
       `IMPORTANT — the automatic checks did NOT run for this build: ${reason}. ` +
       `Nothing verified the finished site, so treat this build as unchecked — and ` +

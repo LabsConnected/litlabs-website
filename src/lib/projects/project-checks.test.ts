@@ -65,7 +65,9 @@ vi.mock("@/lib/terminal-config", () => ({
 import {
   ProjectChecksUnavailableError,
   completionChecksFailureMessage,
+  completionChecksNotConfiguredNote,
   completionChecksNotSavedNote,
+  completionChecksPartiallyNotConfiguredNote,
   completionChecksUnavailableNotSavedNote,
   completionChecksUnavailableNote,
   getLatestProjectCheckRun,
@@ -326,5 +328,28 @@ describe("checks note truthfulness (ACC-09)", () => {
     expect(note).toContain("could not be recorded");
     expect(note).toContain("as not run");
     expect(note).not.toContain("shows the checks as unavailable");
+  });
+});
+
+describe("not-configured notes (ACC-10 Defect 1)", () => {
+  it("the all-not-configured note is loud, admits nothing verified the site, and points at the panels that hold the persisted set", () => {
+    const note = completionChecksNotConfiguredNote();
+    expect(note).toContain("IMPORTANT");
+    expect(note).toContain("none of them are configured");
+    expect(note).toContain("nothing actually verified");
+    // The set WAS persisted in this path, so pointing at the panels
+    // is truthful — unlike the ACC-09 not-saved case.
+    expect(note).toContain("Checks panel and the Jobs tab");
+    expect(note).toContain("Not configured");
+  });
+
+  it("the partial note names exactly the checks that did not run", () => {
+    const note = completionChecksPartiallyNotConfiguredNote([
+      { id: "accessibility", label: "Accessibility" } as never,
+      { id: "performance", label: "Performance" } as never,
+    ]);
+    expect(note).toContain("Accessibility, Performance");
+    expect(note).toContain("did not run");
+    expect(note).not.toContain("IMPORTANT");
   });
 });

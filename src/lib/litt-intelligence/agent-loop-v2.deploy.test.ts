@@ -274,6 +274,51 @@ describe("B. a build with no deploy call leaves no deployment evidence", () => {
   });
 });
 
+/* ── Case ACC-10: a build run must not deploy uninvited ─────────── */
+
+describe("ACC-10 Defect 2 — a run whose instruction never asked to deploy cannot deploy", () => {
+  it("refuses a project.deploy call chained onto a build ask — no approval, no execution", async () => {
+    execute.mockResolvedValue({ ok: true, result: { success: true, path: "index.html" } });
+    callLLMWithTools
+      .mockResolvedValueOnce({
+        text: "Writing the page.",
+        toolCalls: [{ toolCallId: "c1", toolId: "files.write", inputs: { path: "index.html", content: "<h1>hi</h1>" } }],
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "Now I will publish it.",
+        toolCalls: [{ toolCallId: "c2", toolId: "project.deploy", inputs: { projectId: "proj_ember" } }],
+        model: "test-model",
+      })
+      .mockResolvedValueOnce({ text: "Built the page.", toolCalls: [], model: "test-model" });
+
+    const result = await runAgentLoopV2("build a landing page", transport(), config);
+
+    // The deploy never executed and never became an approval card.
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.pendingApproval).toBeUndefined();
+    const refusal = result.toolCalls.find((t) => t.toolId === "project.deploy");
+    expect(refusal?.success).toBe(false);
+    expect(refusal?.summary).toMatch(/did not ask to deploy/i);
+    // The build itself stands, reported as built — not published.
+    expect(result.toolCalls.map((c) => c.toolId)).toContain("files.write");
+    expect(result.finalText).toBe("Built the page.");
+  });
+
+  it("still deploys when the instruction asks for it alongside content work", async () => {
+    callLLMWithTools.mockResolvedValueOnce({
+      text: "",
+      toolCalls: [{ toolCallId: "c1", toolId: "project.deploy", inputs: { projectId: "proj_ember" } }],
+      model: "test-model",
+    });
+
+    const result = await runAgentLoopV2("build a landing page and deploy it", transport(), config);
+
+    // Mixed ask: deploy keeps its own approval gate, exactly as before.
+    expect(result.pendingApproval?.toolId).toBe("project.deploy");
+  });
+});
+
 /* ── Case I: provider dies AFTER a successful deployment ─────────── */
 
 describe("I. a provider failure after deployment neither repeats nor loses it", () => {

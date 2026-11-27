@@ -33,8 +33,9 @@ import { computeWorkspaceChange, workspaceChangeFromVolumeListing, workspaceChan
 import { checkRequestedLiteral, requestedLiteralFailureMessage, requestedLiteralRepairPrompt } from "./requested-literal";
 import { checkTextContrast, textContrastFailureMessage, textContrastRepairPrompt, textContrastUnverifiableNote } from "./text-contrast";
 import { checkRenderedLayout, renderedLayoutFailureMessage, renderedLayoutRepairPrompt } from "./rendered-layout";
+import { checkSiteQuality, siteQualityFailureMessage } from "./site-quality";
 import { studioLog } from "@/lib/studio/logger";
-import { DEPLOY_ONLY_PROMPT_NOTE, deployOnlyRefusalError, isBlockedInDeployOnlyRun, isDeployOnlyInstruction } from "./deploy-intent";
+import { DEPLOY_ONLY_PROMPT_NOTE, NO_DEPLOY_PROMPT_NOTE, deployOnlyRefusalError, instructionRequestsDeploy, isBlockedInDeployOnlyRun, isDeployOnlyInstruction, isDeployTool, noDeployRefusalError } from "./deploy-intent";
 import { settleRunOutcome, type RunFailureContributor } from "./run-settlement";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { recordModelFailure } from "./provider-registry";
@@ -1427,6 +1428,8 @@ async function runCompletionChecks(opts: {
     completionChecksUnavailableNote,
     completionChecksUnavailableNotSavedNote,
     completionChecksNotSavedNote,
+    completionChecksNotConfiguredNote,
+    completionChecksPartiallyNotConfiguredNote,
     unavailableCheckSet,
     unavailableCheckSetFromError,
     ProjectChecksUnavailableError,
@@ -1469,6 +1472,23 @@ async function runCompletionChecks(opts: {
     const failed = outcome.checks.filter((c) => c.status === "failed");
     if (failed.length > 0) {
       return { failureMessage: completionChecksFailureMessage(failed) };
+    }
+    // ACC-10 Defect 1: a persisted set where nothing actually ran —
+    // every check "not configured" (a script-less project) — used to
+    // fall through to a silent clean return, so the closing message
+    // said nothing about checks and the build read as verified
+    // (Acceptance Run 1 on 4adcdd4c). Under Larry's ACC-08 ruling the
+    // build still counts, but the absence of verification is LOUD.
+    // The partial case (some passed, some not configured) names the
+    // checks that did not run.
+    const notConfigured = outcome.checks.filter((c) => c.status === "not_configured");
+    if (notConfigured.length > 0 && notConfigured.length === outcome.checks.length) {
+      studioLog(`agent-loop:completion_checks_not_configured:${opts.loop}`, { projectId });
+      return { note: completionChecksNotConfiguredNote() };
+    }
+    if (notConfigured.length > 0 && outcome.summary.passed > 0) {
+      studioLog(`agent-loop:completion_checks_partially_not_configured:${opts.loop}`, { projectId });
+      return { note: completionChecksPartiallyNotConfiguredNote(notConfigured) };
     }
     return {};
   } catch (error) {
@@ -2657,11 +2677,25 @@ async function runAgentLoopV2Inner(
   // by hand — the hand-picked list left files.delete / files.rename
   // executable in a deploy (Greptile, PR #1108).
   const deployOnlyRun = isDeployOnlyInstruction(userMessage);
+  // ACC-10 Defect 2 — the mirror line: a run whose instruction never
+  // asks to deploy/publish offers no deploy tools at all. Acceptance
+  // Run 1 on 4adcdd4c: a build ask ("Build a website for a bakery…")
+  // chained an uninvited project.deploy after the build — separate
+  // approval, separate charge, site live before the user ever asked.
+  // Any deploy wording in the instruction (even mixed with content
+  // work) leaves deploy available exactly as before; only its total
+  // absence closes the gate.
+  const deployNotRequested = !deployOnlyRun && !instructionRequestsDeploy(userMessage);
   const offeredTools = deployOnlyRun
     ? offerableTools.filter((t) => !isBlockedInDeployOnlyRun(t))
-    : offerableTools;
+    : deployNotRequested
+      ? offerableTools.filter((t) => !isDeployTool(t))
+      : offerableTools;
   if (deployOnlyRun) {
     cfg.systemPrompt += "\n\n" + DEPLOY_ONLY_PROMPT_NOTE;
+  }
+  if (deployNotRequested) {
+    cfg.systemPrompt += "\n\n" + NO_DEPLOY_PROMPT_NOTE;
   }
 
   // ── Observability: record what the model was offered (Part J) ──
@@ -3227,6 +3261,37 @@ async function runAgentLoopV2Inner(
           toolId: toolCall.toolId,
           success: false,
           summary: "Refused — a deploy-only run does not modify content",
+          durationMs: 0,
+        });
+        continue;
+      }
+
+      // ACC-10 Defect 2: in a run whose instruction never asked for a
+      // deploy, a deploy call is refused outright — never turned into
+      // an approval card, never executed. The offer-side filter means
+      // a well-behaved model never emits one; this is the hard
+      // guarantee behind it (Acceptance Run 1 on 4adcdd4c chained an
+      // uninvited deploy onto a build ask).
+      if (deployNotRequested && isDeployTool(toolDef)) {
+        const result: ToolCallResult = {
+          toolCallId: toolCall.toolCallId,
+          toolId: toolCall.toolId,
+          result: null,
+          success: false,
+          error: noDeployRefusalError(toolCall.toolId),
+        };
+        llmMessages.push(buildToolResultMessage(result));
+        toolCallLog.push({
+          toolId: toolCall.toolId,
+          success: false,
+          summary: "Refused — this request did not ask to deploy or publish",
+          mutating: false,
+        });
+        localProgress.emit({
+          type: "tool_result",
+          toolId: toolCall.toolId,
+          success: false,
+          summary: "Refused — this request did not ask to deploy or publish",
           durationMs: 0,
         });
         continue;
@@ -3977,6 +4042,31 @@ async function runAgentLoopV2Inner(
       });
       if (layoutCheck.violations.length > 0) {
         failedHonestly = renderedLayoutFailureMessage(layoutCheck.violations);
+        finalText = failedHonestly;
+      }
+    }
+  }
+
+  // ACC-10 Defect 3 — the quality floor, beside the layout judge: a
+  // full page with no styling at all, or raw markdown left in the
+  // HTML, is not a finished site and must not settle as one
+  // (Acceptance Run 1 on 4adcdd4c settled "Complete" on bare HTML).
+  // The verdict streams as a "Site quality" build_result so Jobs
+  // shows it beside the layout verdict.
+  if (!cancelled && !failedHonestly) {
+    const qualityCheck = await checkSiteQuality({
+      candidatePaths: successfulMutationPaths(toolCallLog),
+      readFile: (path) => transport.readFile(path),
+    });
+    if (qualityCheck.applies) {
+      localProgress.emit({
+        type: "build_result",
+        check: "Site quality",
+        passed: qualityCheck.violations.length === 0,
+        ...(qualityCheck.violations.length > 0 ? { errorCount: qualityCheck.violations.length } : {}),
+      });
+      if (qualityCheck.violations.length > 0) {
+        failedHonestly = siteQualityFailureMessage(qualityCheck.violations);
         finalText = failedHonestly;
       }
     }
@@ -5046,11 +5136,24 @@ async function resumeAgentLoopV2Inner(
   // approved tool (already executed above) is the user's explicit
   // act and is untouched; only NEW calls are gated.
   const resumeDeployOnlyRun = isDeployOnlyInstruction(resumeUserMessage);
+  // ACC-10 Defect 2 (resume half): the no-deploy line also holds
+  // across the approval pause — a build run must not gain the power
+  // to deploy in its continuation when the original instruction never
+  // asked for it. The run's own approved tool (already executed
+  // above) is the user's explicit act and is untouched; only NEW
+  // calls are gated, exactly like the deploy-only half above.
+  const resumeDeployNotRequested =
+    !resumeDeployOnlyRun && !instructionRequestsDeploy(resumeUserMessage);
   const resumeOfferedTools = resumeDeployOnlyRun
     ? resumeOfferableTools.filter((t) => !isBlockedInDeployOnlyRun(t))
-    : resumeOfferableTools;
+    : resumeDeployNotRequested
+      ? resumeOfferableTools.filter((t) => !isDeployTool(t))
+      : resumeOfferableTools;
   if (resumeDeployOnlyRun) {
     cfg.systemPrompt += "\n\n" + DEPLOY_ONLY_PROMPT_NOTE;
+  }
+  if (resumeDeployNotRequested) {
+    cfg.systemPrompt += "\n\n" + NO_DEPLOY_PROMPT_NOTE;
   }
 
   const toolDefs = resumeOfferedTools.map(toToolDefinition);
@@ -5803,6 +5906,35 @@ async function resumeAgentLoopV2Inner(
         continue;
       }
 
+      // ACC-10 Defect 2 (resume half): a deploy call in a run whose
+      // original instruction never asked for one is refused outright —
+      // never an approval card, never executed (mirror of the initial
+      // loop's guarantee).
+      if (resumeDeployNotRequested && isDeployTool(toolDef)) {
+        const result: ToolCallResult = {
+          toolCallId: toolCall.toolCallId,
+          toolId: toolCall.toolId,
+          result: null,
+          success: false,
+          error: noDeployRefusalError(toolCall.toolId),
+        };
+        llmMessages.push(buildToolResultMessage(result));
+        toolCallLog.push({
+          toolId: toolCall.toolId,
+          success: false,
+          summary: "Refused — this request did not ask to deploy or publish",
+          mutating: false,
+        });
+        localProgress.emit({
+          type: "tool_result",
+          toolId: toolCall.toolId,
+          success: false,
+          summary: "Refused — this request did not ask to deploy or publish",
+          durationMs: 0,
+        });
+        continue;
+      }
+
       // Create the pre-mutation checkpoint BEFORE the approval gate, ahead of
       // EVERY mutating tool call (same per-mutation guarantee as the initial
       // loop): a nested approval pause carries the latest checkpoint so the
@@ -6180,6 +6312,28 @@ async function resumeAgentLoopV2Inner(
       });
       if (layoutCheck.violations.length > 0) {
         failedHonestly = renderedLayoutFailureMessage(layoutCheck.violations);
+        finalText = failedHonestly;
+      }
+    }
+  }
+
+  // ACC-10 Defect 3 — the quality floor, identical to the initial
+  // loop: a resumed build whose page is bare unstyled HTML or carries
+  // raw markdown settles honestly failed, never a clean Complete.
+  if (!cancelled && !failedHonestly) {
+    const qualityCheck = await checkSiteQuality({
+      candidatePaths: successfulMutationPaths(toolCallLog),
+      readFile: (path) => transport.readFile(path),
+    });
+    if (qualityCheck.applies) {
+      localProgress.emit({
+        type: "build_result",
+        check: "Site quality",
+        passed: qualityCheck.violations.length === 0,
+        ...(qualityCheck.violations.length > 0 ? { errorCount: qualityCheck.violations.length } : {}),
+      });
+      if (qualityCheck.violations.length > 0) {
+        failedHonestly = siteQualityFailureMessage(qualityCheck.violations);
         finalText = failedHonestly;
       }
     }
