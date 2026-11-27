@@ -888,6 +888,7 @@ Examples:
   litt inspect
   echo "TypeError: Cannot read property 'x' of undefined" | litt explain
   litt ask "How do I fix the TypeScript error in src/app/page.tsx?"
+  litt ask --json "status?"   (single JSON result on stdout for scripts)
 `);
 }
 

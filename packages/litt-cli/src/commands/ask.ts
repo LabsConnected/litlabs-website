@@ -56,10 +56,22 @@ export function isExactAnswerPrompt(question: string): boolean {
 }
 
 export async function askCommand(args: string[], session?: RuntimeSession): Promise<number> {
-  const question = args.join(" ").trim();
+  // `--json` selects the structured output mode: exactly one JSON document
+  // on stdout, all human diagnostics suppressed. Machine consumers parse
+  // stdout; anything else corrupts the payload.
+  const jsonMode = args.includes("--json");
+  const question = args.filter((a) => a !== "--json").join(" ").trim();
+
+  const emitJson = (payload: unknown): void => {
+    process.stdout.write(`${JSON.stringify(payload)}\n`);
+  };
 
   if (!question) {
-    fail("Please provide a question. Example: litt ask \"How do I fix the build?\"");
+    if (jsonMode) {
+      emitJson({ ok: false, termination: "error", error: "Please provide a question. Example: litt ask \"How do I fix the build?\"" });
+    } else {
+      fail("Please provide a question. Example: litt ask \"How do I fix the build?\"");
+    }
     return 1;
   }
 
@@ -69,13 +81,17 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     // Recover via the canonical resolution pipeline instead of dying.
     const resolved = await resolveActiveProject();
     if (!resolved) {
-      fail("No package.json found. Run this command from your project root.");
+      if (jsonMode) {
+        emitJson({ ok: false, termination: "error", error: "No package.json found. Run this command from your project root." });
+      } else {
+        fail("No package.json found. Run this command from your project root.");
+      }
       return 1;
     }
     project = resolved.project;
   }
 
-  header("LiTT Ask");
+  if (!jsonMode) header("LiTT Ask");
 
   // A credential-less Ollama daemon is a real provider lane. Only drop to
   // heuristic analysis when neither hosted/BYOK credentials nor a proven
@@ -90,7 +106,22 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
 
   if (!providerConfigured && !localLane?.available) {
     if (selectedModel) {
-      fail(`Cannot serve selected model "${selectedModel}": ${localLane?.reason ?? "no provider available"}`);
+      const msg = `Cannot serve selected model "${selectedModel}": ${localLane?.reason ?? "no provider available"}`;
+      if (jsonMode) {
+        emitJson({ ok: false, termination: "error", error: msg });
+      } else {
+        fail(msg);
+      }
+      return 1;
+    }
+    if (jsonMode) {
+      // The heuristic fallback is not an agent run — report it honestly
+      // rather than emitting a fabricated "completed" envelope.
+      emitJson({
+        ok: false,
+        termination: "unavailable",
+        error: "No provider API key and no local model available — agent loop did not run.",
+      });
       return 1;
     }
     warn("No provider API key and no local model available — using local heuristic analysis (no agent loop).");
@@ -119,7 +150,13 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   const approvalBridge = new ApprovalBridge();
   let closeApprovalPrompt: (() => void) | null = null;
   if (interactive) {
-    closeApprovalPrompt = driveApprovalBridgeFromTty(approvalBridge);
+    // In --json mode stdout carries the result document — approval prompts
+    // go to stderr so the payload stays parseable.
+    closeApprovalPrompt = driveApprovalBridgeFromTty(
+      approvalBridge,
+      process.stdin,
+      jsonMode ? process.stderr : process.stdout,
+    );
   }
 
   const store = new RuntimeStore();
@@ -210,8 +247,10 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     });
     inFlightModel = model as { cancel?: () => void };
 
-    console.log(`${c.dim}Provider: ${providerLabel(model.providerId)} | Model: ${model.configuredModel}${c.reset}`);
-    console.log(`${c.cyan}▶${c.reset} Asking: ${c.bold}${question}${c.reset}\n`);
+    if (!jsonMode) {
+      console.log(`${c.dim}Provider: ${providerLabel(model.providerId)} | Model: ${model.configuredModel}${c.reset}`);
+      console.log(`${c.cyan}▶${c.reset} Asking: ${c.bold}${question}${c.reset}\n`);
+    }
 
     const toolCallFilter = createToolCallStreamFilter();
 
@@ -241,6 +280,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       },
       store,
       onModelStream: (event) => {
+        if (jsonMode) return; // stdout is reserved for the JSON document
         if (event.type === "delta") {
           // Suppress tool_call/json protocol markup — never dump model
           // protocol internals to the user-facing transcript.
@@ -249,6 +289,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
         }
       },
       onToolStream: (chunk: StreamChunk) => {
+        if (jsonMode) return; // stdout is reserved for the JSON document
         if (chunk.stream === "stdout") {
           process.stdout.write(`${c.gray}${chunk.text}${c.reset}`);
         } else {
@@ -256,6 +297,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
         }
       },
       emitter: (event: RuntimeEvent) => {
+        if (jsonMode) return; // stdout is reserved for the JSON document
         // Lifecycle events — could render in cockpit
         if (event.subtype === "agent_tool_call") {
           const toolId = (event.data as { toolId?: string }).toolId ?? "unknown";
@@ -275,7 +317,35 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       },
       });
     const streamTail = toolCallFilter.flush();
-    if (streamTail) process.stdout.write(streamTail);
+    if (streamTail && !jsonMode) process.stdout.write(streamTail);
+
+    if (jsonMode) {
+      emitJson({
+        ok: result.termination === "complete",
+        termination: result.termination,
+        content: result.content,
+        rounds: result.rounds,
+        durationMs: result.durationMs,
+        usage: result.usage,
+        toolCalls: result.toolCalls.map((tc) => ({
+          toolCallId: tc.toolCallId,
+          toolId: tc.toolId,
+          toolName: tc.toolName,
+          status: tc.result.status,
+          success: tc.result.success,
+          message: tc.result.message,
+          durationMs: tc.durationMs,
+        })),
+        model: {
+          provider: model.providerId,
+          model: model.activeModel ?? model.configuredModel ?? null,
+        },
+        verification: result.verification
+          ? { proven: result.verification.proven === true }
+          : undefined,
+      });
+      return result.termination === "complete" ? 0 : 1;
+    }
 
     const completionLabel = result.termination === "complete"
       ? `${c.green}■${c.reset} Agent completed`
@@ -307,7 +377,12 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
 
     return result.termination === "complete" ? 0 : 1;
   } catch (err) {
-    fail(`Agent error: ${err instanceof Error ? err.message : String(err)}`);
+    const msg = err instanceof Error ? err.message : String(err);
+    if (jsonMode) {
+      emitJson({ ok: false, termination: "error", error: `Agent error: ${msg}` });
+    } else {
+      fail(`Agent error: ${msg}`);
+    }
     return 1;
   } finally {
     closeApprovalPrompt?.();
@@ -321,7 +396,17 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   const deadlineMs = Number(process.env.LITT_ASK_TIMEOUT_MS) > 0
     ? Number(process.env.LITT_ASK_TIMEOUT_MS)
     : 120000;
-  return withAskDeadline(askBody(), deadlineMs, () => inFlightModel?.cancel?.());
+  try {
+    return await withAskDeadline(askBody(), deadlineMs, () => inFlightModel?.cancel?.());
+  } catch (err) {
+    // The hard deadline rejects outside askBody's own try/catch — surface
+    // it as a structured error in --json mode instead of an unhandled throw.
+    if (jsonMode) {
+      emitJson({ ok: false, termination: "error", error: err instanceof Error ? err.message : String(err) });
+      return 1;
+    }
+    throw err;
+  }
 }
 
 // ─── Hard ask deadline ─────────────────────────────────────────────
