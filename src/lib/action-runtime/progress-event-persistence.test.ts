@@ -262,3 +262,28 @@ describe("mapProgressEventToActionEvent — route_plan", () => {
     expect(mapped?.payload.label).toContain("none");
   });
 });
+
+describe("mapProgressEventToActionEvent — model_transition (P0 R4)", () => {
+  it("persists the transition with previous/current model, reason, and failover evidence", () => {
+    const mapped = mapProgressEventToActionEvent({
+      type: "model_transition",
+      from: "cohere/north-mini-code:free",
+      to: "gemini-2.5-flash",
+      provider: "gemini",
+      reason: "rate_limited",
+      failover: [
+        { provider: "openrouter", model: "cohere/north-mini-code:free", class: "rate_limited", httpStatus: 429 },
+      ],
+      step: 3,
+    });
+    expect(mapped?.type).toBe("agent.status");
+    expect(mapped?.payload.kind).toBe("model_transition");
+    expect(mapped?.payload.from).toBe("cohere/north-mini-code:free");
+    expect(mapped?.payload.to).toBe("gemini-2.5-flash");
+    expect(mapped?.payload.reason).toBe("rate_limited");
+    expect(mapped?.payload.failover).toEqual([
+      { provider: "openrouter", model: "cohere/north-mini-code:free", class: "rate_limited", httpStatus: 429 },
+    ]);
+    expect(mapped?.payload.label).toContain("gemini-2.5-flash");
+  });
+});

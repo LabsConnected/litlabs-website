@@ -27,12 +27,29 @@
  *   capacity failure can no longer mask a tool defect in the record.
  * - An honest loop failure (failedHonestly) is never upgraded: it
  *   names a defect in the work itself, not a wrap-up casualty.
+ * - Referenced-but-missing local assets (missingAssetRefs, P0 R3)
+ *   are likewise never upgraded: the deliverable's own pages point
+ *   at files that do not exist, so the work is not done — the same
+ *   existence check the deploy validator applies at publish, moved
+ *   to build completion where the contract requires it.
+ * - A run whose authorized scope includes publishing (the user
+ *   asked to publish/deploy, the run is deploy-only, or a deploy
+ *   was attempted in the run) settles success ONLY on verified
+ *   deployment evidence — the R8 recorded outcome (deployment
+ *   record ready, live URL verified). Mutation + quality pass is
+ *   the BUILD milestone, not the PUBLISH milestone: settling such
+ *   a run "completed" without a verified deployment claims the
+ *   site is live when it is not (coordination finding, acceptance
+ *   run 45930737200: passing iterations settled only after deploy
+ *   + live URL verification). A build never asked to publish
+ *   carries no deployment requirement (ACC-10: builds do not
+ *   deploy unasked, and are not failed for not deploying).
  */
 
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 
 export interface RunFailureContributor {
-  kind: "model_routes" | "tool_failure" | "verification_unknown" | "honest_failure";
+  kind: "model_routes" | "tool_failure" | "verification_unknown" | "honest_failure" | "missing_assets" | "deployment_missing";
   /** Set for tool_failure contributors. */
   toolId?: string;
   /** Sanitized, user-record-safe detail (tool summaries and loop
@@ -70,12 +87,42 @@ export interface RunSettlementInput {
   /** Quality verdict when a gate ran; null when no gate ran. */
   qualityVerdictOk: boolean | null;
   workspaceChange?: WorkspaceChangeEvidence;
+  /**
+   * P0 R3 (execution integrity, audit D3): local asset references in
+   * the built artifact that do not exist in the workspace, as verified
+   * at build completion (the site-enrich audit's brokenRefs, after the
+   * bounded in-scope repair attempt). A build whose pages reference
+   * files that were never written has NOT produced its deliverable —
+   * it must not settle as success, and the missing files must be
+   * discovered here, never first by the deploy validator at publish.
+   * Absent/empty when every referenced local asset exists (or when no
+   * asset verification applies to the run).
+   */
+  missingAssetRefs?: readonly string[];
+  /**
+   * Milestone-aware settlement (coordination fix, 2026-11-26): true
+   * when the run's authorized request/scope includes deployment —
+   * the user asked to publish/deploy, the run is deploy-only, or a
+   * deploy tool was attempted during the run. The loop computes
+   * this from the run's own evidence (deploy-intent classification
+   * + the tool log), never from the model's narration. Absent/false
+   * for ordinary build and conversational runs: they gain NO
+   * deployment requirement.
+   */
+  deploymentRequired?: boolean;
+  /**
+   * True when the run holds R8's verified deployment evidence: a
+   * completed deployment whose recorded outcome is "ready" with a
+   * verified live URL (readDeploymentOutcome non-null). A deploy
+   * tool success flag alone is not verification.
+   */
+  deploymentVerified?: boolean;
 }
 
 const MAX_TOOL_FAILURE_CONTRIBUTORS = 10;
 
 export function collectFailureContributors(
-  input: Pick<RunSettlementInput, "toolCalls" | "workspaceChange" | "failedHonestly" | "modelFailed">,
+  input: Pick<RunSettlementInput, "toolCalls" | "workspaceChange" | "failedHonestly" | "modelFailed" | "missingAssetRefs" | "deploymentRequired" | "deploymentVerified">,
 ): RunFailureContributor[] {
   const contributors: RunFailureContributor[] = [];
   for (const call of input.toolCalls) {
@@ -100,6 +147,23 @@ export function collectFailureContributors(
   }
   if (input.modelFailed) {
     contributors.push({ kind: "model_routes", detail: input.modelFailed });
+  }
+  if (input.missingAssetRefs && input.missingAssetRefs.length > 0) {
+    const refs = [...input.missingAssetRefs];
+    contributors.push({
+      kind: "missing_assets",
+      detail:
+        `The built page references ${refs.length} local asset file(s) that do not exist ` +
+        `in the project: ${refs.join(", ")}.`,
+    });
+  }
+  if (input.deploymentRequired && !input.deploymentVerified) {
+    contributors.push({
+      kind: "deployment_missing",
+      detail:
+        "This run was asked to publish, but no deployment completed with a verified " +
+        "live URL, so the publish milestone was not reached.",
+    });
   }
   return contributors;
 }
@@ -183,6 +247,22 @@ export function settleRunOutcome(input: RunSettlementInput): RunSettlement {
   const failureContributors = collectFailureContributors(input);
   if (input.cancelled) {
     return { outcome: "cancelled", failureContributors };
+  }
+  // P0 R3: referenced-but-missing local assets defeat every success
+  // path, including completed-with-warning — a deliverable whose
+  // pages point at files that do not exist has not landed, whatever
+  // else succeeded. (Cancellation above still wins: a stopped run is
+  // a stopped run, with the missing assets recorded as a contributor.)
+  if (input.missingAssetRefs && input.missingAssetRefs.length > 0) {
+    return { outcome: "failed", failureContributors };
+  }
+  // Milestone-aware settlement: a publish-scoped run without
+  // verified deployment evidence has not reached its milestone —
+  // it cannot settle completed, including via the
+  // completed-with-warning upgrade below. (Cancellation above
+  // still wins, with the missing deployment recorded.)
+  if (input.deploymentRequired && !input.deploymentVerified) {
+    return { outcome: "failed", failureContributors };
   }
   if (input.modelFailed && !input.failedHonestly && deliverableSucceeded(input)) {
     return {

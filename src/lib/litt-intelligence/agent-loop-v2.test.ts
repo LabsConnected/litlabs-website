@@ -2048,13 +2048,28 @@ describe("BUILD resume completion evidence", () => {
     expect(result.failedHonestly).toContain("no files were changed");
   });
 
-  it("bounds a resumed read-only run at three steps", async () => {
+  it("bounds a resumed read-only run by the build-model chain, not a 3-step death", async () => {
+    // P0 R2 superseded the old contract ("fail the resumed run after
+    // 3 write-less steps"): the resumed loop now escapes exactly like
+    // the initial loop — each write-less window rules out its serving
+    // model and switches. The mock honors the hint, so the guard
+    // walks the finite registry chain and the run ends with
+    // NO_BUILD_CAPABLE_MODEL instead of the old zero-write failure.
     let step = 0;
-    vi.mocked(callLLMWithTools).mockImplementation(async () => ({ text: "", toolCalls: [{ toolId: "files.read", toolCallId: `read-${++step}`, inputs: { projectId: "p-test", path: `page-${step}.html` } }], finishReason: "tool_calls", model: "test" }));
+    vi.mocked(callLLMWithTools).mockImplementation(async (_systemPrompt, _messages, _tools, opts) => {
+      const hinted = (opts as { model?: string } | undefined)?.model;
+      const model = hinted ?? "cohere/north-mini-code:free";
+      const provider = model.startsWith("gemini") ? "gemini" : "openrouter";
+      step += 1;
+      return { text: "", toolCalls: [{ toolId: "files.read", toolCallId: `read-${step}`, inputs: { projectId: "p-test", path: `page-${step}.html` } }], finishReason: "tool_calls", model, provider };
+    });
     const transport = { ...fakeTransport, mkdir: vi.fn(async () => ({ created: true })), readFile: vi.fn(async () => ({ content: "<html/>", size: 7 })) } as unknown as WorkspaceTransport;
     const result = await resumeAgentLoopV2(resumeInput(), transport);
-    expect(callLLMWithTools).toHaveBeenCalledTimes(3);
-    expect(result.failedHonestly).toContain("3 steps");
+    expect(result.modelFailed).toBe("NO_BUILD_CAPABLE_MODEL");
+    // More than one window was tried (the old behavior stopped at 3
+    // calls), and the total stays bounded by the chain.
+    expect(step).toBeGreaterThan(3);
+    expect(step).toBeLessThanOrEqual(30);
   });
 });
 
@@ -2937,7 +2952,14 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
   }, 15000);
 
   it("still terminates a genuinely stuck resumed run", async () => {
-    // Three consecutive completed batches with no write and no write gate.
+    // P0 R2 superseded the old bound (fail after 3 write-less steps):
+    // the resumed loop now escapes like the initial loop — each
+    // write-less window rules out a build model and switches. The
+    // mock's serving model ("test") is not in the registry and ignores
+    // the hint, so windows are charged to the requested build model
+    // and the finite chain still exhausts: the run terminates with
+    // NO_BUILD_CAPABLE_MODEL in bounded steps, never an endless loop
+    // and never a silent completion.
     let step = 0;
     vi.mocked(callLLMWithTools).mockImplementation(async () => ({
       text: "",
@@ -2946,13 +2968,19 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
       model: "test",
     }));
     const result = await trackedResume(approvedWriteResume(), writeTransport);
-    expect(callLLMWithTools).toHaveBeenCalledTimes(3);
-    expect(result.failedHonestly).toContain("3 steps");
+    expect(result.modelFailed).toBe("NO_BUILD_CAPABLE_MODEL");
+    // One unmapped window + the 10-model chain, 3 steps each.
+    expect(step).toBeGreaterThan(3);
+    expect(step).toBeLessThanOrEqual(33);
   });
 
   it("a rejected write approval keeps counting — no free progress", async () => {
     // REJECTED write: no execution, no progress. Read steps after the
-    // rejection still accumulate toward the bound.
+    // rejection still accumulate — under P0 R2 they drive the guard's
+    // model chain to exhaustion instead of the old 3-step failure,
+    // and the run still settles FAILED: the rejection earned nothing,
+    // and no completion (not even completed-with-warning) is possible
+    // because no file-writing operation ever landed.
     let step = 0;
     vi.mocked(callLLMWithTools).mockImplementation(async () => ({
       text: "",
@@ -2964,7 +2992,10 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
       approvedWriteResume({ decision: "rejected", rejectionReason: "not now" }),
       writeTransport,
     );
-    expect(result.failedHonestly).toContain("3 steps");
+    expect(result.modelFailed).toBe("NO_BUILD_CAPABLE_MODEL");
+    expect(result.completedWithWarning).toBeUndefined();
+    expect(step).toBeGreaterThan(3);
+    expect(step).toBeLessThanOrEqual(33);
   });
 });
 

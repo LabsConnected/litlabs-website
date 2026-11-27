@@ -322,8 +322,15 @@ export interface QualityLoopState {
    * TEST stage cannot pass — a build that ships placeholder imagery is
    * not visually complete, no matter what other evidence exists
    * (production defect 2026-11-11). Absent until the first audit.
+   *
+   * P0 R3 (audit D3): brokenRefs carries the same audit's BROKEN
+   * references — local assets the built pages reference that do not
+   * exist in the workspace. They gate TEST identically: a page that
+   * points at a never-written file is not complete, and completion
+   * must discover it here rather than at publish. Optional for
+   * snapshot compatibility (audits recorded before R3 lack it).
    */
-  visualAudit?: { placeholderRefs: string[] };
+  visualAudit?: { placeholderRefs: string[]; brokenRefs?: string[] };
   startedAt: string;
   updatedAt: string;
 }

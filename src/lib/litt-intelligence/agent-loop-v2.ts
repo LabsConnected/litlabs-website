@@ -23,7 +23,7 @@ import type { CheckpointInfo, WorkspaceTransport } from "./workspace-transport";
 import { ProgressEmitter, type ProgressEvent } from "./progress-events";
 import { PermissionEngine, type ExecutionMode, type ToolPermissionInfo } from "./permission-engine";
 import { buildScopeApprovalReason, buildScopeCoversTool, isBuildScopeTool } from "./build-scope";
-import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, type ToolDefinition, type ToolCallRequest, type ToolCallResult, type LLMMessage, type RoutePlanSummary } from "./llm-tool-calling";
+import { callLLMWithTools, buildToolResultMessage, buildAssistantToolCallMessage, summarizeToolResult, AllRoutesFailedError, AgentBudgetExhaustedError, sanitizeRouteAttempts, type ToolDefinition, type ToolCallRequest, type ToolCallResult, type LLMMessage, type RoutePlanSummary, type ModelTransitionRecord, type RouteAttemptFailure } from "./llm-tool-calling";
 // Re-exported so launch-flow can seed a continued loop's messages.
 export type { LLMMessage };
 import type { LLMCallMetadata } from "@/lib/evals/braintrust";
@@ -31,11 +31,24 @@ import { runBuildFixLoop, type BuildFixLoopResult } from "./build-fix-loop";
 import { buildPatchRecoveryMessage, existingPageOverwriteError, validateApplyPatchInputs, validateFilesWriteInputs } from "./patch-validation";
 import { computeWorkspaceChange, workspaceChangeFromVolumeListing, workspaceChangeFromDirectReads } from "./workspace-change-producer";
 import { checkRequestedLiteral, requestedLiteralFailureMessage, requestedLiteralRepairPrompt } from "./requested-literal";
+import { checkInstructionLeakage, instructionLeakageFailureMessage } from "./instruction-leakage";
+import {
+  DESTRUCTIVE_GATE_STREAK_LIMIT,
+  assessDestructiveAction,
+  destructiveApprovalReason,
+  destructiveLoopError,
+  destructiveTargetFor,
+  isDestructiveTool,
+  trailingDestructiveStreak,
+  unidentifiedDestructiveTargetError,
+  type DestructiveActionAssessment,
+} from "./destructive-action";
+import { extractLocalAssetRefs } from "@/lib/deployments/user-deployment";
 import { checkTextContrast, textContrastFailureMessage, textContrastRepairPrompt, textContrastUnverifiableNote } from "./text-contrast";
 import { checkRenderedLayout, renderedLayoutFailureMessage, renderedLayoutRepairPrompt } from "./rendered-layout";
 import { checkSiteQuality, siteQualityFailureMessage } from "./site-quality";
 import { studioLog } from "@/lib/studio/logger";
-import { DEPLOY_ONLY_PROMPT_NOTE, NO_DEPLOY_PROMPT_NOTE, deployOnlyRefusalError, instructionRequestsDeploy, isBlockedInDeployOnlyRun, isDeployOnlyInstruction, isDeployTool, noDeployRefusalError } from "./deploy-intent";
+import { DEPLOY_ONLY_PROMPT_NOTE, DEPLOY_TOOL_IDS, NO_DEPLOY_PROMPT_NOTE, deployOnlyRefusalError, instructionRequestsDeploy, isBlockedInDeployOnlyRun, isDeployOnlyInstruction, isDeployTool, noDeployRefusalError } from "./deploy-intent";
 import { settleRunOutcome, type RunFailureContributor } from "./run-settlement";
 import type { WorkspaceChangeEvidence } from "@/lib/studio/completion-evidence";
 import { recordModelFailure } from "./provider-registry";
@@ -340,6 +353,14 @@ export interface PendingApproval {
    * scope survives pauses for out-of-scope actions.
    */
   buildScopeApproved?: boolean;
+  /**
+   * P0 R6: the destructive-action card data for THIS gate, when the
+   * gated tool is destructive (destructive-action.ts) — exact target,
+   * dependencies, blocked status, consequences, recovery, actions.
+   * Persisted on the paused-run record so the client can render the
+   * founder's approval-card standard. Absent for every other gate.
+   */
+  destructiveAction?: DestructiveActionAssessment;
 }
 
 /**
@@ -393,6 +414,51 @@ export interface AgentLoopResult {
    * what landed after the gate.
    */
   baselineCheckpoint?: { checkpointId: string; label: string; gitSha: string };
+  /**
+   * P0 R1 (execution integrity): set when a pre-mutation workspace
+   * checkpoint was attempted for this run but creation FAILED (the
+   * transport recorded an error) and the run holds no checkpoint to
+   * resume or diff against. Carried visibly on the result — including
+   * the pause result, whose persisted record stores it — instead of
+   * being swallowed by `?? undefined`: a paused run carrying this is
+   * NOT safely resumable, and the approvals route refuses its resume
+   * explicitly. Absent when a checkpoint exists, when none was
+   * attempted, and for static (gitless) workspaces, where creation
+   * returns null WITHOUT an error ("not applicable", not "failed").
+   */
+  checkpointFailure?: string;
+  /**
+   * P0 R4 (execution integrity, audit D6): every model transition of
+   * the run — previous model, current model, fallback reason, and the
+   * sanitized provider failures behind the change (route failover and
+   * build-guard switches). Threaded into the persisted run result by
+   * the routes and mirrored as model_transition action events, so the
+   * run record explains its own provider history. Absent when the
+   * requested model served every step without a failed attempt.
+   */
+  modelTransitions?: ModelTransitionRecord[];
+  /**
+   * P0 R5 (execution integrity, audit D7): the run's ONE stable
+   * logical identity — the initial segment's metering run id (in
+   * production, the billing agent run id threaded through the
+   * metering context). Persisted on the paused-run record at a pause
+   * and threaded back into the resume, so every segment of a run
+   * shares one identity and one observability record. Additive
+   * correlation only: no existing id is renamed or retyped.
+   */
+  logicalRunId?: string;
+  /**
+   * P0 R8 (publishing integrity): the run's completed deployment —
+   * the deployment record's own outcome (id, URLs, status, URL
+   * verification, reuse) for the publish this run completed, or null
+   * when the run published nothing (or its deploy's recorded outcome
+   * was not verified-ready — see readDeploymentOutcome). Threaded
+   * into the persisted run result beside the R5 logical run ID, so
+   * the publishing operation correlates with its billing record on
+   * the one run record. Segment-local: the segment that performed
+   * the publish carries it.
+   */
+  deployment?: CompletedDeployment | null;
   /**
    * Post-run checkpoint: created once the run's changes landed (workspace
    * status "changed"). Paired with `checkpoint` (the pre-run baseline) so
@@ -612,6 +678,83 @@ function detectRepeatedCalls(
   );
 
   return identical.length >= 3;
+}
+
+// ─── Same-tool streak breaker (coordination fix) ──────────────────
+// detectRepeatedCalls keys on IDENTICAL inputs, so it misses the
+// varying-arguments loop: the same tool called again and again with
+// different inputs, every call succeeding, and no project file ever
+// written (acceptance trace: image.stock x4 post-approval, all
+// success, zero file writes — only the build guard's zero-write
+// step count stopped that run, at step 6, and non-build runs have no
+// such guard). This counter extends the same breaker machinery with
+// the zero-write guard's own definition of progress: a successful
+// FILE-WRITING call (isFileWritingTool — the FILE_GENERATION set) is
+// the mutation that resets the streak. The streak is the trailing
+// run of consecutive successful calls to the same non-writing tool:
+// any other record — a different tool, a failed call, a file write —
+// ends it, so legitimate varied work that writes files can never
+// trip it, and a tool that writes files has a streak of 0 by
+// definition. Seeded records with an unknown outcome (success
+// undefined) end the streak too: unknown is not a proven success.
+// The bound mirrors detectRepeatedCalls: 3 proven successes are a
+// working set; the 4th consecutive call is answered with the bounded
+// corrective nudge, and the run cancels honestly once the nudge
+// budget (READ_LOOP_NUDGE_MAX, shared with the read-loop path) is
+// spent — never an unbounded loop, never a silent success.
+//
+// SCOPE — the streak is consulted only for the class no other
+// breaker governs, and only where the build guard is not the
+// designated stopper (the call sites enforce both):
+//   - read-only tools belong to the identical-call breaker above
+//     (its per-input design deliberately allows varied research —
+//     the rotating-signatures test pins that varied reads across
+//     files are legitimate, bounded per input with a shared nudge
+//     budget);
+//   - in a build-guarded run, write-less chains belong to the
+//     guard, whose response (switch models, then
+//     NO_BUILD_CAPABLE_MODEL) is stronger than a cancel and must
+//     not be pre-empted;
+//   - what remains — and what the acceptance trace showed — is a
+//     NON-read-only, non-file-writing tool (image.stock,
+//     image.generate) succeeding repeatedly with varying inputs in
+//     a run with no build guard: previously invisible to every
+//     breaker.
+export const SAME_TOOL_STREAK_LIMIT = 3;
+
+export function countSameToolNonWritingStreak(
+  records: ToolCallRecord[],
+  toolId: string,
+): number {
+  if (isFileWritingTool(toolId)) return 0;
+  let streak = 0;
+  for (let i = records.length - 1; i >= 0; i--) {
+    const record = records[i];
+    if (record.toolId !== toolId) return streak;
+    if (record.success !== true) return streak;
+    streak += 1;
+  }
+  return streak;
+}
+
+function buildSameToolStreakNudgeResult(toolCall: ToolCallRequest, streak: number): ToolCallResult {
+  return {
+    toolCallId: toolCall.toolCallId,
+    toolId: toolCall.toolId,
+    result: null,
+    success: false,
+    error:
+      `${toolCall.toolId} has already succeeded ${streak} times in a row with different inputs ` +
+      `and no file has been written — the results of those calls are in context and repeating ` +
+      `the call returns more of the same. Do NOT call ${toolCall.toolId} again until a ` +
+      `file-writing call has landed. Use what you already fetched to make the change now: ` +
+      `apply_patch with an exact verbatim search string from the content already in context, ` +
+      `or files.write with the complete new content.`,
+  };
+}
+
+export function sameToolStreakCancelReason(toolId: string, streak: number): string {
+  return `Repeated tool call detected: ${toolId} succeeded ${streak} times in a row with different inputs and no intervening file write`;
 }
 
 /**
@@ -1261,6 +1404,21 @@ function toToolDefinition(tool: LiTTToolDefinition): ToolDefinition {
  * server-authenticated config and passed DOWN through ToolRegistry.
  * The ActionRun identity is never a model-visible tool input.
  */
+/**
+ * P0 R1: interpret a checkpoint-creation attempt. A null result is a
+ * FAILURE only when the transport recorded an error on
+ * lastCheckpointError — static (gitless) workspaces return null with
+ * no error by design ("not applicable"), and a successful creation
+ * clears it. Returns the failure to record on the run, or undefined.
+ */
+function checkpointAttemptFailure(
+  created: { checkpointId: string } | null | undefined,
+  transport: { lastCheckpointError?: string | null },
+): string | undefined {
+  if (created) return undefined;
+  return transport.lastCheckpointError ?? undefined;
+}
+
 function actionContextFrom(cfg: {
   actionContext?: ActionExecutionContext;
   actionRunId?: string;
@@ -1331,6 +1489,61 @@ async function pauseReasonFor(
   } catch {
     return fallback;
   }
+}
+
+/**
+ * P0 R6 — destructive-action gate preparation, shared by all three
+ * approval-gate sites (initial loop, deferred batch, resume loop) so
+ * the safety rules cannot drift between them. For a non-destructive
+ * tool this returns an empty outcome and the gate proceeds exactly as
+ * before. For a destructive tool (files.delete) it decides, in order:
+ *
+ *   1. Unidentified target → `refusalError`: NO approval is created.
+ *      The caller feeds the refusal back to the model and ledgers it
+ *      as a failed mutating call, so an identical blind repeat counts
+ *      toward the gated-repeat breaker (§6.1) as well.
+ *   2. The run's destructive streak is already at the limit →
+ *      `loopError`: the run ends honestly instead of asking again
+ *      (the four-delete loop from the 2026-11-26 acceptance run).
+ *   3. Otherwise → the structured card `assessment` (target,
+ *      dependencies, blocked status, consequences, recovery,
+ *      actions) and the founder-standard `reason` text for the card.
+ */
+interface DestructiveGateOutcome {
+  assessment?: DestructiveActionAssessment;
+  reason?: string;
+  refusalError?: string;
+  loopError?: string;
+}
+
+async function prepareDestructiveGate(opts: {
+  toolId: string;
+  inputs: Record<string, unknown>;
+  fallbackReason: string;
+  transport: WorkspaceTransport;
+  recoveryAvailable: boolean;
+  toolCallLog: ReadonlyArray<{ toolId: string; success: boolean; mutating: boolean }>;
+}): Promise<DestructiveGateOutcome> {
+  if (!isDestructiveTool(opts.toolId)) return {};
+  if (!destructiveTargetFor(opts.toolId, opts.inputs)) {
+    return { refusalError: unidentifiedDestructiveTargetError(opts.toolId) };
+  }
+  const streak = trailingDestructiveStreak(opts.toolCallLog);
+  if (streak >= DESTRUCTIVE_GATE_STREAK_LIMIT) {
+    return { loopError: destructiveLoopError(opts.toolId, streak) };
+  }
+  const assessment = await assessDestructiveAction({
+    toolId: opts.toolId,
+    inputs: opts.inputs,
+    reason: opts.fallbackReason,
+    transport: opts.transport,
+    recoveryAvailable: opts.recoveryAvailable,
+    gateStreak: streak + 1,
+  });
+  // The target was verified non-null above; a null assessment here is
+  // defensive only — refuse rather than create an unassessed approval.
+  if (!assessment) return { refusalError: unidentifiedDestructiveTargetError(opts.toolId) };
+  return { assessment, reason: destructiveApprovalReason(assessment, opts.fallbackReason) };
 }
 
 // ─── Quality loop hooks ───────────────────────────────────────────
@@ -1407,6 +1620,18 @@ async function runCompletionChecks(opts: {
   const projectId = ctx?.projectId ?? opts.cfg.qualityLoop?.projectId;
   const userId = ctx?.userId ?? opts.cfg.userId ?? opts.cfg.qualityLoop?.userId;
   const conversationId = ctx?.conversationId ?? opts.cfg.conversationId ?? null;
+  if (!projectId || !userId) {
+    studioLog(`agent-loop:completion_checks_skipped:${opts.loop}`, { errorClass: "no_project_context" });
+    // No project context: this run is not a project build, so there
+    // is no Checks panel or Jobs tab for it and nothing to persist
+    // against. The skip stays logged (ACC-08 observability) but
+    // carries no closing note — the loud-note rule covers project
+    // builds whose checks could not run or could not be saved.
+    // The module import stays BELOW this guard: loading the checks
+    // stack (Supabase clients and all) is wasted work — and a real
+    // async boundary — for runs that can never use it.
+    return {};
+  }
   let checksModule: typeof import("@/lib/projects/project-checks");
   try {
     checksModule = await import("@/lib/projects/project-checks");
@@ -1434,15 +1659,6 @@ async function runCompletionChecks(opts: {
     unavailableCheckSetFromError,
     ProjectChecksUnavailableError,
   } = checksModule;
-  if (!projectId || !userId) {
-    studioLog(`agent-loop:completion_checks_skipped:${opts.loop}`, { errorClass: "no_project_context" });
-    // No project context: this run is not a project build, so there
-    // is no Checks panel or Jobs tab for it and nothing to persist
-    // against. The skip stays logged (ACC-08 observability) but
-    // carries no closing note — the loud-note rule covers project
-    // builds whose checks could not run or could not be saved.
-    return {};
-  }
   try {
     const outcome = await runAllProjectChecks({ projectId, userId });
     for (const check of outcome.checks) {
@@ -2074,8 +2290,18 @@ async function maybeEnrichStaticSiteVisuals(
     // enrichment report alone never reached the gate before, so a page
     // shipping placeholder imagery still completed "successfully"
     // (production defect 2026-11-11).
+    // P0 R3: the audit's BROKEN refs (local assets the page references
+    // that do not exist — enrichment has already attempted its bounded
+    // repair by this point, so these are the survivors) feed the gate
+    // too. Before R3 they were computed and dropped, and the first
+    // existence check a missing file ever met was the deploy
+    // validator at publish (audit D3).
     if (qualitySession) {
-      noteStaticVisualAudit(qualitySession, report.unresolvedPlaceholders);
+      noteStaticVisualAudit(
+        qualitySession,
+        report.unresolvedPlaceholders,
+        report.audit?.brokenRefs ?? [],
+      );
     }
     if (report.imagesResolved > 0 || report.imagesFailed > 0 || report.filesChanged.length > 0) {
       localProgress.emit({
@@ -2087,6 +2313,9 @@ async function maybeEnrichStaticSiteVisuals(
           (report.unresolvedPlaceholders.length > 0
             ? `, ${report.unresolvedPlaceholders.length} unresolved placeholder(s): ${report.unresolvedPlaceholders.join(", ")}`
             : "") +
+          ((report.audit?.brokenRefs.length ?? 0) > 0
+            ? `, ${report.audit!.brokenRefs.length} broken asset reference(s) still missing: ${report.audit!.brokenRefs.join(", ")}`
+            : "") +
           ` (${report.providersUsed.join(", ") || "no providers"}` +
           (report.providersFailed.length > 0 ? `; failed: ${report.providersFailed.join(", ")}` : "") +
           `).`,
@@ -2096,6 +2325,156 @@ async function maybeEnrichStaticSiteVisuals(
     // Enrichment is additive — it must never break the run.
     console.warn("[enrich] maybeEnrichStaticSiteVisuals failed:", err instanceof Error ? err.message : err);
   }
+}
+
+/**
+ * P0 R3 — build-completion asset verification (audit D3/D4).
+ *
+ * The per-mutation enrichment pass only runs after a successful
+ * HTML-touching mutation, so whole classes of runs never met any
+ * asset-existence check before publish: deploy-only runs ("Publish
+ * the site."), runs whose last mutation touched no HTML, and refs in
+ * files enrichment does not repair. This tail check closes that gap
+ * with the ONE existing audit (auditStaticSiteHtml — no second audit
+ * system): every HTML file in the workspace (root and nested, the
+ * same depth the enrichment pass collects) is audited against the
+ * workspace file set, the result is noted into the quality session
+ * (so the verdict sees it), and the surviving broken references are
+ * returned for the settlement condition — a build that references
+ * missing local assets cannot settle as success.
+ *
+ * Enrichment has already attempted its bounded repair by the time
+ * this runs (it executes inside the loop, per mutation), so refs
+ * returned here are repair survivors, not first sightings.
+ * Never throws: a verification failure degrades to "no evidence"
+ * rather than breaking the run.
+ *
+ * P0 R8 extends the scan with the deploy validator's own reference
+ * extractor over HTML and CSS files, so script/stylesheet/srcset/
+ * poster references and standalone-CSS references are verified at
+ * completion too — R3's boundary (those classes relied on the deploy
+ * validator alone) is closed in the same settlement channel.
+ */
+async function verifyStaticSiteAssetReferences(
+  transport: WorkspaceTransport,
+  qualitySession: QualityLoopSession | null,
+  isStaticWorkspace: boolean | undefined,
+): Promise<string[]> {
+  if (!isStaticWorkspace) return [];
+  try {
+    const { auditStaticSiteHtml, resolveRefAgainstDir } = await import("@/lib/site-enrich/audit");
+    const fileSet = new Set<string>();
+    const htmlFiles: string[] = [];
+    const cssFiles: string[] = [];
+    const collect = async (dir: string, prefix: string, depth: number): Promise<void> => {
+      if (depth > 3) return;
+      const res = await transport.listFiles(dir).catch(() => null);
+      for (const e of res?.entries ?? []) {
+        const p = prefix ? `${prefix}/${e.name}` : e.name;
+        if (e.type === "file") {
+          fileSet.add(p);
+          if (/\.html?$/i.test(e.name)) htmlFiles.push(p);
+          else if (/\.css$/i.test(e.name)) cssFiles.push(p);
+        } else if (e.type === "directory") {
+          await collect(p, p, depth + 1);
+        }
+      }
+    };
+    await collect("", "", 0);
+    if (htmlFiles.length === 0) return [];
+    const broken = new Set<string>();
+    const placeholders = new Set<string>();
+    for (const file of htmlFiles) {
+      const read = await transport.readFile(file).catch(() => null);
+      if (!read?.content) continue;
+      const audit = auditStaticSiteHtml(read.content, fileSet);
+      // Judge each broken ref the way it will actually be served:
+      // resolved against the referencing page's directory (the deploy
+      // validator's semantics), so a nested page's "../assets/…"
+      // reference to a real file is not condemned. The reported
+      // missing path is the resolved workspace path — the file that
+      // must exist for the page to work.
+      const dir = file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "";
+      for (const r of audit.brokenRefs) {
+        const resolved = resolveRefAgainstDir(r, dir);
+        if (fileSet.has(resolved) || fileSet.has(`public/${resolved}`)) continue;
+        broken.add(resolved);
+      }
+      for (const r of audit.placeholderRefs) placeholders.add(r);
+    }
+    // P0 R8 — close R3's stated boundary: the audit above extracts
+    // image and CSS-url references only, so a missing SCRIPT or
+    // STYLESHEET (or srcset/poster target, or an asset referenced
+    // from a standalone CSS file) survived completion and was caught
+    // only by the deploy validator at publish time. The SAME
+    // extractor the validator uses (extractLocalAssetRefs — no
+    // second audit system) now scans every HTML and CSS file here,
+    // at build completion; its refs come back already resolved
+    // against the referencing file's directory, and missing ones
+    // fold into the same settlement channel. The deploy validator
+    // stays as the last line; completion is now the first.
+    for (const file of [...htmlFiles, ...cssFiles]) {
+      const read = await transport.readFile(file).catch(() => null);
+      if (!read?.content) continue;
+      const dir = file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "";
+      for (const ref of extractLocalAssetRefs(read.content, dir)) {
+        if (fileSet.has(ref) || fileSet.has(`public/${ref}`)) continue;
+        broken.add(ref);
+      }
+    }
+    if (qualitySession) {
+      noteStaticVisualAudit(qualitySession, [...placeholders], [...broken]);
+    }
+    return [...broken];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * P0 R4: record one model transition on the run — appended to the
+ * run's transition list (carried on the result into the persisted run
+ * record) and emitted as a model_transition progress event, which the
+ * persistence layer stores as an action event (unlike the
+ * model_routing stream noise). The record is the run's provider
+ * history: previous model, current model, and the reason it changed.
+ */
+function recordModelTransition(
+  transitions: ModelTransitionRecord[],
+  progress: ProgressEmitter,
+  record: ModelTransitionRecord,
+): void {
+  transitions.push(record);
+  progress.emit({ type: "model_transition", ...record });
+}
+
+/**
+ * P0 R4: build a transition record from a step's route attempts. The
+ * reason is the attempts' failure classes (the structured cause —
+ * rate_limited, timeout, server_error…), or "route_fallback" when the
+ * router served a different model than requested without a recorded
+ * attempt failure. Raw upstream failure messages are never carried:
+ * sanitizeRouteAttempts keeps provider/model/class/status only.
+ */
+function transitionFromAttempts(
+  requestedModel: string | undefined,
+  servedModel: string,
+  servedProvider: string,
+  attempts: readonly RouteAttemptFailure[],
+  step: number,
+): ModelTransitionRecord {
+  const failover = sanitizeRouteAttempts(attempts);
+  return {
+    from: requestedModel ?? "unknown",
+    to: servedModel,
+    provider: servedProvider,
+    reason:
+      failover.length > 0
+        ? [...new Set(failover.map((f) => f.class))].join(", ")
+        : "route_fallback",
+    ...(failover.length > 0 ? { failover } : {}),
+    step,
+  };
 }
 
 /**
@@ -2140,6 +2519,7 @@ async function maybeInspectBeforeFinal(
       });
       llmMessages.push({
         role: "user",
+        origin: "internal",
         content: buildMissingStageDeclarationPrompt(missingDecl),
       });
       return true;
@@ -2170,6 +2550,7 @@ async function maybeInspectBeforeFinal(
       });
       llmMessages.push({
         role: "user",
+        origin: "internal",
         content: buildRedesignPrompt(inspection, qualitySession.state.designPasses),
       });
       return true;
@@ -2526,6 +2907,13 @@ async function runAgentLoopV2Inner(
   const meteringRunId =
     getMeteringContext()?.runId ?? cfg.qualityLoop?.runId ?? randomUUID();
 
+  // P0 R5: this run's logical identity IS its metering run id — the
+  // one id that already prefers the billing agent run id (ambient
+  // metering context) and keys every per-step metering event. It is
+  // carried on the result so a pause can persist it and a resume can
+  // continue under the same identity (see resumeAgentLoopV2).
+  const logicalRunId = meteringRunId;
+
   // Quality loop (opt-in): create the evidence session and teach the agent
   // the stage contract. All hooks below degrade gracefully — the gate
   // itself is enforced at finalize() time, never mid-run.
@@ -2766,6 +3154,14 @@ async function runAgentLoopV2Inner(
   // overwrite or a trailing no-op mutation can no longer make a real build
   // read as "unchanged".
   let baselineCheckpoint: { checkpointId: string; label: string; gitSha: string } | undefined;
+  // P0 R1: the first checkpoint-creation ERROR this run observed (the
+  // transport records it on lastCheckpointError; a null result with no
+  // recorded error is a static workspace's "not applicable", never a
+  // failure). Reported on the result only while the run holds no
+  // checkpoint — a later successful creation heals it.
+  let checkpointCreationError: string | undefined;
+  const reportableCheckpointFailure = (): string | undefined =>
+    baselineCheckpoint ?? checkpoint ? undefined : checkpointCreationError;
   const toolCallLog: AgentToolCallLogEntry[] = [];
   // Reply-content guard state: the exact contents this run writes
   // (the closing reply is checked against them at finalize), and the
@@ -2813,7 +3209,19 @@ async function runAgentLoopV2Inner(
   let buildGuardWindowModel = "";
   const buildGuardExcluded = new Set<string>();
   const buildGuardTried: Array<{ canonicalId: string; reason: string }> = [];
+  // P0 R4: the run's model transitions (route failover + guard
+  // switches), carried on the result into the persisted run record.
+  // lastServedModel keeps the record honest: a transition is a CHANGE
+  // of serving model (or a step reached only after failed attempts) —
+  // continuation steps on the same fallback model are not new
+  // transitions.
+  const modelTransitions: ModelTransitionRecord[] = [];
+  let lastServedModel: string | undefined;
   let buildGuardModelHint: string | undefined;
+  // CanonicalId of the current hint — the fallback exclusion target
+  // when a write-less window's SERVING model cannot be mapped to the
+  // registry (see the guard block below).
+  let buildGuardHintCanonicalId: string | undefined;
 
   // Check if any mutations have been requested (for checkpoint logic)
   let mutationBatchPending = false;
@@ -2850,6 +3258,10 @@ async function runAgentLoopV2Inner(
     // The build capability guard may have switched the serving model
     // mid-run; its hint routes through planBasicRoutes on the next step.
     const requestedModel = buildGuardModelHint ?? cfg.model;
+    // P0 R4: this step's failed route attempts, reported by
+    // callLLMWithTools through onRouteAttempts (accumulates across
+    // the internal whole-plan retry, which reports each pass).
+    const stepRouteAttempts: RouteAttemptFailure[] = [];
     try {
       llmResponse = await callLLMWithTools(
         cfg.systemPrompt,
@@ -2872,6 +3284,11 @@ async function runAgentLoopV2Inner(
           allowLittPaidProviders: cfg.allowLittPaidProviders,
           allowTransientPlanRetry: true,
           onRoutePlan: recordRoutePlan,
+          // P0 R4: collect the step's failed route attempts so the
+          // transition (and its reason) can be persisted below.
+          onRouteAttempts: (attempts) => {
+            stepRouteAttempts.push(...attempts);
+          },
           // D4 text channel (guarded): the step's reply text is
           // buffered by the guarded text stream, not emitted raw —
           // a closing reply that dumps a written file must never
@@ -2900,7 +3317,33 @@ async function runAgentLoopV2Inner(
         latencyMs: llmDurationMs,
         canonicalId: routedRecord?.canonicalId,
         configSource: routedRecord ? getModelConfigSource(routedRecord.canonicalId) : undefined,
+        // P0 R4: the failover evidence rides the routing event too.
+        ...(stepRouteAttempts.length > 0
+          ? { failover: sanitizeRouteAttempts(stepRouteAttempts) }
+          : {}),
       });
+      // P0 R4: when the serving model changed from the previous
+      // step's (or from the request, on the first step), or the step
+      // was reached only after failed attempts, persist the
+      // transition WITH its reason — the routing event above is
+      // stream noise and is never stored.
+      if (
+        stepRouteAttempts.length > 0 ||
+        llmResponse.model !== (lastServedModel ?? requestedModel ?? llmResponse.model)
+      ) {
+        recordModelTransition(
+          modelTransitions,
+          localProgress,
+          transitionFromAttempts(
+            lastServedModel ?? requestedModel ?? cfg.model,
+            llmResponse.model,
+            llmResponse.provider ?? "unknown",
+            stepRouteAttempts,
+            stepsUsed,
+          ),
+        );
+      }
+      lastServedModel = llmResponse.model;
       // Canonical metering (P0): one usage+cost event per step's LLM call.
       // provider/model are from the ACTUAL call; token counts are chars/4
       // estimates (callLLMWithTools exposes no usage) — see helper.
@@ -2940,6 +3383,23 @@ async function runAgentLoopV2Inner(
         message: errMsg.slice(0, 200),
       });
       modelFailed = errMsg.slice(0, 200);
+      // P0 R4: a step that died on its routes still leaves its
+      // transition record — the attempts and their failure classes
+      // are the reason no model served.
+      if (stepRouteAttempts.length > 0) {
+        const lastAttempt = stepRouteAttempts[stepRouteAttempts.length - 1];
+        const rec = transitionFromAttempts(
+          requestedModel ?? cfg.model,
+          lastAttempt.model,
+          lastAttempt.provider,
+          stepRouteAttempts,
+          stepsUsed,
+        );
+        recordModelTransition(modelTransitions, localProgress, {
+          ...rec,
+          reason: `${rec.reason} — all routes failed`,
+        });
+      }
       finalText = completedDeployment
         ? describeProviderFailureAfterDeployment(completedDeployment, errMsg)
         : err instanceof AllRoutesFailedError
@@ -3002,7 +3462,7 @@ async function runAgentLoopV2Inner(
             "The model's patch was rejected and its reply contained no recovery action — requiring a corrected patch or files.write...",
         });
         llmMessages.push({ role: "assistant", content: zeroCallText });
-        llmMessages.push({ role: "user", content: buildPatchRecoveryForceMessage(pendingPatchRejection) });
+        llmMessages.push({ role: "user", origin: "internal", content: buildPatchRecoveryForceMessage(pendingPatchRejection) });
         continue;
       }
       const resolution = resolveZeroToolCalls(zeroCallText, continuationNudges, {
@@ -3029,7 +3489,7 @@ async function runAgentLoopV2Inner(
             "The model announced more work but emitted no tool calls — asking it to continue...",
         });
         llmMessages.push({ role: "assistant", content: zeroCallText });
-        llmMessages.push({ role: "user", content: resolution.nudgeMessage });
+        llmMessages.push({ role: "user", origin: "internal", content: resolution.nudgeMessage });
         continue;
       }
       if (resolution.action === "stall") {
@@ -3217,6 +3677,33 @@ async function runAgentLoopV2Inner(
             toolId: toolCall.toolId,
             success: true,
             summary: "skipped — already executed",
+            durationMs: 0,
+          });
+          continue;
+        }
+      }
+
+      // P0 R8 — duplicate-publishing prevention: a project.deploy
+      // call in a run that already completed this publish (and no
+      // successful mutation has landed since) replays the recorded
+      // deployment outcome instead of executing a second publish —
+      // and never reaches the approval gate, so a retry cannot mint
+      // a second approval for the same operation either.
+      if (toolCall.toolId === "project.deploy") {
+        const replay = duplicateDeploymentReplay(completedDeployment, toolCallLog);
+        if (replay) {
+          llmMessages.push(buildToolResultMessage({
+            toolCallId: toolCall.toolCallId,
+            toolId: toolCall.toolId,
+            result: replay,
+            success: true,
+          }));
+          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — publish already completed in this run", mutating: true });
+          localProgress.emit({
+            type: "tool_result",
+            toolId: toolCall.toolId,
+            success: true,
+            summary: "skipped — publish already completed in this run",
             durationMs: 0,
           });
           continue;
@@ -3490,6 +3977,17 @@ async function runAgentLoopV2Inner(
             label: checkpoint.label,
             gitSha: checkpoint.gitSha,
           });
+        } else if (!checkpointCreationError) {
+          // P0 R1: stop swallowing a failed creation — record it (and
+          // say so live) so the pause result can carry it and a resume
+          // can refuse a run with no verified baseline.
+          checkpointCreationError = checkpointAttemptFailure(checkpoint, transport);
+          if (checkpointCreationError) {
+            localProgress.emit({
+              type: "status",
+              summary: `Workspace checkpoint could not be created (${checkpointCreationError}). The failure is recorded on this run; if it pauses for approval, it cannot be resumed safely.`,
+            });
+          }
         }
         mutationBatchPending = true;
         batchHasMutation = true;
@@ -3502,19 +4000,69 @@ async function runAgentLoopV2Inner(
         permResult.requiresApproval && !buildScopeCoversTool(buildScopeAuthorized, toolCall.toolId);
 
       if (requiresApproval) {
+        // P0 R6 — destructive-action safety (see prepareDestructiveGate):
+        // an unidentified target creates NO approval; a run already at
+        // the destructive-streak limit ends honestly instead of asking
+        // again; otherwise the gate carries the structured card data.
+        const destructivePrep = await prepareDestructiveGate({
+          toolId: toolCall.toolId,
+          inputs: toolCall.inputs,
+          fallbackReason: permResult.reason ?? "Approval required",
+          transport,
+          recoveryAvailable: (baselineCheckpoint ?? checkpoint) != null,
+          toolCallLog,
+        });
+        if (destructivePrep.refusalError) {
+          const result: ToolCallResult = {
+            toolCallId: toolCall.toolCallId,
+            toolId: toolCall.toolId,
+            result: null,
+            success: false,
+            error: destructivePrep.refusalError,
+          };
+          llmMessages.push(buildToolResultMessage(result));
+          toolCallLog.push({
+            toolId: toolCall.toolId,
+            success: false,
+            summary: "Refused — destructive action without an identified target",
+            mutating: true,
+          });
+          toolCallRecords.push({
+            toolId: toolCall.toolId,
+            inputsHash: hashInputs(toolCall.inputs),
+            resultHash: hashResult(null),
+            step: stepsUsed,
+            success: false,
+            mutating: true,
+          });
+          localProgress.emit({
+            type: "tool_result",
+            toolId: toolCall.toolId,
+            success: false,
+            summary: "Refused — destructive action without an identified target",
+            durationMs: 0,
+          });
+          continue;
+        }
+        if (destructivePrep.loopError) {
+          failedHonestly = destructivePrep.loopError;
+          finalText = destructivePrep.loopError;
+          localProgress.emit({ type: "status", summary: destructivePrep.loopError });
+          break;
+        }
         // ACC-07: the first gated build-scope call of a run asks for
         // the SCOPE, not just the step — its card carries the scope
         // text stating what the approval authorizes.
         const grantsBuildScope = !buildScopeAuthorized && isBuildScopeTool(toolCall.toolId);
         // Phase 3: browser mutations get an action-and-target description
         // so the in-chat approval card says what is being approved.
-        const approvalReason = grantsBuildScope
+        const approvalReason = destructivePrep.reason ?? (grantsBuildScope
           ? buildScopeApprovalReason(toolCall.toolId)
           : await pauseReasonFor(
               toolCall.toolId,
               toolCall.inputs,
               permResult.reason ?? "Approval required",
-            );
+            ));
         localProgress.emit({
           type: "approval_required",
           toolId: toolCall.toolId,
@@ -3554,6 +4102,12 @@ async function runAgentLoopV2Inner(
             // landed after the gate — instead of reporting "unchanged"
             // while pre-pause writes sit inside the pause-side commit.
             baselineCheckpoint: baselineCheckpoint ?? checkpoint ?? undefined,
+            // P0 R1: a failed checkpoint creation rides the pause
+            // result into the persisted paused-run record, so the
+            // resume can refuse this run explicitly.
+            checkpointFailure: reportableCheckpointFailure(),
+    modelTransitions: modelTransitions.length > 0 ? [...modelTransitions] : undefined,
+    logicalRunId,
             // Observability (Part J): the run pauses here awaiting approval.
             runObservability: finishRunObservability(runObs, "awaiting_approval"),
             // The quality session snapshot rides at the TOP level too,
@@ -3578,6 +4132,8 @@ async function runAgentLoopV2Inner(
               priorToolCalls: [...toolCallLog],
               grantsBuildScope,
               buildScopeApproved: buildScopeAuthorized,
+              // P0 R6: the destructive-action card data rides the pause.
+              destructiveAction: destructivePrep.assessment,
             },
             finalMessages: [...llmMessages],
           };
@@ -3600,19 +4156,34 @@ async function runAgentLoopV2Inner(
       // corrective nudge (the content is already in context; spend the
       // step mutating). Exhausted read nudges still cancel honestly;
       // failed writes are bounded by the step budget instead.
+      // The same-tool streak breaker (coordination fix) shares this
+      // site and its nudge budget: identical inputs are not required
+      // — a streak of successful calls to one non-writing tool with
+      // varying inputs and no file written is the same loop wearing
+      // different arguments.
       const inputsHash = hashInputs(toolCall.inputs);
-      if (toolDef.readOnly && detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation)) {
+      const identicalRepeat = toolDef.readOnly && detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation);
+      const sameToolStreak = identicalRepeat || toolDef.readOnly || cfg.buildCapabilityGuard
+        ? 0
+        : countSameToolNonWritingStreak(toolCallRecords, toolCall.toolId);
+      if (identicalRepeat || sameToolStreak >= SAME_TOOL_STREAK_LIMIT) {
         if (readLoopNudges < READ_LOOP_NUDGE_MAX) {
           readLoopNudges += 1;
           localProgress.emit({
             type: "status",
-            summary: `Repeated ${toolCall.toolId} — nudging the model to apply the change instead of re-reading`,
+            summary: identicalRepeat
+              ? `Repeated ${toolCall.toolId} — nudging the model to apply the change instead of re-reading`
+              : `Repeated ${toolCall.toolId} — nudging the model to use the results already in context instead of fetching more`,
           });
-          llmMessages.push(buildToolResultMessage(buildReadLoopNudgeResult(toolCall)));
+          llmMessages.push(buildToolResultMessage(
+            identicalRepeat ? buildReadLoopNudgeResult(toolCall) : buildSameToolStreakNudgeResult(toolCall, sameToolStreak),
+          ));
           continue;
         }
         cancelled = true;
-        cancelReason = `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`;
+        cancelReason = identicalRepeat
+          ? `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`
+          : sameToolStreakCancelReason(toolCall.toolId, sameToolStreak);
         break;
       }
 
@@ -3779,6 +4350,10 @@ async function runAgentLoopV2Inner(
     }
 
     if (cancelled) break;
+    // P0 R6: a destructive-loop stop inside the batch settles the run
+    // failed — exit before any further step (the resume loop's
+    // post-batch check does the same for its breaker).
+    if (failedHonestly) break;
 
     // Early bounded capability guard (BUILD runs only): a model that keeps
     // emitting tool calls but never file-writing calls is ruled out within
@@ -3814,6 +4389,25 @@ async function runAgentLoopV2Inner(
           recordHealthOutcome(excludedCanonicalId, false, "no_file_write_calls");
           recordModelFailure(buildGuardWindowProvider, buildGuardWindowModel);
           buildGuardTried.push({ canonicalId: excludedCanonicalId, reason });
+        } else if (
+          distinctModels.length === 0 &&
+          buildGuardHintCanonicalId &&
+          !buildGuardExcluded.has(buildGuardHintCanonicalId)
+        ) {
+          // The window's serving model is not in the registry (a
+          // substituted or custom route), so there is no serving
+          // model to rule out — without a growing exclusion the guard
+          // would re-switch to the same hint until the run budget
+          // died. Charge the window to the model the guard itself
+          // requested for it (the active hint): run-local exclusion
+          // only, no health recording — the hinted model did not
+          // provably fail, the route simply never served it.
+          excludedCanonicalId = buildGuardHintCanonicalId;
+          buildGuardExcluded.add(excludedCanonicalId);
+          buildGuardTried.push({
+            canonicalId: excludedCanonicalId,
+            reason: `${reason} (serving model unmapped; charged to the requested build model)`,
+          });
         } else {
           buildGuardTried.push({
             canonicalId: distinctModels.length === 0 ? "unmapped" : distinctModels.join("+"),
@@ -3853,6 +4447,16 @@ async function runAgentLoopV2Inner(
         // Continue the SAME conversation on the next eligible build model —
         // the hint routes through planBasicRoutes on the following step.
         buildGuardModelHint = next.providerModelId;
+        buildGuardHintCanonicalId = next.canonicalId;
+        // P0 R4: the guard switch is a model transition — record it
+        // with its reason (the excluded model produced no file writes).
+        recordModelTransition(modelTransitions, localProgress, {
+          from: excludedCanonicalId ?? requestedModel ?? "unknown",
+          to: next.canonicalId,
+          provider: next.provider,
+          reason: "no_file_write_calls",
+          step: stepsUsed,
+        });
         localProgress.emit({
           type: "status",
           summary: `Switching build model to ${next.canonicalId} — the previous model produced no file writes in ${buildGuardZeroWriteSteps} steps.`,
@@ -3889,6 +4493,7 @@ async function runAgentLoopV2Inner(
         literalRepairFeedbackGiven = true;
         llmMessages.push({
           role: "user",
+          origin: "internal",
           content: requestedLiteralRepairPrompt(literalCheck.literal, literalCheck.checkedFiles),
         });
         localProgress.emit({
@@ -3920,6 +4525,7 @@ async function runAgentLoopV2Inner(
         contrastRepairFeedbackGiven = true;
         llmMessages.push({
           role: "user",
+          origin: "internal",
           content: textContrastRepairPrompt(contrastCheck.violations),
         });
         localProgress.emit({
@@ -3954,6 +4560,7 @@ async function runAgentLoopV2Inner(
         layoutRepairFeedbackGiven = true;
         llmMessages.push({
           role: "user",
+          origin: "internal",
           content: renderedLayoutRepairPrompt(layoutCheck.violations),
         });
         localProgress.emit({
@@ -4021,6 +4628,30 @@ async function runAgentLoopV2Inner(
     });
     if (literalCheck.applies && !literalCheck.found && literalCheck.literal) {
       failedHonestly = requestedLiteralFailureMessage(literalCheck.literal);
+      finalText = failedHonestly;
+    }
+  }
+
+  // P0 R7 — content/instruction separation: the run's own instruction
+  // text and internal execution markers must never appear in a
+  // generated page. The 2026-11-26 acceptance rebuild pasted the
+  // user's repair message verbatim into the site's footer and the run
+  // reported success; a proven leak settles the run honestly as
+  // failed instead of shipping internal text as website content.
+  if (!cancelled && !failedHonestly) {
+    const leakCheck = await checkInstructionLeakage({
+      instructions: [userMessage],
+      // Coordination fix (c): the loop's own injected messages are
+      // internal content (provenance marker) — checked with no
+      // quoted-content exemption, never treated as the customer's.
+      internalInstructions: llmMessages
+        .filter((m) => m.origin === "internal")
+        .map((m) => m.content),
+      candidatePaths: successfulMutationPaths(toolCallLog),
+      readFile: (path) => transport.readFile(path),
+    });
+    if (leakCheck.applies && leakCheck.leaked.length > 0) {
+      failedHonestly = instructionLeakageFailureMessage(leakCheck.leaked);
       finalText = failedHonestly;
     }
   }
@@ -4148,6 +4779,17 @@ async function runAgentLoopV2Inner(
       ? `The build checks did not all pass after ${buildFixResult.repairAttempts} repair attempts.`
       : describeSilentOutcome(toolCallLog, cancelled, cancelReason));
 
+  // P0 R3: verify referenced assets exist before completion can be
+  // declared — noted into the quality session first so the verdict
+  // below sees it, and carried into settlement as its asset
+  // condition. Runs for every static run, including deploy-only runs
+  // the per-mutation enrichment pass never fired for.
+  const missingAssetRefs = await verifyStaticSiteAssetReferences(
+    transport,
+    qualitySession,
+    cfg.isStaticWorkspace,
+  );
+
   // Quality gate: finalize the evidence ledger and compute the verdict.
   // When the verdict refuses success, say so plainly in the closing text
   // instead of letting it imply the work is done.
@@ -4222,6 +4864,16 @@ async function runAgentLoopV2Inner(
   // wrap-up route failure after the deliverable landed settles
   // completed-with-warning instead of failing work that succeeded;
   // every failure contributor is recorded either way.
+  // Milestone-aware settlement (coordination fix): the publish
+  // milestone is in this run's authorized scope when the user asked
+  // to publish/deploy, the run is deploy-only, or a deploy was
+  // attempted in the run — and it counts as reached only on R8's
+  // verified deployment record (completedDeployment). A build never
+  // asked to publish gains no deployment requirement (ACC-10).
+  const deploymentRequired =
+    deployOnlyRun ||
+    instructionRequestsDeploy(userMessage) ||
+    toolCallLog.some((call) => DEPLOY_TOOL_IDS.has(call.toolId));
   const settlement = settleRunOutcome({
     cancelled,
     modelFailed,
@@ -4229,6 +4881,11 @@ async function runAgentLoopV2Inner(
     toolCalls: toolCallLog,
     qualityVerdictOk: qualityFinale ? qualityFinale.verdict.ok : null,
     workspaceChange,
+    // P0 R3: surviving broken asset references — success is
+    // impossible while any remain (see run-settlement.ts).
+    missingAssetRefs,
+    deploymentRequired,
+    deploymentVerified: completedDeployment != null,
   });
   if (settlement.completedWithWarning) {
     localProgress.emit({ type: "status", summary: settlement.completedWithWarning });
@@ -4334,6 +4991,13 @@ async function runAgentLoopV2Inner(
     completedWithWarning: settlement.completedWithWarning,
     failureContributors: settlement.failureContributors,
     baselineCheckpoint,
+    checkpointFailure: reportableCheckpointFailure(),
+    modelTransitions: modelTransitions.length > 0 ? [...modelTransitions] : undefined,
+    logicalRunId,
+    // P0 R8: the completed deployment's recorded outcome rides the
+    // result beside the logical run ID (publishing ↔ billing
+    // correlation on the persisted run record).
+    deployment: completedDeployment,
     qualityLoop: qualityFinale
       ? {
           verdict: qualityFinale.verdict,
@@ -4384,25 +5048,50 @@ function describeSilentOutcome(
  * "I encountered an error" would hide completed work — and would also invite
  * a retry that deploys a second time.
  */
-interface CompletedDeployment {
+export interface CompletedDeployment {
   deploymentId: string | null;
   publicUrl: string;
   /** The project's stable public URL when the deploy produced one —
    *  carried separately from publicUrl (which already prefers it) so
    *  the settled reply can GUARANTEE its presence (ACC-05 item 3). */
   stablePublicUrl: string | null;
+  /** P0 R8: the deployment record's own status ("ready" for a
+   *  completed publish), url verification, and content-reuse flags —
+   *  the recorded outcome the run's completion claim rests on.
+   *  Null when the deploy result carried no deployment record. */
+  status: string | null;
+  urlVerified: boolean | null;
+  reused: boolean;
 }
 
 /** Extract a completed deployment from a successful project.deploy result. */
-function readDeploymentOutcome(toolId: string, result: unknown): CompletedDeployment | null {
+export function readDeploymentOutcome(toolId: string, result: unknown): CompletedDeployment | null {
   if (toolId !== "project.deploy" || !result || typeof result !== "object") return null;
   const payload = result as {
     success?: boolean;
     liveUrl?: unknown;
     stablePublicUrl?: unknown;
-    deployment?: { deploymentId?: unknown; publicUrl?: unknown; stablePublicUrl?: unknown; status?: unknown };
+    deployment?: {
+      deploymentId?: unknown;
+      publicUrl?: unknown;
+      stablePublicUrl?: unknown;
+      status?: unknown;
+      urlVerified?: unknown;
+      reused?: unknown;
+    };
   };
   if (payload.success !== true) return null;
+  // P0 R8 — publishing integrity: the run's completion claim must
+  // rest on the deployment's RECORDED outcome, not on the tool's
+  // success flag alone. A deployment record that is not "ready", or
+  // whose live URL was never verified, is not a completed publish —
+  // the deploy service verifies the URL before it may claim success,
+  // so a success payload carrying an unverified or non-ready record
+  // is contradictory evidence and grounds no completion claim.
+  const status = typeof payload.deployment?.status === "string" ? payload.deployment.status : null;
+  const urlVerified = typeof payload.deployment?.urlVerified === "boolean" ? payload.deployment.urlVerified : null;
+  if (status !== null && status !== "ready") return null;
+  if (urlVerified === false) return null;
   // ACC-03 item 1: the URL a deploy reports is the project's STABLE
   // address (/sites/project/<projectId>/, F8a) — the one that keeps
   // serving the latest publish — not the per-deployment snapshot URL.
@@ -4423,7 +5112,57 @@ function readDeploymentOutcome(toolId: string, result: unknown): CompletedDeploy
     deploymentId: typeof payload.deployment?.deploymentId === "string" ? payload.deployment.deploymentId : null,
     publicUrl: url,
     stablePublicUrl: stableUrl,
+    status,
+    urlVerified,
+    reused: payload.deployment?.reused === true,
   };
+}
+
+/**
+ * P0 R8 — duplicate-publishing prevention at the operation level.
+ * When this run already holds a completed deployment and no
+ * successful non-deploy mutation has landed since that publish, a
+ * further project.deploy call is the SAME publish operation being
+ * retried (a model retry, a UI double-submit replayed into the run,
+ * a provider re-emission): executing it again would publish twice
+ * for one authorized operation. The caller feeds back the recorded
+ * outcome instead — the model sees the deployment that already
+ * exists and the run keeps exactly one publish. A successful
+ * mutation after the publish changes the content, so a later deploy
+ * is a genuinely new operation and returns null here.
+ *
+ * Cross-segment duplicates (a second deploy approved in a later
+ * segment) are covered one layer down by the deploy service's own
+ * idempotency: identical content reuses the ready deployment record
+ * instead of creating a second one. This guard closes the
+ * within-segment gap that layer cannot see.
+ */
+export function duplicateDeploymentReplay(
+  completedDeployment: CompletedDeployment | null,
+  toolCallLog: ReadonlyArray<{ toolId: string; success: boolean; mutating: boolean }>,
+): Record<string, unknown> | null {
+  if (!completedDeployment) return null;
+  for (let i = toolCallLog.length - 1; i >= 0; i--) {
+    const entry = toolCallLog[i];
+    if (entry.toolId === "project.deploy" && entry.success) {
+      return {
+        success: true,
+        duplicatePrevented: true,
+        deployment: {
+          deploymentId: completedDeployment.deploymentId,
+          status: completedDeployment.status ?? "ready",
+          publicUrl: completedDeployment.publicUrl,
+          stablePublicUrl: completedDeployment.stablePublicUrl,
+          urlVerified: completedDeployment.urlVerified,
+          reused: true,
+        },
+        liveUrl: completedDeployment.publicUrl,
+        stablePublicUrl: completedDeployment.stablePublicUrl,
+      };
+    }
+    if (entry.mutating && entry.success && entry.toolId !== "project.deploy") return null;
+  }
+  return null;
 }
 
 /**
@@ -4562,6 +5301,14 @@ export interface ResumeInput {
   /** Existing checkpoint (if created before pause) */
   existingCheckpoint?: { checkpointId: string; label: string; gitSha: string };
   /**
+   * P0 R5: the paused run's stable logical identity, read from the
+   * paused-run record by the approvals route. When present, this
+   * segment adopts it as its metering identity and continues the
+   * SAME observability record; when absent (legacy record), the
+   * segment derives a local identity exactly as before.
+   */
+  logicalRunId?: string;
+  /**
    * Calls deferred from the batch that hit the approval gate. Executed
    * after the approved tool on resume (in batch order), through the same
    * validate → permission → dedupe → execute machinery as a live batch.
@@ -4635,6 +5382,12 @@ export interface DeferredToolBatchState {
    * and settles the run failed instead of creating another gate.
    */
   failedHonestly?: string;
+  /**
+   * P0 R1: the first checkpoint-creation error observed inside the
+   * deferred batch (see checkpointAttemptFailure). The resume path
+   * merges it into its own checkpoint-failure record.
+   */
+  checkpointError?: string;
 }
 
 export interface DeferredToolBatchContext {
@@ -4654,6 +5407,13 @@ export interface DeferredToolBatchContext {
   maxOutputChars: number;
   /** Upstream/client abort signal. Deferred execution must honor the same stop request as the resumed loop. */
   signal?: AbortSignal;
+  /**
+   * Coordination fix (b): the owning run carries the build
+   * capability guard — write-less chains there belong to the
+   * guard's model-switching, so the same-tool streak breaker
+   * stands down in the deferred batch exactly as in the loops.
+   */
+  buildGuardActive?: boolean;
   state: DeferredToolBatchState;
   /**
    * Authenticated user id — injected into user-scoped tools (browser.*)
@@ -4772,6 +5532,30 @@ export async function executeDeferredToolCalls(
       }
     }
 
+    // P0 R8 — duplicate-publishing prevention in the deferred batch
+    // too: replay the recorded deployment instead of a second
+    // publish (see duplicateDeploymentReplay).
+    if (toolCall.toolId === "project.deploy") {
+      const replay = duplicateDeploymentReplay(state.completedDeployment, ctx.toolCallLog);
+      if (replay) {
+        ctx.llmMessages.push(buildToolResultMessage({
+          toolCallId: toolCall.toolCallId,
+          toolId: toolCall.toolId,
+          result: replay,
+          success: true,
+        }));
+        ctx.toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — publish already completed in this run", mutating: true });
+        ctx.localProgress.emit({
+          type: "tool_result",
+          toolId: toolCall.toolId,
+          success: true,
+          summary: "skipped — publish already completed in this run",
+          durationMs: 0,
+        });
+        continue;
+      }
+    }
+
     const inputsHash = hashInputs(toolCall.inputs);
 
     // Gated-repeat breaker (§6.1): a gated mutation that keeps failing
@@ -4813,16 +5597,64 @@ export async function executeDeferredToolCalls(
       permResult.requiresApproval && !buildScopeCoversTool(ctx.buildScopeApproved === true, toolCall.toolId);
 
     if (requiresApproval) {
+      // P0 R6 — destructive-action safety on the nested gate too (see
+      // prepareDestructiveGate): no approval for an unidentified
+      // target, no re-asking past the destructive-streak limit.
+      const destructivePrep = await prepareDestructiveGate({
+        toolId: toolCall.toolId,
+        inputs: toolCall.inputs,
+        fallbackReason: permResult.reason ?? "Approval required",
+        transport: ctx.transport,
+        recoveryAvailable: (state.baselineCheckpoint ?? state.checkpoint) != null,
+        toolCallLog: ctx.toolCallLog,
+      });
+      if (destructivePrep.refusalError) {
+        const result: ToolCallResult = {
+          toolCallId: toolCall.toolCallId,
+          toolId: toolCall.toolId,
+          result: null,
+          success: false,
+          error: destructivePrep.refusalError,
+        };
+        ctx.llmMessages.push(buildToolResultMessage(result));
+        ctx.toolCallLog.push({
+          toolId: toolCall.toolId,
+          success: false,
+          summary: "Refused — destructive action without an identified target",
+          mutating: true,
+        });
+        ctx.toolCallRecords.push({
+          toolId: toolCall.toolId,
+          inputsHash,
+          resultHash: hashResult(null),
+          step: ctx.stepsUsed,
+          success: false,
+          mutating: true,
+        });
+        ctx.localProgress.emit({
+          type: "tool_result",
+          toolId: toolCall.toolId,
+          success: false,
+          summary: "Refused — destructive action without an identified target",
+          durationMs: 0,
+        });
+        continue;
+      }
+      if (destructivePrep.loopError) {
+        state.failedHonestly = destructivePrep.loopError;
+        ctx.localProgress.emit({ type: "status", summary: destructivePrep.loopError });
+        break;
+      }
       const grantsBuildScope = ctx.buildScopeApproved !== true && isBuildScopeTool(toolCall.toolId);
       // Phase 3: browser mutations get an action-and-target description
       // on the nested gate too.
-      const approvalReason = grantsBuildScope
+      const approvalReason = destructivePrep.reason ?? (grantsBuildScope
         ? buildScopeApprovalReason(toolCall.toolId)
         : await pauseReasonFor(
             toolCall.toolId,
             toolCall.inputs,
             permResult.reason ?? "Approval required",
-          );
+          ));
       ctx.localProgress.emit({
         type: "approval_required",
         toolId: toolCall.toolId,
@@ -4846,6 +5678,8 @@ export async function executeDeferredToolCalls(
             priorToolCalls: [...ctx.toolCallLog],
             grantsBuildScope,
             buildScopeApproved: ctx.buildScopeApproved === true,
+            // P0 R6: the destructive-action card data rides the pause.
+            destructiveAction: destructivePrep.assessment,
           },
         };
       }
@@ -4864,18 +5698,30 @@ export async function executeDeferredToolCalls(
     // Loop detection — same bounded read-loop nudge as the main loop;
     // nudge budget lives on `state` so it carries across the boundary.
     // inputsHash was computed above, before the permission check.
-    if (toolDef.readOnly && detectRepeatedCalls(ctx.toolCallRecords, toolCall.toolId, inputsHash, state.hasInterveningMutation)) {
+    // The same-tool streak breaker shares the site and budget,
+    // exactly as in the main loop (see there).
+    const identicalRepeat = toolDef.readOnly && detectRepeatedCalls(ctx.toolCallRecords, toolCall.toolId, inputsHash, state.hasInterveningMutation);
+    const sameToolStreak = identicalRepeat || toolDef.readOnly || ctx.buildGuardActive
+      ? 0
+      : countSameToolNonWritingStreak(ctx.toolCallRecords, toolCall.toolId);
+    if (identicalRepeat || sameToolStreak >= SAME_TOOL_STREAK_LIMIT) {
       if ((state.readLoopNudges ?? 0) < READ_LOOP_NUDGE_MAX) {
         state.readLoopNudges = (state.readLoopNudges ?? 0) + 1;
         ctx.localProgress.emit({
           type: "status",
-          summary: `Repeated ${toolCall.toolId} — nudging the model to apply the change instead of re-reading`,
+          summary: identicalRepeat
+            ? `Repeated ${toolCall.toolId} — nudging the model to apply the change instead of re-reading`
+            : `Repeated ${toolCall.toolId} — nudging the model to use the results already in context instead of fetching more`,
         });
-        ctx.llmMessages.push(buildToolResultMessage(buildReadLoopNudgeResult(toolCall)));
+        ctx.llmMessages.push(buildToolResultMessage(
+          identicalRepeat ? buildReadLoopNudgeResult(toolCall) : buildSameToolStreakNudgeResult(toolCall, sameToolStreak),
+        ));
         continue;
       }
       state.cancelled = true;
-      state.cancelReason = `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`;
+      state.cancelReason = identicalRepeat
+        ? `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`
+        : sameToolStreakCancelReason(toolCall.toolId, sameToolStreak);
       break;
     }
 
@@ -4896,6 +5742,15 @@ export async function executeDeferredToolCalls(
           label: state.checkpoint.label,
           gitSha: state.checkpoint.gitSha,
         });
+      } else if (!state.checkpointError) {
+        // P0 R1: record a failed creation instead of swallowing it.
+        state.checkpointError = checkpointAttemptFailure(state.checkpoint, ctx.transport);
+        if (state.checkpointError) {
+          ctx.localProgress.emit({
+            type: "status",
+            summary: `Workspace checkpoint could not be created (${state.checkpointError}). The failure is recorded on this run; if it pauses for approval, it cannot be resumed safely.`,
+          });
+        }
       }
     }
 
@@ -5022,8 +5877,21 @@ async function resumeAgentLoopV2Inner(
 
   // Canonical metering (P0): same per-step emission as the fresh loop —
   // stable per-resume id so resumed steps stay idempotent.
+  // P0 R5: the paused run's logical identity outranks the quality
+  // session's id and the random fallback — the resumed segment meters
+  // under the SAME id as the initial segment (an ambient metering
+  // context, when a route provides one, still wins: it is the
+  // billing run the route is settling). Step indices continue from
+  // stepsUsedBeforePause, so per-step metering keys cannot collide
+  // across segments. The billing reservation itself
+  // (approval-resume:<pausedRunId>) is untouched by this identity.
   const meteringRunId =
-    getMeteringContext()?.runId ?? cfg.qualityLoop?.runId ?? randomUUID();
+    getMeteringContext()?.runId ?? resume.logicalRunId ?? cfg.qualityLoop?.runId ?? randomUUID();
+  // The identity this segment carries forward (onto its result, and
+  // onto any nested paused-run record): the threaded logical id when
+  // present, else this segment's metering id — so the identity
+  // stabilizes from the first R5-aware pause onward.
+  const logicalRunId = resume.logicalRunId ?? meteringRunId;
 
   // Quality loop (opt-in): restore the server-persisted evidence session from
   // before the approval pause. The paused messages are still re-harvested for
@@ -5067,11 +5935,14 @@ async function resumeAgentLoopV2Inner(
   await applyTopicPackContext(cfg, resumeUserMessage, transport);
 
   // ── Run observability on resume (Part J, D) ──
-  // The approval pause breaks the original run's observability record
-  // (not yet persisted across pauses); start a continuation record linked
-  // by runId so the resumed segment's tool use is still captured.
+  // P0 R5: when the paused record carried the run's logical identity,
+  // the resumed segment continues the SAME observability record (same
+  // runId as the initial segment) — the ":resume" offshoot existed
+  // only because the identity was never persisted across the pause.
+  // Legacy records (no logicalRunId) keep the historical offshoot
+  // name exactly as before.
   const resumeRunObs = startRunObservability({
-    runId: `${meteringRunId}:resume`,
+    runId: resume.logicalRunId ?? `${meteringRunId}:resume`,
     goal: resumeUserMessage.slice(0, 500),
     agentMode: cfg.executionMode,
     capabilityPlan: resumeCapabilityPlan,
@@ -5213,6 +6084,13 @@ async function resumeAgentLoopV2Inner(
   // already committed. Legacy rows stored the latest pre-pause checkpoint
   // instead; seeding from it keeps the pre-change "post-gate only" view.
   let baselineCheckpoint = resume.existingCheckpoint;
+  // P0 R1: first checkpoint-creation error observed during THIS
+  // resumed segment (same semantics as the initial loop). Reported
+  // only while the segment holds no checkpoint — a run that resumed
+  // with a valid baseline, or creates one here, is not marked.
+  let checkpointCreationError: string | undefined;
+  const reportableCheckpointFailure = (): string | undefined =>
+    baselineCheckpoint ?? checkpoint ? undefined : checkpointCreationError;
   // Seed the evidence log with pre-pause calls: a resumed run's
   // persisted/complete verdict must cover the full mutation history, not
   // just what ran after the gate.
@@ -5463,6 +6341,33 @@ async function resumeAgentLoopV2Inner(
   // are not model steps and never count; the counter persists across
   // approval cycles via pendingApproval.zeroWriteStepsAtPause.
   let resumeZeroWriteSteps = resume.zeroWriteStepsAtPause ?? 0;
+  // P0 R2 (execution integrity, audit D5): the resumed loop gets the
+  // SAME bounded model-switch escape as the initial loop's build
+  // guard — a window of write-less steps rules out the serving model
+  // and continues the SAME conversation on the next eligible build
+  // model instead of failing the run outright. The bookkeeping mirrors
+  // the initial loop exactly (window model set, exclusion set, tried
+  // list, hint): the chain is bounded by the registry's finite
+  // build-capable models, and exhaustion ends the run with
+  // NO_BUILD_CAPABLE_MODEL. Like the initial loop's, this state is
+  // per-segment — an approval pause carries only the zero-write
+  // counter, so a nested segment re-derives its own window.
+  let resumeBuildGuardModelHint: string | undefined;
+  // CanonicalId of the current hint — the fallback exclusion target
+  // when a write-less window's SERVING model cannot be mapped to the
+  // registry (identical to the initial loop's mechanism).
+  let resumeBuildGuardHintCanonicalId: string | undefined;
+  const resumeGuardWindowModels = new Set<string>(); // canonicalIds ("" = unmapped)
+  let resumeGuardWindowProvider = "";
+  let resumeGuardWindowModel = "";
+  const resumeGuardExcluded = new Set<string>();
+  const resumeGuardTried: Array<{ canonicalId: string; reason: string }> = [];
+  // P0 R4: this segment's model transitions (route failover + guard
+  // switches), carried on the result into the persisted run record —
+  // the same record the initial loop produces. lastServedModel is
+  // segment-local, mirroring the initial loop's change semantics.
+  const modelTransitions: ModelTransitionRecord[] = [];
+  let lastServedModel: string | undefined;
 
   // Re-inject the deferred remainder of the batch that hit the approval
   // gate: these calls were never executed before the pause, and approving
@@ -5505,6 +6410,7 @@ async function resumeAgentLoopV2Inner(
       actionContext: actionContextFrom(cfg),
       isStaticWorkspace: cfg.isStaticWorkspace,
       buildScopeApproved: buildScopeAuthorized,
+      buildGuardActive: cfg.buildCapabilityGuard != null,
     });
     hasInterveningMutation = deferredState.hasInterveningMutation;
     cancelled = deferredState.cancelled;
@@ -5515,6 +6421,11 @@ async function resumeAgentLoopV2Inner(
     batchHasMutation = deferredState.batchHasMutation;
     completedDeployment = deferredState.completedDeployment;
     readLoopNudges = deferredState.readLoopNudges ?? readLoopNudges;
+    // P0 R1: a checkpoint failure inside the deferred batch is this
+    // segment's failure too.
+    if (!checkpointCreationError && deferredState.checkpointError) {
+      checkpointCreationError = deferredState.checkpointError;
+    }
     // The gated-repeat breaker (§6.1) may have tripped inside the
     // deferred batch: settle the run failed instead of entering the
     // main loop or creating another gate.
@@ -5537,6 +6448,9 @@ async function resumeAgentLoopV2Inner(
         events,
         checkpoint: checkpoint ?? undefined,
         baselineCheckpoint: baselineCheckpoint ?? checkpoint ?? undefined,
+        checkpointFailure: reportableCheckpointFailure(),
+    modelTransitions: modelTransitions.length > 0 ? [...modelTransitions] : undefined,
+    logicalRunId,
         pendingApproval: deferredResult.nestedApproval,
       };
     }
@@ -5579,6 +6493,7 @@ async function resumeAgentLoopV2Inner(
       literalRepairFeedbackGiven = true;
       llmMessages.push({
         role: "user",
+        origin: "internal",
         content: requestedLiteralRepairPrompt(literalCheck.literal, literalCheck.checkedFiles),
       });
       localProgress.emit({
@@ -5606,6 +6521,7 @@ async function resumeAgentLoopV2Inner(
       contrastRepairFeedbackGiven = true;
       llmMessages.push({
         role: "user",
+        origin: "internal",
         content: textContrastRepairPrompt(contrastCheck.violations),
       });
       localProgress.emit({
@@ -5637,6 +6553,7 @@ async function resumeAgentLoopV2Inner(
       layoutRepairFeedbackGiven = true;
       llmMessages.push({
         role: "user",
+        origin: "internal",
         content: renderedLayoutRepairPrompt(layoutCheck.violations),
       });
       localProgress.emit({
@@ -5666,16 +6583,23 @@ async function resumeAgentLoopV2Inner(
     }
 
     stepsUsed++;
+    const stepStartTime = Date.now();
     localProgress.emit({ type: "phase", phase: "call_llm", step: stepsUsed });
 
     let llmResponse;
+    // P0 R2: the build guard may have switched the serving model
+    // mid-segment; its hint routes through planBasicRoutes on the
+    // next step, exactly as in the initial loop.
+    const requestedModel = resumeBuildGuardModelHint ?? cfg.model;
+    // P0 R4: this step's failed route attempts (see the initial loop).
+    const stepRouteAttempts: RouteAttemptFailure[] = [];
     try {
       llmResponse = await callLLMWithTools(
         cfg.systemPrompt,
         llmMessages,
         toolDefs,
         {
-          model: cfg.model,
+          model: requestedModel,
           temperature: 0.15,
           maxTokens: 4096,
           toolChoice: (cfg.buildCapabilityGuard && !hasLandedBuildWrite(toolCallLog) && !shellMutationVerified) ||
@@ -5690,6 +6614,11 @@ async function resumeAgentLoopV2Inner(
           allowLittPaidProviders: cfg.allowLittPaidProviders,
           allowTransientPlanRetry: true,
           onRoutePlan: recordRoutePlan,
+          // P0 R4: collect the step's failed route attempts so the
+          // transition (and its reason) can be persisted below.
+          onRouteAttempts: (attempts) => {
+            stepRouteAttempts.push(...attempts);
+          },
           // D4 text channel (guarded): same treatment as the main
           // loop — resumed runs buffer step text through the guarded
           // text stream instead of emitting it raw.
@@ -5701,6 +6630,45 @@ async function resumeAgentLoopV2Inner(
       if (llmResponse.responseShape && llmResponse.provider) {
         localProgress.emit({ type: "model_response", provider: llmResponse.provider, model: llmResponse.model, ...llmResponse.responseShape, finishReason: llmResponse.finishReason });
       }
+      // P0 R2/R4 parity: the resumed loop emits the same model_routing
+      // event as the initial loop — before this, a provider fallback
+      // inside a resumed segment left no routing trace at all, so the
+      // Activity view could not show which model actually served the
+      // continuation (the exact blind spot of the 2026-11-26 run).
+      const routedRecord = findModelRecord(llmResponse.provider ?? "unknown", llmResponse.model);
+      localProgress.emit({
+        type: "model_routing",
+        model: llmResponse.model,
+        provider: llmResponse.provider ?? "unknown",
+        fallbackFrom: requestedModel && llmResponse.model !== requestedModel ? requestedModel : undefined,
+        latencyMs: Date.now() - stepStartTime,
+        canonicalId: routedRecord?.canonicalId,
+        configSource: routedRecord ? getModelConfigSource(routedRecord.canonicalId) : undefined,
+        // P0 R4: the failover evidence rides the routing event too.
+        ...(stepRouteAttempts.length > 0
+          ? { failover: sanitizeRouteAttempts(stepRouteAttempts) }
+          : {}),
+      });
+      // P0 R4: persist the transition WITH its reason, exactly as the
+      // initial loop does — a resumed segment's provider history is
+      // part of the same run record.
+      if (
+        stepRouteAttempts.length > 0 ||
+        llmResponse.model !== (lastServedModel ?? requestedModel ?? llmResponse.model)
+      ) {
+        recordModelTransition(
+          modelTransitions,
+          localProgress,
+          transitionFromAttempts(
+            lastServedModel ?? requestedModel ?? cfg.model,
+            llmResponse.model,
+            llmResponse.provider ?? "unknown",
+            stepRouteAttempts,
+            stepsUsed,
+          ),
+        );
+      }
+      lastServedModel = llmResponse.model;
       textStream.noteStepSettled((llmResponse.toolCalls?.length ?? 0) > 0);
       // Canonical metering (P0): one usage+cost event per resumed step's
       // LLM call. provider/model are from the ACTUAL call; token counts
@@ -5723,7 +6691,7 @@ async function resumeAgentLoopV2Inner(
         stepIndex: stepsUsed,
         meteringRunId,
         provider: "unknown",
-        model: cfg.model ?? "unknown",
+        model: requestedModel ?? "unknown",
         inputChars: loopInputChars(llmMessages),
         outputChars: 0,
         status: "failed",
@@ -5736,6 +6704,22 @@ async function resumeAgentLoopV2Inner(
         message: errMsg.slice(0, 200),
       });
       modelFailed = errMsg.slice(0, 200);
+      // P0 R4: a step that died on its routes still leaves its
+      // transition record (same as the initial loop).
+      if (stepRouteAttempts.length > 0) {
+        const lastAttempt = stepRouteAttempts[stepRouteAttempts.length - 1];
+        const rec = transitionFromAttempts(
+          requestedModel ?? cfg.model,
+          lastAttempt.model,
+          lastAttempt.provider,
+          stepRouteAttempts,
+          stepsUsed,
+        );
+        recordModelTransition(modelTransitions, localProgress, {
+          ...rec,
+          reason: `${rec.reason} — all routes failed`,
+        });
+      }
       finalText = completedDeployment
         ? describeProviderFailureAfterDeployment(completedDeployment, errMsg)
         : err instanceof AllRoutesFailedError
@@ -5793,7 +6777,7 @@ async function resumeAgentLoopV2Inner(
             "The model announced more work but emitted no tool calls — asking it to continue...",
         });
         llmMessages.push({ role: "assistant", content: zeroCallText });
-        llmMessages.push({ role: "user", content: resolution.nudgeMessage });
+        llmMessages.push({ role: "user", origin: "internal", content: resolution.nudgeMessage });
         continue;
       }
       if (resolution.action === "stall") {
@@ -5878,6 +6862,24 @@ async function resumeAgentLoopV2Inner(
           toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — already executed", mutating: true, paths: declaredMutationPaths(toolCall.inputs, prior.result.result), persisted: prior.persisted });
           noteWrittenFileContent(writtenFiles, toolCall.toolId, toolCall.inputs);
           localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: true, summary: "skipped — already executed", durationMs: 0 });
+          continue;
+        }
+      }
+
+      // P0 R8 — duplicate-publishing prevention in the resumed loop
+      // too: replay the recorded deployment instead of a second
+      // publish (see duplicateDeploymentReplay).
+      if (toolCall.toolId === "project.deploy") {
+        const replay = duplicateDeploymentReplay(completedDeployment, toolCallLog);
+        if (replay) {
+          llmMessages.push(buildToolResultMessage({
+            toolCallId: toolCall.toolCallId,
+            toolId: toolCall.toolId,
+            result: replay,
+            success: true,
+          }));
+          toolCallLog.push({ toolId: toolCall.toolId, success: true, summary: "skipped — publish already completed in this run", mutating: true });
+          localProgress.emit({ type: "tool_result", toolId: toolCall.toolId, success: true, summary: "skipped — publish already completed in this run", durationMs: 0 });
           continue;
         }
       }
@@ -5979,6 +6981,15 @@ async function resumeAgentLoopV2Inner(
         if (checkpoint) {
           baselineCheckpoint ??= checkpoint;
           localProgress.emit({ type: "checkpoint", label: checkpoint.label, gitSha: checkpoint.gitSha });
+        } else if (!checkpointCreationError) {
+          // P0 R1: record a failed creation instead of swallowing it.
+          checkpointCreationError = checkpointAttemptFailure(checkpoint, transport);
+          if (checkpointCreationError) {
+            localProgress.emit({
+              type: "status",
+              summary: `Workspace checkpoint could not be created (${checkpointCreationError}). The failure is recorded on this run; if it pauses for approval, it cannot be resumed safely.`,
+            });
+          }
         }
       }
 
@@ -5988,16 +6999,65 @@ async function resumeAgentLoopV2Inner(
         permResult.requiresApproval && !buildScopeCoversTool(buildScopeAuthorized, toolCall.toolId);
 
       if (requiresApproval) {
+        // P0 R6 — destructive-action safety on the resumed-run gate
+        // too (see prepareDestructiveGate): no approval for an
+        // unidentified target, no re-asking past the streak limit.
+        const destructivePrep = await prepareDestructiveGate({
+          toolId: toolCall.toolId,
+          inputs: toolCall.inputs,
+          fallbackReason: permResult.reason ?? "Approval required",
+          transport,
+          recoveryAvailable: (baselineCheckpoint ?? checkpoint) != null,
+          toolCallLog,
+        });
+        if (destructivePrep.refusalError) {
+          const result: ToolCallResult = {
+            toolCallId: toolCall.toolCallId,
+            toolId: toolCall.toolId,
+            result: null,
+            success: false,
+            error: destructivePrep.refusalError,
+          };
+          llmMessages.push(buildToolResultMessage(result));
+          toolCallLog.push({
+            toolId: toolCall.toolId,
+            success: false,
+            summary: "Refused — destructive action without an identified target",
+            mutating: true,
+          });
+          toolCallRecords.push({
+            toolId: toolCall.toolId,
+            inputsHash: hashInputs(toolCall.inputs),
+            resultHash: hashResult(null),
+            step: stepsUsed,
+            success: false,
+            mutating: true,
+          });
+          localProgress.emit({
+            type: "tool_result",
+            toolId: toolCall.toolId,
+            success: false,
+            summary: "Refused — destructive action without an identified target",
+            durationMs: 0,
+          });
+          continue;
+        }
+        if (destructivePrep.loopError) {
+          failedHonestly = destructivePrep.loopError;
+          finalText = destructivePrep.loopError;
+          localProgress.emit({ type: "status", summary: destructivePrep.loopError });
+          break;
+        }
         const grantsBuildScope = !buildScopeAuthorized && isBuildScopeTool(toolCall.toolId);
         // Phase 3: browser mutations get an action-and-target description
         // on the resumed-run gate too.
-        const approvalReason = grantsBuildScope
+        const approvalReason = destructivePrep.reason ?? (grantsBuildScope
           ? buildScopeApprovalReason(toolCall.toolId)
           : await pauseReasonFor(
               toolCall.toolId,
               toolCall.inputs,
               permResult.reason ?? "Approval required",
-            );
+            ));
         localProgress.emit({ type: "approval_required", toolId: toolCall.toolId, reason: approvalReason });
 
         // Pause for approval in AUTO as well as ACT — the same contract as
@@ -6018,6 +7078,9 @@ async function resumeAgentLoopV2Inner(
           events,
           checkpoint: checkpoint ?? undefined,
           baselineCheckpoint: baselineCheckpoint ?? checkpoint ?? undefined,
+          checkpointFailure: reportableCheckpointFailure(),
+    modelTransitions: modelTransitions.length > 0 ? [...modelTransitions] : undefined,
+    logicalRunId,
           // Top-level snapshot, same as the initial loop's pause
           // return: the approvals route reads result.qualityLoopState
           // for the resumed run's settlement, and a nested pause must
@@ -6039,25 +7102,39 @@ async function resumeAgentLoopV2Inner(
             zeroWriteStepsAtPause: isFileWritingTool(toolCall.toolId) ? 0 : resumeZeroWriteSteps,
             grantsBuildScope,
             buildScopeApproved: buildScopeAuthorized,
+            // P0 R6: the destructive-action card data rides the pause.
+            destructiveAction: destructivePrep.assessment,
           },
         };
       }
 
       // Loop detection — same bounded read-loop nudge as the initial
       // loop; nudges spent in the deferred batch carry over here.
+      // The same-tool streak breaker shares the site and budget,
+      // exactly as in the initial loop (see there).
       const inputsHash = hashInputs(toolCall.inputs);
-      if (toolDef.readOnly && detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation)) {
+      const identicalRepeat = toolDef.readOnly && detectRepeatedCalls(toolCallRecords, toolCall.toolId, inputsHash, hasInterveningMutation);
+      const sameToolStreak = identicalRepeat || toolDef.readOnly || cfg.buildCapabilityGuard
+        ? 0
+        : countSameToolNonWritingStreak(toolCallRecords, toolCall.toolId);
+      if (identicalRepeat || sameToolStreak >= SAME_TOOL_STREAK_LIMIT) {
         if (readLoopNudges < READ_LOOP_NUDGE_MAX) {
           readLoopNudges += 1;
           localProgress.emit({
             type: "status",
-            summary: `Repeated ${toolCall.toolId} — nudging the model to apply the change instead of re-reading`,
+            summary: identicalRepeat
+              ? `Repeated ${toolCall.toolId} — nudging the model to apply the change instead of re-reading`
+              : `Repeated ${toolCall.toolId} — nudging the model to use the results already in context instead of fetching more`,
           });
-          llmMessages.push(buildToolResultMessage(buildReadLoopNudgeResult(toolCall)));
+          llmMessages.push(buildToolResultMessage(
+            identicalRepeat ? buildReadLoopNudgeResult(toolCall) : buildSameToolStreakNudgeResult(toolCall, sameToolStreak),
+          ));
           continue;
         }
         cancelled = true;
-        cancelReason = `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`;
+        cancelReason = identicalRepeat
+          ? `Repeated tool call detected: ${toolCall.toolId} called 3+ times with same inputs and no intervening mutation`
+          : sameToolStreakCancelReason(toolCall.toolId, sameToolStreak);
         break;
       }
 
@@ -6168,13 +7245,106 @@ async function resumeAgentLoopV2Inner(
     if (failedHonestly) break;
     if (cfg.buildCapabilityGuard) {
       const wroteFile = toolCallLog.slice(logBeforeBatch).some((call) => call.success && isFileWritingTool(call.toolId));
-      resumeZeroWriteSteps = wroteFile ? 0 : resumeZeroWriteSteps + 1;
-      if ((cfg.buildCapabilityGuard.maxStepsWithoutFileWrite ?? 3) > 0 &&
-          resumeZeroWriteSteps >= (cfg.buildCapabilityGuard.maxStepsWithoutFileWrite ?? 3)) {
-        failedHonestly = `The resumed build made no successful file writes in ${resumeZeroWriteSteps} steps; stopping to preserve the remaining budget.`;
-        finalText = failedHonestly;
-        localProgress.emit({ type: "status", summary: failedHonestly });
-        break;
+      const resumeGuardMaxSteps = cfg.buildCapabilityGuard.maxStepsWithoutFileWrite ?? 3;
+      if (wroteFile) {
+        resumeZeroWriteSteps = 0;
+        resumeGuardWindowModels.clear();
+      } else {
+        resumeZeroWriteSteps++;
+        const serving = findModelRecord(llmResponse.provider ?? "unknown", llmResponse.model);
+        resumeGuardWindowModels.add(serving?.canonicalId ?? "");
+        resumeGuardWindowProvider = llmResponse.provider ?? "unknown";
+        resumeGuardWindowModel = llmResponse.model;
+      }
+      if (resumeGuardMaxSteps > 0 && resumeZeroWriteSteps >= resumeGuardMaxSteps) {
+        // P0 R2 (audit D5): the initial loop ESCAPES this state by
+        // ruling out the serving model and switching; the resumed loop
+        // used to fail the run here — a resumed build served by a weak
+        // fallback model had no way out (the 2026-11-26 bakery run).
+        // The escape below mirrors the initial loop's mechanism
+        // exactly: same exclusion/cooldown recording, same
+        // entitlement-aware selection, same evidence event. The run
+        // fails only when the build-model chain is exhausted.
+        const distinctModels = [...resumeGuardWindowModels].filter((id) => id !== "");
+        const reason = `${resumeZeroWriteSteps} consecutive steps with tool calls but zero file-writing calls`;
+        let excludedCanonicalId: string | undefined;
+        if (distinctModels.length === 1) {
+          excludedCanonicalId = distinctModels[0];
+          resumeGuardExcluded.add(excludedCanonicalId);
+          recordHealthOutcome(excludedCanonicalId, false, "no_file_write_calls");
+          recordModelFailure(resumeGuardWindowProvider, resumeGuardWindowModel);
+          resumeGuardTried.push({ canonicalId: excludedCanonicalId, reason });
+        } else if (
+          distinctModels.length === 0 &&
+          resumeBuildGuardHintCanonicalId &&
+          !resumeGuardExcluded.has(resumeBuildGuardHintCanonicalId)
+        ) {
+          // Serving model unmapped — charge the window to the model
+          // the guard itself requested for it (the active hint), so
+          // the exclusion set grows every window and the chain still
+          // exhausts in bounded steps. Run-local exclusion only, no
+          // health recording (identical to the initial loop).
+          excludedCanonicalId = resumeBuildGuardHintCanonicalId;
+          resumeGuardExcluded.add(excludedCanonicalId);
+          resumeGuardTried.push({
+            canonicalId: excludedCanonicalId,
+            reason: `${reason} (serving model unmapped; charged to the requested build model)`,
+          });
+        } else {
+          resumeGuardTried.push({
+            canonicalId: distinctModels.length === 0 ? "unmapped" : distinctModels.join("+"),
+            reason: `${reason} (serving model changed mid-window)`,
+          });
+        }
+        localProgress.emit({
+          type: "build_model_incompatible",
+          canonicalId: excludedCanonicalId ?? "unmapped",
+          provider: resumeGuardWindowProvider,
+          stepsObserved: resumeZeroWriteSteps,
+          zeroWriteSteps: resumeZeroWriteSteps,
+          reason: "no_file_write_calls_in_window",
+        });
+
+        // P1 parity: never switch an unentitled run onto a LITT_PAID
+        // registry model the router would refuse (see initial loop).
+        const next = selectBuildModel(resumeGuardExcluded, {
+          allowLittPaidProviders: cfg.allowLittPaidProviders,
+        });
+        if (!next) {
+          const listing = resumeGuardTried.map((t) => `- ${t.canonicalId}: ${t.reason}`).join("\n");
+          modelFailed = NO_BUILD_CAPABLE_MODEL;
+          modelFailureText =
+            `No build-capable model is available. Models tried:\n${listing}\n` +
+            `No model produced a file-writing tool call within the bounded window, so the run stops instead of burning the budget.`;
+          finalText =
+            "I couldn't complete this build: none of the available models produced file-writing tool calls. " +
+            "Your project and everything completed so far are preserved — try again later or pick a different model.";
+          localProgress.emit({
+            type: "status",
+            summary: "Stopping: no build-capable model produced file-writing tool calls.",
+          });
+          break;
+        }
+        // Continue the SAME conversation on the next eligible build
+        // model — context, completed work, and approved scope are
+        // loop state and carry across the switch untouched.
+        resumeBuildGuardModelHint = next.providerModelId;
+        resumeBuildGuardHintCanonicalId = next.canonicalId;
+        // P0 R4: the guard switch is a model transition — record it
+        // with its reason (the excluded model produced no file writes).
+        recordModelTransition(modelTransitions, localProgress, {
+          from: excludedCanonicalId ?? requestedModel ?? "unknown",
+          to: next.canonicalId,
+          provider: next.provider,
+          reason: "no_file_write_calls",
+          step: stepsUsed,
+        });
+        localProgress.emit({
+          type: "status",
+          summary: `Switching build model to ${next.canonicalId} — the previous model produced no file writes in ${resumeZeroWriteSteps} steps.`,
+        });
+        resumeZeroWriteSteps = 0;
+        resumeGuardWindowModels.clear();
       }
     }
     // ACC-01 F9: same requested-literal feedback as the initial loop —
@@ -6199,6 +7369,7 @@ async function resumeAgentLoopV2Inner(
         literalRepairFeedbackGiven = true;
         llmMessages.push({
           role: "user",
+          origin: "internal",
           content: requestedLiteralRepairPrompt(literalCheck.literal, literalCheck.checkedFiles),
         });
         localProgress.emit({
@@ -6226,6 +7397,7 @@ async function resumeAgentLoopV2Inner(
         contrastRepairFeedbackGiven = true;
         llmMessages.push({
           role: "user",
+          origin: "internal",
           content: textContrastRepairPrompt(contrastCheck.violations),
         });
         localProgress.emit({
@@ -6254,6 +7426,7 @@ async function resumeAgentLoopV2Inner(
         layoutRepairFeedbackGiven = true;
         llmMessages.push({
           role: "user",
+          origin: "internal",
           content: renderedLayoutRepairPrompt(layoutCheck.violations),
         });
         localProgress.emit({
@@ -6303,6 +7476,29 @@ async function resumeAgentLoopV2Inner(
     });
     if (literalCheck.applies && !literalCheck.found && literalCheck.literal) {
       failedHonestly = requestedLiteralFailureMessage(literalCheck.literal);
+      finalText = failedHonestly;
+    }
+  }
+
+  // P0 R7 — content/instruction separation, identical to the initial
+  // loop: the resumed segment's instruction text (the repair message
+  // that resumed the run is exactly the shape that leaked in the
+  // 2026-11-26 acceptance run) must never land in a generated page.
+  if (!cancelled && !failedHonestly) {
+    const leakCheck = await checkInstructionLeakage({
+      instructions: [resumeUserMessage],
+      // Coordination fix (c) — identical to the initial loop: the
+      // logical run's internal messages (this segment's injections
+      // plus any carried through the pause snapshot) are internal
+      // content, checked with no quoted-content exemption.
+      internalInstructions: llmMessages
+        .filter((m) => m.origin === "internal")
+        .map((m) => m.content),
+      candidatePaths: successfulMutationPaths(toolCallLog),
+      readFile: (path) => transport.readFile(path),
+    });
+    if (leakCheck.applies && leakCheck.leaked.length > 0) {
+      failedHonestly = instructionLeakageFailureMessage(leakCheck.leaked);
       finalText = failedHonestly;
     }
   }
@@ -6457,6 +7653,15 @@ async function resumeAgentLoopV2Inner(
     }
   }
 
+  // P0 R3: same build-completion asset verification as the initial
+  // loop — noted into the quality session before the verdict, and
+  // carried into settlement as its asset condition.
+  const missingAssetRefs = await verifyStaticSiteAssetReferences(
+    transport,
+    qualitySession,
+    cfg.isStaticWorkspace,
+  );
+
   // Quality gate: finalize the evidence ledger and compute the verdict.
   const qualityFinale = await finalizeQualityGatedRun(qualitySession, {
     buildFixResult,
@@ -6522,6 +7727,14 @@ async function resumeAgentLoopV2Inner(
   // a resume: the deliverable (an approved, saved image generation)
   // landed and the gate passed, then the wrap-up model call exhausted
   // its routes and the old outcome expression failed the whole run.
+  // Milestone-aware settlement — identical computation to the
+  // initial loop: publish in scope (asked / deploy-only / deploy
+  // attempted anywhere in this logical run's log, pauses included)
+  // requires R8's verified deployment record to settle success.
+  const deploymentRequired =
+    resumeDeployOnlyRun ||
+    instructionRequestsDeploy(resumeUserMessage) ||
+    toolCallLog.some((call) => DEPLOY_TOOL_IDS.has(call.toolId));
   const settlement = settleRunOutcome({
     cancelled,
     modelFailed,
@@ -6529,6 +7742,11 @@ async function resumeAgentLoopV2Inner(
     toolCalls: toolCallLog,
     qualityVerdictOk: qualityFinale ? qualityFinale.verdict.ok : null,
     workspaceChange,
+    // P0 R3: surviving broken asset references — success is
+    // impossible while any remain (see run-settlement.ts).
+    missingAssetRefs,
+    deploymentRequired,
+    deploymentVerified: completedDeployment != null,
   });
   if (settlement.completedWithWarning) {
     localProgress.emit({ type: "status", summary: settlement.completedWithWarning });
@@ -6606,6 +7824,13 @@ async function resumeAgentLoopV2Inner(
     completedWithWarning: settlement.completedWithWarning,
     failureContributors: settlement.failureContributors,
     baselineCheckpoint,
+    checkpointFailure: reportableCheckpointFailure(),
+    modelTransitions: modelTransitions.length > 0 ? [...modelTransitions] : undefined,
+    logicalRunId,
+    // P0 R8: the completed deployment's recorded outcome rides the
+    // result beside the logical run ID (publishing ↔ billing
+    // correlation on the persisted run record).
+    deployment: completedDeployment,
     qualityLoop: qualityFinale
       ? {
           verdict: qualityFinale.verdict,
@@ -6648,6 +7873,7 @@ export function createAutonomousRepairCallback(
     const repairMessages: LLMMessage[] = [
       {
         role: "user",
+        origin: "internal",
         content: `The build/check failed with the following output. Please inspect the relevant code, fix the issue, and verify your fix.\n\n--- Error output ---\n${errors}\n--- End error output ---\n\nRepair attempt ${attempt}/3. Use the available tools to read the failing files, identify the issue, and write the fix.`,
       },
     ];

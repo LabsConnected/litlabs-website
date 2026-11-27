@@ -31,7 +31,9 @@ Do NOT use retired copies or stale clones as canonical sources.
 ## Current Branch
 
 main tracks LabsConnected/litlabs-website (remote: origin).
-The Windows canonical checkout currently sits on fix/studio-mission-20261030.
+The Windows canonical checkout sits on `main` as of 2026-11-27 (previously
+`fix/studio-mission-20261030`, since merged/moved past — update this line
+again if it drifts, rather than trusting it blind).
 See .devin/workspace-registry.md for the live branch map.
 
 ## Build and Relink
@@ -80,6 +82,76 @@ Env vars:
 - Space after command token closes the palette; args stay in composer
 - Arguments never participate in palette fuzzy matching
 - /local where.exe adb submits directly to the machine lane handler
+
+## Execution Integrity Program (R1-R8) — status (verified 2026-11-27)
+
+PR #1140 ("P0 execution integrity R1-R8") merged into `main`. Its own body
+frames R1-R8 as implementing a founder-approved program; there is no separate
+"Execution Integrity Contract" document — treat PR #1140's description as the
+closest thing to one. Status, verified directly against code and tests, not
+just the merge/PR text:
+
+- R1 (checkpoint-failure recording + resume refusal), R2 (bounded model-switch
+  escape on resume), R4 (provider-transition reasons persisted), R5 (one
+  stable logical run ID across pauses/resumes), R6 (destructive-action safety:
+  delete-streak cap, structured approval cards) — merged, not independently
+  re-verified beyond what #1140's own 2,691/2,691 test claim covers.
+- R3 (referenced-asset existence gate) and R8 (publishing integrity: a deploy
+  only counts on a ready, URL-verified record; duplicate publishes replay) —
+  merged and directly verified: `run-settlement.ts`, `agent-loop-v2.ts`
+  `readDeploymentOutcome`/`duplicateDeploymentReplay`, and
+  `__tests__/publishing-integrity.test.ts`.
+- R7 (content/instruction-leakage guard) — merged; see `instruction-leakage.ts`
+  and `__tests__/instruction-leakage.test.ts`.
+- **Milestone-aware settlement** (a build-only run settling "completed"
+  without ever checking a publish-scoped run actually deployed) — this was a
+  real gap, flagged by a 2026-11-26 coordination note and independently
+  rediscovered by a 2026-11-27 architecture audit before the audit caught that
+  it had already been fixed. Fixed in commit `dd08ad449` ("Reconcile R1-R8
+  with main + Devin coordination fixes (a)(b)(c)"), landed inside #1140 before
+  it merged. `run-settlement.ts`'s `deploymentRequired`/`deploymentVerified`
+  fields gate settlement at both call sites in `agent-loop-v2.ts`. Test
+  coverage for failure/cancellation/success existed from the fix itself;
+  explicit timeout and fail-then-retry-succeeds tests were added 2026-11-27
+  (`agent-loop-v2.deploy.test.ts`, "II. milestone-aware settlement: timeout
+  and retry").
+- **Same-tool-different-args breaker bypass** (the `image.stock` x4 class) —
+  fixed in the same `dd08ad449` commit, item (b), `513c11ed`. See
+  `agent-loop-v2.same-tool-streak.test.ts`.
+- **Internal-message provenance** (loop-injected nudges indistinguishable
+  from real user text) — fixed in the same `dd08ad449` commit, item (c),
+  `878c559a`. `LLMMessage.origin: "internal"` set at all 15 loop injection
+  sites. See `agent-loop-v2.internal-provenance.test.ts`. PR #1139's actual
+  nudge content was explicitly NOT adopted by this fix and remains on hold —
+  only the provenance marker mechanism landed.
+- **Billing settlement** (stale-settlement false positive, unverified
+  release-on-insert-failure) — fixed on `main`, not just an unmerged branch.
+  `src/lib/agent-billing.ts` now guards release-on-insert-failure against a
+  prior row's actual status and cross-checks `settled_amount + released_amount`
+  against reserved credits before trusting a settlement read-back. Commits
+  `1b3c828df` (ACC-01) and `907966c2e` (ACC-04).
+
+Before citing any R1-R8 item as "open" or "unverified," re-check the code
+directly — this list has already been wrong once (the audit's own first pass
+flagged three already-fixed items as open) because a prior reconciliation
+commit landed inside the same PR as the headline work.
+
+## Known Architectural Debt (not a release blocker, tracked here so it isn't re-discovered as a surprise)
+
+Studio's primary agent loop (`src/lib/litt-intelligence/agent-loop-v2.ts`,
+~6700 lines) is an independent implementation with zero imports from
+`@litt/agent-core` — it does not run on the CLI's shared execution core.
+`@litt/agent-core` + `@litt/models` are genuinely shared between the CLI and
+the PC-bridge path (`src/app/api/bridge/cli/route.ts`), so "shared execution
+intelligence" is real for that path but not for Studio's main chat/build loop.
+Permission enforcement is likewise fully duplicated: Studio's
+`capability-registry.ts`/`capability-shared.ts` vs the CLI's
+`capability-gate.ts`/`approval-policy.ts` share no risk model. Every future
+integrity fix in this area (billing, verification, permissions, settlement)
+has to be built and verified twice as a result — which is exactly the kind of
+split where a fix lands on one side and not the other. Deferred by design per
+the 2026-11-27 audit (Larry: Development GO, Integration/Acceptance/Production
+HOLD) — not something to fix opportunistically inside an unrelated task.
 
 ## Do NOT Modify (Stable Systems)
 
@@ -187,8 +259,11 @@ model routing change; CI does this on Linux, Windows and macOS
 - Resume integrity: a resume must present the same job (SHA-256 digest) the
   run started with, so a changed job cannot widen scope mid-run.
 - Evidence is redacted with `secret-redaction` before it leaves the process.
-  That redactor covers Stripe/Supabase/Railway/Bearer/`*_KEY=` forms only; it
-  does not recognize OpenAI-style `sk-`, GitHub `ghp_`, or JWT tokens.
+  That redactor covers Stripe/Supabase/Railway/Bearer/`*_KEY=` forms, plus
+  (verified 2026-11-27 against `packages/litt-cli/src/lib/secret-redaction.ts`)
+  OpenAI-style `sk-...` and the full GitHub token family (`ghp_`/`gho_`/`ghu_`/
+  `ghs_`/`github_pat_`). JWT-specific redaction was not confirmed either way —
+  treat as unverified, not as covered, until checked directly.
 - Model policy: defaults to local `ollama:litt-coder:8k`. Cloud models need a
   configured key and an explicit `modelPolicy`; `offline` forbids non-Ollama
   models. Provider failures (billing, no daemon) block the run (exit 3) and are

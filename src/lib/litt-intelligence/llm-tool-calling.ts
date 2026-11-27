@@ -114,6 +114,21 @@ export type LLMMessage = {
   role: "user" | "assistant" | "tool";
   content: string;
   /**
+   * Provenance marker (coordination fix, 2026-11-26): "internal"
+   * marks a message the LOOP ITSELF injected as role "user" —
+   * continuation nudges, guard messages, quality/repair prompts —
+   * as opposed to the customer's own words, which carry no marker.
+   * Before this marker the two were indistinguishable, including in
+   * pausedMessages snapshots, so downstream machinery (the R7
+   * instruction-leakage check) could not tell customer instructions
+   * from execution text. Internal content is never customer
+   * content: it earns no quoted-content exemption anywhere, and its
+   * appearance in generated site files is always a leak. The marker
+   * is our metadata only — provider serializers build fresh message
+   * objects and never forward it.
+   */
+  origin?: "internal";
+  /**
    * Optional image attachments (PNG data URLs) for vision-capable calls.
    * Serialized as Gemini inlineData parts or OpenAI image_url content parts.
    * Only honored when the call requests vision (requireVision).
@@ -1854,6 +1869,53 @@ export interface RouteAttemptFailure {
 }
 
 /**
+ * P0 R4 (execution integrity, audit D6): the persisted form of a
+ * failed route attempt. Deliberately STRUCTURAL — provider, model,
+ * failure class, HTTP status. The raw upstream `message` is excluded:
+ * it is provider-controlled text that can echo request data, and the
+ * failure class IS the transition reason the contract requires.
+ */
+export interface SanitizedRouteAttempt {
+  provider: string;
+  model: string;
+  class: FailureClass;
+  httpStatus?: number;
+}
+
+export function sanitizeRouteAttempts(
+  attempts: readonly RouteAttemptFailure[],
+): SanitizedRouteAttempt[] {
+  return attempts.map((a) => ({
+    provider: a.provider,
+    model: a.model,
+    class: a.class,
+    ...(a.httpStatus !== undefined ? { httpStatus: a.httpStatus } : {}),
+  }));
+}
+
+/**
+ * P0 R4: one model-transition record on a run — why the serving model
+ * changed, or was reached only after failures. Persisted on the run
+ * result (and as a model_transition action event) so a later reader
+ * can reconstruct previous model → current model → reason without
+ * server logs. `reason` is the failed attempts' failure classes
+ * joined, "route_fallback" when the router served a different model
+ * without a recorded attempt failure, or "no_file_write_calls" for a
+ * build-capability-guard switch.
+ */
+export interface ModelTransitionRecord {
+  /** The model the caller asked the router to serve for the step. */
+  from: string;
+  /** The model that actually served (or the guard's next build model). */
+  to: string;
+  /** Serving provider (the next build model's provider for guard switches). */
+  provider: string;
+  reason: string;
+  failover?: SanitizedRouteAttempt[];
+  step?: number;
+}
+
+/**
  * Every eligible provider route failed (or none were eligible). Carries the
  * structured per-attempt failure list for diagnostics and a truthful,
  * secret-free message for the user.
@@ -2004,6 +2066,17 @@ export async function callLLMWithTools(
      */
     onRoutePlan?: (summary: RoutePlanSummary) => void;
     /**
+     * Route-attempt observer (P0 R4): invoked with a copy of the
+     * structured per-attempt failures whenever a call's attempts
+     * conclude — before a successful return (the failover that
+     * preceded success), before the bounded whole-plan retry (a first
+     * pass whose attempts the retry would otherwise discard), and
+     * before the final AllRoutesFailedError. Fires only when at least
+     * one attempt failed. Observer errors are swallowed: reporting
+     * must never break the call.
+     */
+    onRouteAttempts?: (attempts: RouteAttemptFailure[]) => void;
+    /**
      * Reply-text observer (D4 text channel): invoked with the serving
      * attempt's reply text as it is produced. The tool-calling adapters
      * are non-streaming today, so this fires once per successful attempt
@@ -2039,6 +2112,19 @@ export async function callLLMWithTools(
   }
 
   const failures: RouteAttemptFailure[] = [];
+  // P0 R4: hand the accumulated attempt failures to the observer at
+  // each conclusion point (success after failover, whole-plan retry,
+  // total failure) — until now they were only logged on success and
+  // carried on the thrown error, so a persisted run record could not
+  // say WHY its model changed.
+  const reportRouteAttempts = () => {
+    if (!options?.onRouteAttempts || failures.length === 0) return;
+    try {
+      options.onRouteAttempts([...failures]);
+    } catch {
+      // A broken observer must never break the call.
+    }
+  };
   // Bounded in-place 429 retries: one per (provider, model) per call.
   const retriedInPlace429 = new Set<string>();
   const toolIdMap = buildToolIdReverseMap(tools);
@@ -2331,6 +2417,9 @@ export async function callLLMWithTools(
             // A broken observer must never break the call.
           }
         }
+        // P0 R4: success after failover — report the attempts that
+        // preceded it before returning.
+        reportRouteAttempts();
         return normalized;
       } catch (err) {
         const latencyMs = Date.now() - t0;
@@ -2540,6 +2629,9 @@ export async function callLLMWithTools(
       classes: [...new Set(failures.map((f) => f.class))].join(","),
       remainingBudgetMs: Math.max(0, remainingForRetry),
     });
+    // P0 R4: this pass's attempts are real failures the retry would
+    // otherwise discard — report them before recursing.
+    reportRouteAttempts();
     await new Promise((resolve) => setTimeout(resolve, 2_000));
     return callLLMWithTools(systemPrompt, messages, tools, {
       ...options,
@@ -2547,6 +2639,10 @@ export async function callLLMWithTools(
     });
   }
 
+  // P0 R4: total failure — report the attempts before throwing (the
+  // error carries them too; the observer keeps one channel for all
+  // three conclusion points).
+  reportRouteAttempts();
   throw new AllRoutesFailedError(failures, callExcluded);
 }
 

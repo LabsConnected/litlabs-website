@@ -160,11 +160,11 @@ async function openMobileSheet(page) {
     await dockClose.click();
     await page.waitForTimeout(250);
   }
-  const trigger = page
-    .getByRole("button", { name: "Ask LiTT to build" })
-    .first();
-  await trigger.click({ timeout: 15_000 });
-  await sheet.waitFor({ state: "visible", timeout: 15_000 });
+  // chat-first layout: whenever the sheet is closed the top bar renders
+  // Back to chat (handled above). If neither is visible the entry default
+  // may still be hydrating — wait for the sheet rather than clicking a
+  // control that no longer exists.
+  await sheet.waitFor({ state: "visible", timeout: 20_000 });
 }
 
 // ─── Clerk sign-in token ───────────────────────────────────────
@@ -433,20 +433,23 @@ async function main() {
     step("studio_load", studioResp?.status() === 200, `HTTP ${studioResp?.status()}`);
     await page.waitForTimeout(6000);
     const shellVisible = await page.locator(".studio-shell").isVisible().catch(() => false);
-    // The mobile nav affordance is the trigger OR the already-open LiTT
-    // sheet — the trigger hides by design whenever a surface panel owns the
-    // viewport, and the sheet's open state can legitimately persist across
-    // navigation. Asserting trigger-only flakes on that stored state. Both
-    // mount behind hydration — poll briefly rather than sampling once.
-    let triggerVisible = false;
+    // The mobile nav affordance is the LiTT sheet itself OR the slim top
+    // bar's Back to chat (rendered whenever a tool surface owns the
+    // viewport). The retired litt-mobile-trigger FAB no longer exists —
+    // the 2026-11-19 chat-first layout auto-opens the sheet on fresh chat
+    // entries and routes closed states through mobile-back-to-chat.
+    // Both mount behind hydration — poll briefly rather than sampling once.
     let sheetVisible = false;
-    for (let i = 0; i < 10 && !triggerVisible && !sheetVisible; i++) {
-      triggerVisible = await page.getByTestId("litt-mobile-trigger").isVisible().catch(() => false);
+    let backToChatVisible = false;
+    let topbarVisible = false;
+    for (let i = 0; i < 20 && !sheetVisible && !backToChatVisible; i++) {
       sheetVisible = await page.getByTestId("litt-mobile-sheet").isVisible().catch(() => false);
-      if (!triggerVisible && !sheetVisible) await page.waitForTimeout(2000);
+      backToChatVisible = await page.getByTestId("mobile-back-to-chat").isVisible().catch(() => false);
+      topbarVisible = await page.getByTestId("mobile-studio-topbar").isVisible().catch(() => false);
+      if (!sheetVisible && !backToChatVisible) await page.waitForTimeout(2000);
     }
-    step("studio_shell", shellVisible && (triggerVisible || sheetVisible),
-      `shell=${shellVisible} trigger=${triggerVisible} sheet=${sheetVisible}`);
+    step("studio_shell", shellVisible && (sheetVisible || backToChatVisible || topbarVisible),
+      `shell=${shellVisible} sheet=${sheetVisible} backToChat=${backToChatVisible} topbar=${topbarVisible}`);
     await shot(page, "02-studio-mobile");
 
     // ── Step 3: open LiTT mobile sheet, composer usable ──
