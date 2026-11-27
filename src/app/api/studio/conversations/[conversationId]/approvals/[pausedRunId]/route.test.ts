@@ -753,7 +753,39 @@ describe("POST /approvals/[pausedRunId] — checkpoint SHA threading (#551b1)", 
     });
   });
 
-  it("keeps the empty-SHA behavior when the checkpoint row is missing (legacy rows)", async () => {
+  it("refuses the resume when the recorded checkpoint row is missing (P0 R1 — no silent empty baseline)", async () => {
+    // P0 R1 supersedes the pre-R1 legacy tolerance at this site: a
+    // recorded checkpointId whose row is gone means the run's verified
+    // baseline no longer exists. Continuing on a fabricated empty SHA
+    // would settle the resumed run on unverified evidence, so the
+    // resume refuses explicitly (409, run settled failed with the
+    // reason) and the user restarts the request for a fresh checkpoint.
+    vi.mocked(getPausedRun).mockResolvedValue({ ...pendingRun, checkpointId: "chk-gone" } as any);
+    vi.mocked(resolvePausedRun).mockResolvedValue({
+      ...pendingRun,
+      checkpointId: "chk-gone",
+      status: "approved",
+    } as any);
+    vi.mocked(getCheckpoint).mockResolvedValue(null);
+
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.status).toBe("failed");
+    expect(body.error).toContain("no verified baseline");
+    expect(resumeAgentLoopV2).not.toHaveBeenCalled();
+    const failed = settleCall("failed");
+    expect(failed).not.toBeNull();
+    expect(failed?.args.patch?.failureCode).toBe("CHECKPOINT_MISSING");
+  });
+
+  it("keeps the empty-SHA threading for a missing checkpoint row in a STATIC workspace (P0 R1)", async () => {
+    // Static (gitless) workspaces never require a checkpoint — the
+    // gitless read-back path verifies the run — so a stray recorded id
+    // whose row is missing must not block the resume.
+    const transport = await createWorkspaceTransport("ws-123", "user_123");
+    Object.assign(transport, { isStaticWorkspace: true });
+    vi.mocked(createWorkspaceTransport).mockResolvedValueOnce(transport);
     vi.mocked(getPausedRun).mockResolvedValue({ ...pendingRun, checkpointId: "chk-gone" } as any);
     vi.mocked(resolvePausedRun).mockResolvedValue({
       ...pendingRun,
@@ -771,6 +803,35 @@ describe("POST /approvals/[pausedRunId] — checkpoint SHA threading (#551b1)", 
       label: "pre-approval",
       gitSha: "",
     });
+  });
+
+  it("refuses the resume when the record carries a checkpoint creation failure (P0 R1)", async () => {
+    // The loop recorded at pause time that checkpoint creation was
+    // attempted and FAILED (checkpointFailure on the record) — the run
+    // reported itself non-resumable, and the resume honors that
+    // instead of continuing with no baseline at all.
+    vi.mocked(getPausedRun).mockResolvedValue({
+      ...pendingRun,
+      checkpointId: null,
+      checkpointFailure: "checkpoint store unavailable",
+    } as any);
+    vi.mocked(resolvePausedRun).mockResolvedValue({
+      ...pendingRun,
+      checkpointId: null,
+      checkpointFailure: "checkpoint store unavailable",
+      status: "approved",
+    } as any);
+
+    const res = await POST(makeRequest("approved"), routeParams);
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.status).toBe("failed");
+    expect(body.error).toContain("could not be created when it paused");
+    expect(resumeAgentLoopV2).not.toHaveBeenCalled();
+    expect(getCheckpoint).not.toHaveBeenCalled();
+    const failed = settleCall("failed");
+    expect(failed).not.toBeNull();
+    expect(failed?.args.patch?.failureCode).toBe("CHECKPOINT_CREATION_FAILED");
   });
 
   it("leaves existingCheckpoint undefined when the pause recorded no checkpoint", async () => {

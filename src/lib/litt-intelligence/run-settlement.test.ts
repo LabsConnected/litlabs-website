@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { primaryFailureReason } from "./run-settlement";
+import { primaryFailureReason, settleRunOutcome } from "./run-settlement";
 
 /**
  * ACC-05 item 1 — a failed run must carry its real reason to the work
@@ -34,6 +34,55 @@ describe("primaryFailureReason (ACC-05)", () => {
     expect(primaryFailureReason(null)).toBeNull();
     expect(primaryFailureReason(undefined)).toBeNull();
   });
+
+describe("settleRunOutcome — P0 R3 referenced-asset existence", () => {
+  // A run whose deliverable verifiably landed: a successful mutating
+  // tool call and a verified workspace change.
+  const landed = {
+    cancelled: false,
+    toolCalls: [{ toolId: "files.write", success: true, summary: "index.html written", mutating: true }],
+    qualityVerdictOk: null,
+    workspaceChange: { status: "changed" as const },
+  };
+
+  it("settles completed when no referenced asset is missing", () => {
+    expect(settleRunOutcome({ ...landed }).outcome).toBe("completed");
+    expect(settleRunOutcome({ ...landed, missingAssetRefs: [] }).outcome).toBe("completed");
+  });
+
+  it("cannot settle as success while a referenced local asset is missing", () => {
+    const s = settleRunOutcome({ ...landed, missingAssetRefs: ["fonts/main.woff2"] });
+    expect(s.outcome).toBe("failed");
+    expect(s.completedWithWarning).toBeUndefined();
+    expect(s.failureContributors).toContainEqual(
+      expect.objectContaining({ kind: "missing_assets" }),
+    );
+    // …and the missing file is the primary reason the transcript reports.
+    expect(primaryFailureReason({ failureContributors: s.failureContributors })).toContain(
+      "fonts/main.woff2",
+    );
+  });
+
+  it("missing assets defeat even the completed-with-warning upgrade", () => {
+    const s = settleRunOutcome({
+      ...landed,
+      modelFailed: "NO_BUILD_CAPABLE_MODEL",
+      missingAssetRefs: ["assets/images/hero.jpg"],
+    });
+    expect(s.outcome).toBe("failed");
+    expect(s.completedWithWarning).toBeUndefined();
+  });
+
+  it("cancellation still wins, with the missing assets recorded as a contributor", () => {
+    const s = settleRunOutcome({
+      ...landed,
+      cancelled: true,
+      missingAssetRefs: ["assets/images/hero.jpg"],
+    });
+    expect(s.outcome).toBe("cancelled");
+    expect(s.failureContributors.some((c) => c.kind === "missing_assets")).toBe(true);
+  });
+});
 
   it("keeps the reason complete on a single line — no mid-sentence truncation (ACC-06a item 3)", () => {
     // Acceptance Run 1 on 8cd7728c: the failure reason shown to the

@@ -1580,6 +1580,18 @@ async function postHandler(req: NextRequest, routeCtx: RouteParams) {
               // report "unchanged". Legacy rows kept the latest — their
               // resumes keep the pre-change post-gate-only view.
               checkpointId: v2Result.baselineCheckpoint?.checkpointId ?? v2Result.checkpoint?.checkpointId ?? null,
+              // P0 R1: a checkpoint creation failure recorded by the
+              // loop rides the record, so the approval resume refuses
+              // this run explicitly instead of continuing on an
+              // unverified baseline.
+              checkpointFailure: v2Result.checkpointFailure ?? null,
+              // P0 R5: the run's stable logical identity rides the
+              // record, so the resume continues under the same id.
+              logicalRunId: v2Result.logicalRunId ?? null,
+              // P0 R6: the destructive-action card data rides the
+              // record, so the approval card can render the target,
+              // dependencies, and blocked status.
+              destructiveAction: v2Result.pendingApproval.destructiveAction ?? null,
               actionRunId: actionContext?.actionRunId ?? null,
               qualityLoopState: v2Result.qualityLoopState,
               deferredToolCalls: v2Result.pendingApproval.deferredToolCalls,

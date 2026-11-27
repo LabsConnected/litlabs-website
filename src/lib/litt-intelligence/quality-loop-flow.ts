@@ -292,7 +292,13 @@ function stagePassable(
   // The block lives on the loop state (not on any single evidence
   // record) precisely so a passing read-back filed before OR after the
   // audit can never mask it; a later clean audit clears it.
-  if (stage === "test" && (state.visualAudit?.placeholderRefs.length ?? 0) > 0) {
+  // P0 R3: broken (referenced-but-missing) asset references gate TEST
+  // identically — the audit's other half, previously never fed here.
+  if (
+    stage === "test" &&
+    ((state.visualAudit?.placeholderRefs.length ?? 0) > 0 ||
+      (state.visualAudit?.brokenRefs?.length ?? 0) > 0)
+  ) {
     return false;
   }
   if (blockedReason(state, stage)) return false;
@@ -1098,6 +1104,7 @@ export function noteStaticArtifactCheck(
 export function noteStaticVisualAudit(
   session: QualityLoopSession,
   placeholderRefs: string[],
+  brokenRefs: string[] = [],
 ): void {
   try {
     if (session.state.isStaticWorkspace !== true) return;
@@ -1109,27 +1116,49 @@ export function noteStaticVisualAudit(
         ),
       ),
     ];
-    session.state.visualAudit = { placeholderRefs: refs };
-    if (refs.length > 0) {
+    // P0 R3: the audit's broken references (local assets the page
+    // references that do not exist) are recorded alongside the
+    // placeholders — before R3 only the placeholder half ever reached
+    // the gate, so a page pointing at never-written files passed.
+    const broken = [
+      ...new Set(
+        (brokenRefs ?? []).filter(
+          (r): r is string => typeof r === "string" && r.length > 0,
+        ),
+      ),
+    ];
+    session.state.visualAudit = { placeholderRefs: refs, brokenRefs: broken };
+    if (refs.length > 0 || broken.length > 0) {
+      const problems: string[] = [];
+      if (refs.length > 0) {
+        problems.push(
+          `${refs.length} unresolved placeholder image reference(s): ${refs.join(", ")}`,
+        );
+      }
+      if (broken.length > 0) {
+        problems.push(
+          `${broken.length} broken asset reference(s) — files the page references ` +
+            `that do not exist in the project: ${broken.join(", ")}`,
+        );
+      }
       fileObservation(session, "test", {
-        summary:
-          `Static visual audit: ${refs.length} unresolved placeholder image ` +
-          `reference(s) survive in the built page: ${refs.join(", ")}.`,
-        artifacts: refs.slice(0, 20),
+        summary: `Static visual audit: ${problems.join("; ")}.`,
+        artifacts: [...refs, ...broken].slice(0, 20),
         by: "system",
         detail: {
           via: "static-visual-audit",
           passed: false,
           executedChecks: true,
           reason:
-            `Unresolved placeholder image reference(s) in the built page: ` +
-            `${refs.join(", ")} — the page ships placeholder imagery instead of real photos.`,
+            problems.join("; ") +
+            ` — the page is not complete: placeholder imagery ships instead of real ` +
+            `photos, and/or referenced files were never written.`,
         },
       });
     } else {
       fileObservation(session, "test", {
         summary:
-          "Static visual audit: no placeholder image references remain in the built page.",
+          "Static visual audit: no placeholder or broken asset references remain in the built page.",
         by: "system",
         // The clearing record supersedes any earlier failing audit
         // record as the stage's latest evidence. It deliberately does
@@ -1519,19 +1548,34 @@ export function finalizeQualityLoop(
   // may not be declared and TEST is named as the lacking stage — even
   // if every stage was swept to passed before the audit landed. The
   // verdict reason names the surviving refs.
+  // P0 R3: broken asset references (files the page references that do
+  // not exist) hold the verdict identically.
   const unresolvedPlaceholders = state.visualAudit?.placeholderRefs ?? [];
+  const brokenAssetRefs = state.visualAudit?.brokenRefs ?? [];
+  const auditBlockers: string[] = [];
+  if (unresolvedPlaceholders.length > 0) {
+    auditBlockers.push(
+      `Unresolved placeholder image reference(s) survive in the built page: ` +
+        `${unresolvedPlaceholders.join(", ")} — the build is not visually complete.`,
+    );
+  }
+  if (brokenAssetRefs.length > 0) {
+    auditBlockers.push(
+      `Broken asset reference(s) in the built page — files that do not exist ` +
+        `in the project: ${brokenAssetRefs.join(", ")} — the build references ` +
+        `assets that were never written.`,
+    );
+  }
   const verdict: SuccessVerdict =
-    unresolvedPlaceholders.length > 0
+    auditBlockers.length > 0
       ? {
           ok: false,
           missing: blockedVerdict.missing.includes("test")
             ? blockedVerdict.missing
             : [...blockedVerdict.missing, "test"],
-          reason: blockedVerdict.reason.includes(unresolvedPlaceholders[0])
+          reason: auditBlockers.some((b) => blockedVerdict.reason.includes(b))
             ? blockedVerdict.reason
-            : `${blockedVerdict.reason} Unresolved placeholder image reference(s) ` +
-              `survive in the built page: ${unresolvedPlaceholders.join(", ")} — ` +
-              `the build is not visually complete.`,
+            : `${blockedVerdict.reason} ${auditBlockers.join(" ")}`,
         }
       : blockedVerdict;
   return {

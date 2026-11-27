@@ -275,6 +275,25 @@ export function mapProgressEventToActionEvent(
             : `Model failed: ${event.model}`,
         },
       };
+    // P0 R4: model transitions ARE persisted (unlike model_routing
+    // stream noise below) — previous model, current model, the
+    // transition reason, and the sanitized failover attempts are the
+    // run record's provider history (audit D6).
+    case "model_transition":
+      return {
+        type: "agent.status",
+        payload: {
+          ...basePayload(event),
+          kind: "model_transition",
+          from: event.from,
+          to: event.to,
+          provider: event.provider,
+          reason: event.reason,
+          ...(event.failover ? { failover: event.failover } : {}),
+          ...(event.step !== undefined ? { step: event.step } : {}),
+          label: `Model transition: ${event.from} → ${event.to} (${event.reason})`,
+        },
+      };
     case "reasoning":
       return {
         type: "agent.status",

@@ -213,8 +213,12 @@ export type ArtifactValidation =
  * map to artifact paths ("assets/x.png"); relative refs resolve against the
  * referencing file's directory. Refs escaping the artifact root are ignored
  * (path validation already rejects those files).
+ *
+ * Exported (P0 R6/R8) so the SAME extractor serves the build-completion
+ * verification and the destructive-action dependency inspection — one
+ * reference machinery, never a second audit system.
  */
-function extractLocalAssetRefs(source: string, fromDir: string): string[] {
+export function extractLocalAssetRefs(source: string, fromDir: string): string[] {
   const refs: string[] = [];
   const push = (raw: string | undefined | null) => {
     if (!raw) return;
