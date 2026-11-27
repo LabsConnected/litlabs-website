@@ -1365,10 +1365,25 @@ export function registerInternalTools(): void {
       tool: {
         id: "image.generate",
         name: "Generate Image",
-        description: "Generate an image using the project's image generation provider",
+        description:
+          "Generate an image using the project's image generation provider. " +
+          "Write a detailed prompt: name the subject, style (e.g. photorealistic, " +
+          "illustration), composition, lighting, and any important details — " +
+          "terse prompts like \"a bike\" produce low-quality results.",
         source: "internal",
         version: "1.0.0",
-        inputSchema: { type: "object", properties: { prompt: { type: "string" }, projectId: { type: "string" } }, required: ["prompt"] },
+        inputSchema: {
+          type: "object",
+          properties: {
+            prompt: {
+              type: "string",
+              description:
+                "Detailed image prompt describing subject, style, composition, and lighting",
+            },
+            projectId: { type: "string" },
+          },
+          required: ["prompt"],
+        },
         outputSchema: { type: "object" },
         requiredCapabilities: ["image_generation"],
         requiredPermissions: ["image:generate"],
