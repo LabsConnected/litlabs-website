@@ -1,0 +1,255 @@
+# ==============================================================================
+# Release Terminal Server to Production — CI-GATED, MANUALLY APPROVED
+# ------------------------------------------------------------------------------
+# WHY THIS EXISTS (incident 2026-10-10):
+#   Merging PR #650 (commit b9a80638) auto-deployed terminal-server to
+#   PRODUCTION via Railway's NATIVE GitHub integration — even though the GitHub
+#   Actions workflow (deploy-terminal.yml) had been disabled via the GitHub API
+#   minutes earlier. The two deploy paths are INDEPENDENT:
+#     1. GitHub Actions workflows (deploy-terminal.yml — disabled_manually)
+#     2. Railway native GitHub integration (auto-deploy, per Railway service)
+#   Disabling one does NOT disable the other. BOTH paths must stay audited.
+#
+# THIS WORKFLOW IS THE ONLY APPROVED PATH to terminal-server production:
+#   - Triggers ONLY on release tags `terminal-prod-v*` or manual dispatch.
+#   - NEVER on push to main / pull_request — a merge must never deploy again.
+#   - `resolve` pins the exact commit and proves it is on main.
+#   - `ci-gate` verifies the required CI checks are green on that commit
+#     (fail-closed; read-only; does not weaken any existing workflow).
+#   - `deploy` needs ci-gate AND the GitHub `production` ENVIRONMENT approval
+#     (a human reviewer must click Approve).
+#
+# RAILWAY NATIVE AUTO-DEPLOY MUST REMAIN DISABLED on every production service.
+# If it is re-enabled, pushes to main will deploy again and silently bypass
+# this workflow. See docs/deployment-controls.md for the audit checklist.
+# ==============================================================================
+
+name: Release Terminal Server (production, gated)
+
+on:
+  push:
+    tags:
+      - "terminal-prod-v*"
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit SHA to release (must be on main; defaults to the selected branch head)"
+        required: false
+        default: ""
+
+# Deliberately NO push-to-main and NO pull_request triggers — see header.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terminal-server-production-release
+  cancel-in-progress: false
+
+jobs:
+  # ------------------------------------------------------------------
+  # resolve: pin the exact commit this release will deploy, and prove it
+  # is on origin/main. Everything downstream deploys THIS sha — never
+  # "latest", never a moving ref.
+  # ------------------------------------------------------------------
+  resolve:
+    name: Resolve release commit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.pin.outputs.sha }}
+    steps:
+      - name: Checkout (full history for ancestry check)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # dispatch with input sha -> that commit; otherwise the tag / branch head
+          ref: ${{ inputs.sha || github.ref }}
+
+      - name: Pin and validate release SHA
+        id: pin
+        run: |
+          SHA="$(git rev-parse HEAD)"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Release commit: $SHA"
+          git fetch origin main --quiet
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::Release commit $SHA is NOT on origin/main. Releases may only ship code merged to main."
+            exit 1
+          fi
+          echo "OK: $SHA is on origin/main"
+
+  # ------------------------------------------------------------------
+  # ci-gate: fail closed unless the required CI checks are green on the
+  # release commit. Uses the Checks API (read-only) — existing workflows
+  # are untouched and keep their own required-check semantics.
+  # ------------------------------------------------------------------
+  ci-gate:
+    name: CI gate
+    needs: resolve
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - name: Verify required checks are green on ${{ needs.resolve.outputs.sha }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_SHA: ${{ needs.resolve.outputs.sha }}
+        run: |
+          python3 - <<'PYEOF'
+          import json, os, sys, urllib.request
+          sha = os.environ["RELEASE_SHA"]
+          token = os.environ["GH_TOKEN"]
+          repo = "LabsConnected/litlabs-website"
+
+          # Checks that MUST be green for a terminal-server production release.
+          # Names are "<workflow name> / <job name>" as shown in the GitHub UI.
+          REQUIRED = [
+              "Build and Type Check / Terminal Server Tests",
+              "Build and Type Check / Build and Type Check",
+              "Secret scanning / gitleaks",
+          ]
+
+          def api(path):
+              req = urllib.request.Request(f"https://api.github.com{path}")
+              req.add_header("Accept", "application/vnd.github+json")
+              req.add_header("Authorization", f"Bearer {token}")
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  return json.load(r)
+
+          runs = api(f"/repos/{repo}/commits/{sha}/check-runs?per_page=100").get("check_runs", [])
+          if not runs:
+              print(f"::error::No check runs found for {sha} — CI never ran; refusing to release.")
+              sys.exit(1)
+
+          # Keep only the latest run per check name (re-runs supersede older ones).
+          latest = {}
+          for r in runs:
+              if r["id"] > latest.get(r["name"], {}).get("id", -1):
+                  latest[r["name"]] = r
+
+          missing, failed = [], []
+          for name in REQUIRED:
+              r = latest.get(name)
+              if not r:
+                  missing.append(name)
+              elif r["status"] != "completed" or r.get("conclusion") != "success":
+                  failed.append(f'{name} ({r["status"]}/{r.get("conclusion")})')
+
+          # Any OTHER red check also blocks the release — production must not
+          # ship over a failing pipeline, even outside the required set.
+          # (skipped / neutral / cancelled-by-newer-run are not failures.)
+          other_red = [
+              f'{n} ({r["status"]}/{r.get("conclusion")})'
+              for n, r in sorted(latest.items())
+              if n not in REQUIRED
+              and r["status"] == "completed"
+              and r.get("conclusion") in ("failure", "timed_out", "action_required")
+          ]
+
+          ok = True
+          if missing:
+              print(f"::error::Missing required checks on {sha}: {missing}")
+              ok = False
+          if failed:
+              print(f"::error::Required checks not green on {sha}: {failed}")
+              ok = False
+          if other_red:
+              print(f"::error::Other failing checks on {sha}: {other_red}")
+              ok = False
+          if not ok:
+              sys.exit(1)
+          print(f"CI gate PASSED for {sha}: required checks green, no failing checks.")
+          PYEOF
+
+  # ------------------------------------------------------------------
+  # deploy: the ONLY path to terminal-server production. Runs after the
+  # CI gate AND after a human approves the `production` environment.
+  #
+  # REQUIRED SETUP (cannot be done from a PR — owner action):
+  #   Repo Settings -> Environments -> `production` -> Required reviewers:
+  #   add the owner (and any backup approver). Without required reviewers
+  #   the environment gate is a no-op and this workflow is NOT safe.
+  # ------------------------------------------------------------------
+  deploy:
+    name: Deploy terminal-server to production
+    needs: [resolve, ci-gate]
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Confirm pinned SHA
+        run: |
+          ACTUAL="$(git rev-parse HEAD)"
+          EXPECTED="${{ needs.resolve.outputs.sha }}"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::checked out $ACTUAL, expected $EXPECTED"
+            exit 1
+          fi
+          echo "Deploying terminal-server @ $EXPECTED"
+
+      # Deploy mechanism mirrors the (now disabled) deploy-terminal.yml so the
+      # release path stays identical to the previously proven one — but now
+      # behind the CI gate above and the `production` environment approval.
+      - name: Check RAILWAY_TOKEN
+        id: check_token
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::RAILWAY_TOKEN GitHub secret is not set. Cannot deploy."
+            exit 1
+          fi
+          echo "has_token=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Set deployed commit metadata
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          # railway up (CLI upload) does NOT inject Railway's predefined
+          # RAILWAY_GIT_COMMIT_SHA — that only happens with Railway's own
+          # GitHub integration. Set it explicitly from the release SHA so
+          # /health, /health/ready, and /health/live report the real
+          # deployed commit instead of falling back to "dev".
+          railway variable set RAILWAY_GIT_COMMIT_SHA=${{ needs.resolve.outputs.sha }} \
+            --service litlabs-terminal-server \
+            --skip-deploys
+
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up --service litlabs-terminal-server
+
+      - name: Health check
+        env:
+          TERMINAL_BASE_URL: ${{ vars.TERMINAL_BASE_URL || 'https://litlabs-terminal-server-production-0be1.up.railway.app' }}
+        run: |
+          sleep 30
+          curl -sSf --retry 3 --retry-delay 10 \
+            "${TERMINAL_BASE_URL%/}/health/ready" \
+            | jq -e '.readiness == "ready"'
+
+      - name: Verify deployed SHA
+        env:
+          TERMINAL_BASE_URL: ${{ vars.TERMINAL_BASE_URL || 'https://litlabs-terminal-server-production-0be1.up.railway.app' }}
+        run: |
+          DEPLOYED="$(curl -sSf --max-time 15 "${TERMINAL_BASE_URL%/}/health" | jq -r '.commit // "unknown"')"
+          EXPECTED="${{ needs.resolve.outputs.sha }}"
+          echo "deployed=$DEPLOYED expected=${EXPECTED:0:8}"
+          if [ "$DEPLOYED" != "$EXPECTED" ] && [ "$DEPLOYED" != "${EXPECTED:0:8}" ]; then
+            echo "::error::Deployed commit $DEPLOYED does not match release $EXPECTED"
+            exit 1
+          fi
+          echo "Deployed SHA matches the release commit."
