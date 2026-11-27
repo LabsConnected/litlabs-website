@@ -9,9 +9,9 @@ need an owner to confirm against Railway / Clerk / Cloudflare.
 | Environment | Where | Notes |
 | --- | --- | --- |
 | Local dev | `pnpm dev` (port 3001), `pnpm terminal:dev` (terminal server, port 4001) | Terminal URL resolves to `http://localhost:4001` unless overridden. Never falls back to a production host. |
-| Production | Railway project `litlabs-terminal-server`, environment `production`, service `web` (`RAILWAY.md`), `https://www.litlabs.net` | Deployed from `main`. Explicitly defines `NEXT_PUBLIC_TERMINAL_HTTP_URL`, `NEXT_PUBLIC_TERMINAL_WS_URL` and `TERMINAL_SERVER_INTERNAL_URL` (`TERMINAL_PUBLIC_URL` is not set; not needed). |
+| Production | Railway project `litlabs-website`, environment `production`, service `@litlabs/litt-shell` → `https://www.litlabs.net` (health: `/api/health`) | Web service auto-deploy is currently held — merges to `main` do not deploy it; production web deploys are a manual owner decision. `terminal-server` in the same project still auto-deploys `main` via Railway's GitHub integration. Explicitly defines `NEXT_PUBLIC_TERMINAL_HTTP_URL`, `NEXT_PUBLIC_TERMINAL_WS_URL` and `TERMINAL_SERVER_INTERNAL_URL` (`TERMINAL_PUBLIC_URL` is not set; not needed). |
 | Railway PR / preview deploys | Railway projects/services such as `web-phase3b-630` + `terminal-phase3b-630` | Each must define its own terminal URLs. **Do not key logic on `RAILWAY_ENVIRONMENT_NAME`**: at least one preview project also names its environment `production`. |
-| Staging | **verify** | No staging environment is documented. See "Naming" below. |
+| Staging | Railway project `litlabs-website`, environment `staging`, service `@litlabs/litt-shell` → `https://litlabslitt-shell-staging.up.railway.app` | Auto-deploys `main` merges via Railway's GitHub integration; non-main SHAs are deployed manually via `staging-deploy.yml` (workflow_dispatch, staging-only guard). Clerk TEST instance + Stripe TEST mode. |
 
 Vercel is not a hosting target (Railway is production). Remaining Vercel
 references in code are legacy and tracked for separate cleanup.
@@ -92,7 +92,9 @@ ssh -N -L 3001:127.0.0.1:3001 -L 4001:127.0.0.1:4001 <dev-host>
 | --- | --- |
 | `build.yml`, `lighthouse.yml`, `migration-reproducibility.yml`, `companion.yml`, `secret-scan.yml` | No (local build / placeholder env) |
 | `release-gate.yml` | Yes, read-only: hourly `GET /api/health` and terminal `/health`. Terminal URL overridable via repo variable `TERMINAL_BASE_URL`. |
-| `deploy-terminal.yml` | Deploys the terminal service on `main` pushes touching `terminal-server/**`; post-deploy health check (same `TERMINAL_BASE_URL` override). |
+| `deploy-terminal.yml` | Manual only (production hold since 2026-10-22): `workflow_dispatch` deploys the terminal service. NOTE: Railway's own GitHub integration still auto-deploys `terminal-server@main` to the production environment on merges — the hold covers only this workflow. |
+| `staging-deploy.yml` | No: manual dispatch deploys a chosen SHA to the Railway **staging** web service only (hardcoded target + production-name guard). Never production. |
+| `staging-acceptance.yml`, `staging-clerk-auth.yml`, `staging-stripe-e2e.yml` | No: manual dispatch acceptance suites against staging with Clerk TEST users and Stripe TEST checkout (`cs_test_*` hard gate). |
 | `prod-clerk-auth-smoke.yml` | Yes: signs a Clerk test user in on production. **Manual only.** |
 | `final-acceptance-golden.yml` | Yes: full production journey with disposable users. **Manual only.** |
 | `cron-deploy-digest.yml` | Yes: authenticated `POST /api/deployments/digest` on production each weekday (09:00 UTC). Target overridable via repo variable `DIGEST_URL`. |
