@@ -47,10 +47,12 @@ const PENDING_CANCEL_TTL_MS = 30_000;
 
 /**
  * Executions are bounded internally by the agent-loop runtime budget
- * (~10 min). Anything registered longer than this is stale bookkeeping
- * from a killed process and is no longer treated as active.
+ * (maxRuntimeMs = 30 min). Anything registered longer than that plus a
+ * margin is stale bookkeeping from a killed process and is no longer
+ * treated as active. (Was 15 min — shorter than the loop's own cap, so
+ * live runs could be pruned while still executing.)
  */
-const STALE_EXECUTION_MS = 15 * 60 * 1000;
+const STALE_EXECUTION_MS = 35 * 60 * 1000;
 
 const globalRegistry = globalThis as unknown as {
   __littStudioExecutions?: Map<string, ActiveExecution>;
