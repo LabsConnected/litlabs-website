@@ -79,6 +79,17 @@ vi.mock("@/lib/projects/project-checks", () => {
       `Note: the automatic checks ran for this build, but their results could not be ` +
       `saved — the Checks panel and the Jobs tab will show them as not run. You can ` +
       `run the checks again from the Checks panel.`,
+    completionChecksNotConfiguredNote: () =>
+      `IMPORTANT — the automatic checks ran for this build, but none of them are ` +
+      `configured for this project (it has no build, test, lint or audit scripts, ` +
+      `and no configured equivalents for the rest), so nothing actually verified ` +
+      `the finished site. Treat this build as unchecked: the Checks panel and the ` +
+      `Jobs tab show every check as "Not configured" with the run's time, and the ` +
+      `checks will run for real once the project has scripts configured.`,
+    completionChecksPartiallyNotConfiguredNote: (notConfigured: Array<{ label: string }>) =>
+      `Note: some automatic checks are not configured for this project and did not ` +
+      `run: ${notConfigured.map((c) => c.label).join(", ")}. The checks that did run passed — their results are in the ` +
+      `Checks panel and the Jobs tab.`,
     completionChecksUnavailableNotSavedNote: (reason: string) =>
       `IMPORTANT — the automatic checks did NOT run for this build: ${reason}. ` +
       `Nothing verified the finished site, so treat this build as unchecked — and ` +
@@ -475,5 +486,102 @@ describe("ACC-07 Item 2 — automatic checks at build completion", () => {
     expect(saveProjectCheckRunMock).not.toHaveBeenCalled();
     expect(result.checksNote).toBeUndefined();
     expect(result.finalText).not.toContain("automatic checks");
+  });
+
+  // ACC-10 Defect 1 — Acceptance Run 1 on 4adcdd4c: the checks ran
+  // and persisted, but every one settled "not configured" (a
+  // script-less static project), and the closing message said
+  // nothing about checks at all — the build read as verified when
+  // nothing had verified it. Larry's ACC-08 ruling covers this
+  // outcome too: the build counts, the absence of verification is
+  // LOUD.
+  it("when every check settles not-configured, the build counts but the closing note says loudly that nothing verified it", async () => {
+    const { transport } = memoryTransport();
+    const allNotConfigured = {
+      ...checksOutcome(),
+      checks: checksOutcome().checks.map((c) => ({ ...c, status: "not_configured" as const })),
+      summary: { total: 7, passed: 0, failed: 0, notConfigured: 7, changedFileCount: 1 },
+    };
+    runAllProjectChecksMock.mockResolvedValue(allNotConfigured);
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(
+        toolCallReply("tc-1", "files.write", { projectId: "p-test", path: "index.html", content: PAGE }),
+      )
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2(
+      "Build a one-page website for a bakery called Sunny Crust Bakery",
+      transport,
+      config,
+    );
+
+    expect(result.failedHonestly).toBeUndefined();
+    expect(saveProjectCheckRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "p-test", conversationId: "conv-1" }),
+    );
+    expect(result.checksNote).toBeTruthy();
+    expect(result.checksNote).toContain("IMPORTANT");
+    expect(result.checksNote).toContain("none of them are configured");
+    expect(result.checksNote).toContain("nothing actually verified");
+    expect(result.finalText).toContain("none of them are configured");
+  });
+
+  it("when some checks pass and others are not configured, the note names the ones that did not run", async () => {
+    const { transport } = memoryTransport();
+    runAllProjectChecksMock.mockResolvedValue(checksOutcome());
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(
+        toolCallReply("tc-1", "files.write", { projectId: "p-test", path: "index.html", content: PAGE }),
+      )
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2(
+      "Build a one-page website for a bakery called Sunny Crust Bakery",
+      transport,
+      config,
+    );
+
+    expect(result.failedHonestly).toBeUndefined();
+    expect(result.checksNote).toBeTruthy();
+    expect(result.checksNote).toContain("did not run: Accessibility, Performance");
+  });
+
+  // ACC-10 Defect 3 — the quality floor: a full page with no styling
+  // at all must not settle as a clean Complete (Acceptance Run 1 on
+  // 4adcdd4c shipped exactly that shape and called it done).
+  it("settles honestly failed when the written page is a full page with no styling", async () => {
+    const { transport } = memoryTransport();
+    const barePage = [
+      "<!DOCTYPE html>",
+      "<html><head><title>Sunny Crust Bakery</title></head><body>",
+      "<h1>Sunny Crust Bakery</h1>",
+      "<p>Welcome to Sunny Crust Bakery, a neighborhood bakery serving fresh sourdough, croissants, muffins, cakes and pies every morning from seven until three, with coffee, tea and a small lunch menu at midday.</p>",
+      "<p>Find us on Main Street, call ahead for large orders, and ask about our weekend baking classes for kids and adults alike.</p>",
+      "</body></html>",
+    ].join("\n");
+    runAllProjectChecksMock.mockResolvedValue(checksOutcome());
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(
+        toolCallReply("tc-1", "files.write", { projectId: "p-test", path: "index.html", content: barePage }),
+      )
+      .mockResolvedValueOnce(doneReply);
+
+    const result = await runAgentLoopV2(
+      "Build a one-page website for a bakery called Sunny Crust Bakery",
+      transport,
+      config,
+    );
+
+    expect(result.failedHonestly).toBeTruthy();
+    expect(result.failedHonestly).toContain("no styling at all");
+    expect(result.finalText).toBe(result.failedHonestly);
+    // The floor fires before the completion checks — a page this bare
+    // never reaches them.
+    expect(runAllProjectChecksMock).not.toHaveBeenCalled();
+    const qualityEvents = result.events.filter(
+      (e) => e.type === "build_result" && (e as { check?: string }).check === "Site quality",
+    );
+    expect(qualityEvents).toHaveLength(1);
+    expect((qualityEvents[0] as { passed?: boolean }).passed).toBe(false);
   });
 });

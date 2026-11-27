@@ -25,7 +25,37 @@ export interface VisualAudit {
   externalRefs: string[];
   placeholderRefs: string[];
   hasHeroImagery: boolean;
+  /** ACC-10 Defect 3: the page carries SOME styling — a <style> block
+   *  with rules, a stylesheet link, a utility-framework CDN script, or
+   *  several inline style attributes. A full page with none of these
+   *  renders as bare unstyled HTML (Acceptance Run 1 on 4adcdd4c). */
+  hasStyling: boolean;
+  /** ACC-10 Defect 3: raw markdown link syntax ([text](url)) left in
+   *  the HTML — it renders literally in the browser and is never valid
+   *  output (Acceptance Run 1 on 4adcdd4c shipped one as the contact
+   *  email). */
+  markdownLeaks: string[];
   issues: string[];
+}
+
+const STYLE_BLOCK_RE = /<style\b[^>]*>[\s\S]*?\{[^}]*\}/i;
+const STYLESHEET_LINK_RE = /<link\b[^>]*\brel\s*=\s*["']stylesheet["']/i;
+const FRAMEWORK_CDN_RE = /<script\b[^>]*\bsrc\s*=\s*["'][^"']*(?:tailwind|bootstrap)[^"']*["']/i;
+const INLINE_STYLE_RE = /\bstyle\s*=\s*["'][^"']+["']/gi;
+const MARKDOWN_LINK_RE = /\[[^\]\n]{1,80}\]\((?:https?:\/\/|mailto:)[^)\s]+\)/g;
+
+/** True when the document carries any styling signal at all. */
+export function detectStyling(html: string): boolean {
+  if (STYLE_BLOCK_RE.test(html)) return true;
+  if (STYLESHEET_LINK_RE.test(html)) return true;
+  if (FRAMEWORK_CDN_RE.test(html)) return true;
+  const inline = html.match(INLINE_STYLE_RE);
+  return (inline?.length ?? 0) >= 3;
+}
+
+/** Raw markdown link syntax left in the document (capped list). */
+export function detectMarkdownLeaks(html: string): string[] {
+  return [...html.matchAll(MARKDOWN_LINK_RE)].map((m) => m[0]).slice(0, 5);
 }
 
 const IMG_TAG_RE = /<img\b[^>]*>/gi;
@@ -129,12 +159,17 @@ export function auditStaticSiteHtml(html: string, files: ReadonlySet<string>): V
   }
   if (PLACEHOLDER_TEXT.test(html)) placeholders.push("(placeholder text)");
 
+  const hasStyling = detectStyling(html);
+  const markdownLeaks = detectMarkdownLeaks(html);
+
   const issues: string[] = [];
   if (broken.length) issues.push(`${broken.length} broken image reference(s)`);
   if (external.length) issues.push(`${external.length} external hotlinked image(s)`);
   if (placeholders.length) issues.push(`${placeholders.length} placeholder image/text item(s)`);
   if (imgCount === 0) issues.push("no imagery in page");
   if (!hasHeroImagery) issues.push("hero/lead section has no imagery");
+  if (!hasStyling) issues.push("page has no styling (unstyled HTML)");
+  if (markdownLeaks.length) issues.push(`${markdownLeaks.length} raw markdown link(s) in page`);
 
   return {
     imageCount: imgCount,
@@ -143,6 +178,8 @@ export function auditStaticSiteHtml(html: string, files: ReadonlySet<string>): V
     externalRefs: external,
     placeholderRefs: placeholders,
     hasHeroImagery,
+    hasStyling,
+    markdownLeaks,
     issues,
   };
 }

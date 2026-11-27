@@ -177,6 +177,67 @@ export function isDeployOnlyInstruction(instruction: string): boolean {
   return true;
 }
 
+/**
+ * ACC-10 Defect 2 — the mirror of deploy-only: a run whose instruction
+ * never asks to deploy or publish must not deploy at all.
+ *
+ * Acceptance Run 1 on 4adcdd4c (2026-11-26): the user asked to BUILD a
+ * bakery site; the run built it — and then, uninvited, chained a
+ * project.deploy (its own approval, its own charge) before the user
+ * ever asked to publish. ACC-07's build scope correctly forced a
+ * separate approval for the deploy, but a separate approval is not the
+ * line: the user never asked for the site to go live in that run.
+ *
+ * The classifier stays deliberately conservative, mirroring
+ * deploy-only's asymmetry: deploy is blocked only when the instruction
+ * carries NO deploy pattern at all. Any deploy/publish wording — even
+ * mixed with content work ("build it and deploy") — leaves deploy
+ * available with its own separate approval, exactly as before. A
+ * missed block costs the status quo; a false one would refuse a
+ * publish the user actually asked for.
+ */
+
+/** The deploy tools: project.deploy publishes the project;
+ *  deploy.execute redeploys the LiTT app service itself. Neither may
+ *  fire in a run whose instruction never asked for a deploy. */
+export const DEPLOY_TOOL_IDS: ReadonlySet<string> = new Set([
+  "project.deploy",
+  "deploy.execute",
+]);
+
+/** True when the tool is a deploy tool (by registry id). */
+export function isDeployTool(tool: { id: string }): boolean {
+  return DEPLOY_TOOL_IDS.has(tool.id);
+}
+
+/**
+ * True when the instruction asks to deploy/publish in ANY form —
+ * deploy-only or mixed with content work. Deploy stays available for
+ * such runs; every other run must not deploy.
+ */
+export function instructionRequestsDeploy(instruction: string): boolean {
+  const text = stripResolverContext(instruction ?? "");
+  if (!text) return false;
+  return DEPLOY_PATTERNS.some((p) => p.test(text));
+}
+
+/** The tool-result error fed back when a run whose instruction never
+ *  asked for a deploy emits a deploy call anyway. */
+export function noDeployRefusalError(toolId: string): string {
+  return (
+    `${toolId} refused: the user did not ask to deploy or publish in this request, so this run ` +
+    `must not put anything live. The work the user asked for stands as it is — built, not published. ` +
+    `If the user wants the site published, they will ask for that separately, and it will get its own approval then.`
+  );
+}
+
+/** System-prompt note appended for runs whose instruction never
+ *  asked for a deploy. */
+export const NO_DEPLOY_PROMPT_NOTE =
+  "NO DEPLOY IN THIS REQUEST: the user did not ask to deploy or publish anything. " +
+  "Do NOT call project.deploy or deploy.execute in this run — they are disabled. " +
+  "Finish the work the user asked for and report it as built, not published.";
+
 /** The tool-result error fed back when a deploy-only run's model
  *  emits a mutation call anyway. */
 export function deployOnlyRefusalError(toolId: string): string {

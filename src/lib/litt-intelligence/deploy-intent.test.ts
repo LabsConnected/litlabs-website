@@ -2,8 +2,11 @@ import { describe, it, expect } from "vitest";
 import {
   DEPLOY_TRANSPORT_TOOL_IDS,
   deployOnlyRefusalError,
+  instructionRequestsDeploy,
   isBlockedInDeployOnlyRun,
   isDeployOnlyInstruction,
+  isDeployTool,
+  noDeployRefusalError,
 } from "./deploy-intent";
 import { toolRegistry } from "./tool-registry";
 
@@ -163,5 +166,54 @@ describe("isDeployOnlyInstruction", () => {
     expect(err).toContain("files.write");
     expect(err).toContain("project.deploy");
     expect(err).toMatch(/deploy-only/i);
+  });
+});
+
+/**
+ * ACC-10 Defect 2 — the mirror classification. Acceptance Run 1 on
+ * 4adcdd4c: a build ask chained an uninvited project.deploy. Deploy
+ * is blocked only when the instruction carries NO deploy wording at
+ * all; any deploy ask — pure or mixed with content work — keeps
+ * deploy available.
+ */
+describe("instructionRequestsDeploy (ACC-10 Defect 2)", () => {
+  it.each([
+    "Build a website for a bakery called Sunny Crust Bakery, with a menu, prices, and contact info.",
+    "build a landing page",
+    "Fix the header and make the prices readable",
+    "Add a gallery page with photos of the shop",
+    "",
+  ])("no deploy wording → deploy not requested: %s", (text) => {
+    expect(instructionRequestsDeploy(text)).toBe(false);
+  });
+
+  it.each([
+    "Deploy this project to production",
+    "Publish the site",
+    "build a landing page and deploy it",
+    "Fix the header, then publish it",
+    "Please redeploy",
+    "Ship it",
+  ])("any deploy wording → deploy requested: %s", (text) => {
+    expect(instructionRequestsDeploy(text)).toBe(true);
+  });
+
+  it("resolver-appended context does not manufacture a deploy ask", () => {
+    expect(
+      instructionRequestsDeploy("Build a bakery site — referring to: Deploy this project to production"),
+    ).toBe(false);
+  });
+
+  it("isDeployTool covers exactly the two deploy tools", () => {
+    expect(isDeployTool({ id: "project.deploy" })).toBe(true);
+    expect(isDeployTool({ id: "deploy.execute" })).toBe(true);
+    expect(isDeployTool({ id: "files.write" })).toBe(false);
+    expect(isDeployTool({ id: "site.compose" })).toBe(false);
+  });
+
+  it("the refusal names the tool and states the user never asked", () => {
+    const err = noDeployRefusalError("project.deploy");
+    expect(err).toContain("project.deploy");
+    expect(err).toMatch(/did not ask to deploy or publish/i);
   });
 });

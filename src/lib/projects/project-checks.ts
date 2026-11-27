@@ -518,3 +518,43 @@ export function completionChecksUnavailableNotSavedNote(reason: string): string 
     `as not run. They can be run from the Checks panel once the workspace is reachable.`
   );
 }
+
+/**
+ * ACC-10 Defect 1 — the checks RAN and persisted, but every one of
+ * them settled "not configured": the project has no package scripts
+ * (a script-less static site) and no configured equivalents, so the
+ * run verified nothing. Acceptance Run 1 on 4adcdd4c: all seven
+ * checks settled "Not configured / No script configured", the
+ * persisted set existed, and the closing message said nothing about
+ * checks at all — indistinguishable from a verified build. Under
+ * Larry's ACC-08 ruling this is the same class as checks that cannot
+ * run: the build still counts, but the fact must be LOUD. The results
+ * ARE persisted, so the note may point at the panels truthfully.
+ */
+export function completionChecksNotConfiguredNote(): string {
+  return (
+    `IMPORTANT — the automatic checks ran for this build, but none of them are ` +
+    `configured for this project (it has no build, test, lint or audit scripts, ` +
+    `and no configured equivalents for the rest), so nothing actually verified ` +
+    `the finished site. Treat this build as unchecked: the Checks panel and the ` +
+    `Jobs tab show every check as "Not configured" with the run's time, and the ` +
+    `checks will run for real once the project has scripts configured.`
+  );
+}
+
+/**
+ * ACC-10 Defect 1 — the mixed outcome: some checks ran and passed,
+ * others are not configured for this project and did not run. The
+ * build's verification is partial and the closing text says which
+ * checks did not run, instead of letting a partial pass read as a
+ * full one. (A failed check dominates via the failure message, so
+ * this note is only used when nothing failed.)
+ */
+export function completionChecksPartiallyNotConfiguredNote(notConfigured: ProjectCheckResult[]): string {
+  const names = notConfigured.map((c) => c.label).join(", ");
+  return (
+    `Note: some automatic checks are not configured for this project and did not ` +
+    `run: ${names}. The checks that did run passed — their results are in the ` +
+    `Checks panel and the Jobs tab.`
+  );
+}
