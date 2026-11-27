@@ -130,8 +130,8 @@ describe("AppShell Navigation", () => {
     expect(APP_NAV_MORE.map((item) => item.label)).toEqual([]);
   });
 
-  // Regression: /hire is permanently retired — the page always redirects
-  // to /studio — so no nav surface may link to it.
+  // /hire is a public marketing inquiry page, not an app workspace surface —
+  // the signed-in app nav should not duplicate it.
   it("does NOT link to /hire anywhere", () => {
     const hrefs = [...APP_NAV_MAIN, ...APP_NAV_MORE].map((i) => i.href);
     expect(hrefs).not.toContain("/hire");

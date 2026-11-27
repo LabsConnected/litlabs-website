@@ -13,24 +13,19 @@ import MarketingHeader from "@/components/marketing/MarketingHeader";
 import MarketingFooter from "@/components/marketing/MarketingFooter";
 
 // Routes that render minimal chrome (no navbar / footer).
-// Only truly public pages: auth, legal, docs.
-// Note: /hire is hybrid — bare for signed-out, AppShell for signed-in.
-// /pricing lives in the (marketing) route group now — it never renders here.
+// Only truly public pages still owned by the (app) group: auth and docs.
+// Legal/about pages live in (marketing) now; /pricing lives there too.
 const BARE_PUBLIC_PATHS = [
   "/login",
   "/sign-in",
   "/sign-up",
   "/oauth-consent",
-  "/about",
-  "/privacy",
-  "/terms",
-  "/cookies",
   "/docs",
 ];
 
 // Routes that are bare-public ONLY when signed out.
 // When signed in, they get the AppShell sidebar.
-const HYBRID_PUBLIC_PATHS = ["/hire", "/marketplace", "/discover", "/showcase"];
+const HYBRID_PUBLIC_PATHS = ["/marketplace", "/discover", "/showcase"];
 
 // Routes that render their own custom interactive chrome (e.g. cloud emulator)
 const SELF_CONTAINED_CHROME = ["/games/cloud"];

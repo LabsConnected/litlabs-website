@@ -1,6 +1,5 @@
 import { buildMetadata } from "@/lib/seo";
-import { ArrowRight, Bot, Code2, Globe, Heart, Shield, Sparkles, Zap, Check } from "lucide-react";
-import Link from "next/link";
+import { Code2, Shield, Zap, Check } from "lucide-react";
 import "@/app/public-pages-tlc.css";
 
 export const metadata = buildMetadata({
@@ -13,7 +12,7 @@ export default function AboutPage() {
   return (
     <main className="litt-public-light min-h-screen bg-white text-[#0e1510] selection:bg-[#8fd14f]/60">
       {/* ── Hero Section ── */}
-      <section className="relative pt-16 pb-20 border-b border-[#cfdec4]">
+      <section className="relative pt-24 pb-20 border-b border-[#cfdec4]">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(23,122,54,0.12),transparent_50%)]" />
         <div className="relative mx-auto max-w-screen-xl px-5 lg:px-10">
           <div className="max-w-3xl">
@@ -135,27 +134,6 @@ export default function AboutPage() {
           </div>
         </div>
       </section>
-
-      {/* ── Footer ── */}
-      <footer className="bg-[#0b120d] border-t border-white/10 px-5 py-12 lg:px-10 mt-auto">
-        <div className="mx-auto max-w-screen-2xl">
-          <div className="flex flex-col items-center justify-between gap-6 sm:flex-row">
-            <div className="flex items-center gap-2 font-black text-white">
-              <Sparkles size={16} className="text-accent" /> LiTTree LabStudios
-            </div>
-            <div className="flex flex-wrap justify-center gap-6 text-xs font-bold text-white/40">
-              <Link href="/" className="hover:text-white transition">Home</Link>
-              <Link href="/studio" className="hover:text-white transition">Studio</Link>
-              <Link href="/pricing" className="hover:text-white transition">Pricing</Link>
-              <Link href="/privacy" className="hover:text-white transition">Privacy</Link>
-              <Link href="/terms" className="hover:text-white transition">Terms</Link>
-            </div>
-          </div>
-          <div className="mt-8 text-center text-[10px] text-white/20">
-            &copy; {new Date().getFullYear()} LiTTree LabStudios. All rights reserved.
-          </div>
-        </div>
-      </footer>
     </main>
   );
 }

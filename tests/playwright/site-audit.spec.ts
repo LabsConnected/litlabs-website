@@ -26,7 +26,7 @@ const PUBLIC_ROUTES = [
   { path: "/", name: "Homepage", expectedText: /LiTTree|LiTT|AI Creative Studio/i },
   { path: "/pricing", name: "Pricing", expectedText: /Creator|Pro|Pricing|month|\$7|\$19/i },
   { path: "/marketplace", name: "Marketplace", expectedText: /Marketplace|agent|Agent/i },
-  { path: "/gallery", name: "Gallery", expectedText: /Gallery|project|Project|Showcase|Sign|sign/i, redirectsTo: "/showcase" },
+  { path: "/gallery", name: "Gallery", expectedText: /Gallery|project|Project|Showcase|Sign|sign/i },
   { path: "/docs", name: "Docs", expectedText: /Docs|Documentation|guide|Guide|LiTTree/i },
   { path: "/privacy", name: "Privacy", expectedText: /Privacy|privacy/i },
   { path: "/terms", name: "Terms", expectedText: /Terms|terms/i },
@@ -74,7 +74,6 @@ test.describe("Site Audit — Public Routes @public", () => {
   for (const route of PUBLIC_ROUTES) {
     test(`${route.name} (${route.path}) — full audit`, async ({ page }) => {
       const errors: string[] = [];
-      const failedRequests: string[] = [];
 
       page.on("pageerror", (error) => {
         if (error.message.includes("418")) return;
