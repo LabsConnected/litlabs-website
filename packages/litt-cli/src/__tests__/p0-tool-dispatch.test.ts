@@ -18,7 +18,7 @@
 
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import path from "node:path";
 import { classifyIntent } from "../lib/intent.js";
 import { classifyUtilityIntent, executeUtilityLookup } from "../lib/utility-lane.js";
@@ -162,10 +162,12 @@ describe("filesystem.search: real execution evidence", () => {
     expect(res.message).toMatch(/no matches/i);
   });
 
-  it("denied system root returns the actual failure", async () => {
+  it("denied credential root returns the actual failure", async () => {
     const root = makeTree();
     const shell = createShellExecutor(root);
-    const res = await findFilesByName(shell, { path: "C:\\Windows", name: "*.exe" });
+    // ~/.ssh is absolute on every platform and always matches the
+    // credential blocklist — the denial fires before any fs access.
+    const res = await findFilesByName(shell, { path: path.join(homedir(), ".ssh"), name: "*.pub" });
     expect(res.success).toBe(false);
     expect(res.message).toMatch(/denied|authorization/i);
   });
@@ -177,9 +179,14 @@ describe("filesystem.search: real execution evidence", () => {
     expect(res.message).toMatch(/not found/i);
   });
 
-  it("traversal in an explicit root normalizes before the blocklist (C:\\LiTT\\..\\Windows → denied)", async () => {
+  it("traversal in an explicit root normalizes before the blocklist (~/.ssh → denied)", async () => {
     const shell = createShellExecutor(tmpdir());
-    const res = await findFilesByName(shell, { path: "C:\\LiTT\\..\\Windows", name: "*.exe" });
+    // "subdir/.." collapses to the home dir; the blocklist must see the
+    // normalized ~/.ssh, not the pre-normalization spelling.
+    const res = await findFilesByName(shell, {
+      path: path.join(homedir(), "litt-traversal-probe", "..", ".ssh"),
+      name: "*.pub",
+    });
     expect(res.success).toBe(false);
     expect(res.message).toMatch(/denied|authorization/i);
   });
@@ -223,12 +230,13 @@ describe("filesystem.search: real execution evidence", () => {
     expect(res.success).toBe(true); // un-aborted run unaffected
   });
 
-  it("'.' searches the project sandbox — C:\\LiTT is a real authorized scope", async () => {
-    // Real evidence: the actual LiTT tree on this PC. C:\LiTT must exist
-    // (this worktree lives inside it); AGENTS.md search proves real
-    // execution outside the project sandbox when the user names it.
+  it("'.' searches the project sandbox — the repo root is a real authorized scope", async () => {
+    // Real evidence: vitest runs with cwd = packages/litt-cli, so ../..
+    // is the repository root — an explicit scope outside the package
+    // sandbox that contains a real AGENTS.md.
+    const repoRoot = path.resolve(process.cwd(), "..", "..");
     const shell = createShellExecutor(process.cwd());
-    const res = await findFilesByName(shell, { path: "C:\\LiTT", name: "AGENTS.md", maxDepth: 6, timeoutMs: 30000 });
+    const res = await findFilesByName(shell, { path: repoRoot, name: "AGENTS.md", maxDepth: 4, timeoutMs: 30000 });
     expect(res.success).toBe(true);
     const data = res.data as { matches: string[]; count: number };
     expect(data.count).toBeGreaterThan(0);
