@@ -331,7 +331,7 @@ jobs:
             echo "Authenticated Clerk setup: FAIL"
             # Surface a sanitized tail — the log is deleted by the final
             # cleanup step, so without this every auth failure is opaque.
-            python3 - "$auth_log" 2>/dev/null | tee -a "$GITHUB_STEP_SUMMARY" <<'PY' || true
+            python3 - "$auth_log" 2>/dev/null <<'PY' | tee -a "$GITHUB_STEP_SUMMARY" || true
           import re, sys
           try:
               lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
