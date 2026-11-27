@@ -1,0 +1,55 @@
+description: >
+  F3 routing — MODEL-ONLY judge track (informational, NOT authoritative).
+  Asks qwen3:4b-instruct-fast via PC Ollama to classify the same 6 prompts
+  as CHAT or BUILD, with no access to LiTT's real code. Per F3 step 5,
+  this track must never be treated as proof of real LiTT behavior — it
+  exists only to show whether the model's own judgment agrees with the
+  deterministic classifyIntent() ground truth in
+  promptfooconfig.routing-ground-truth.yaml. $0 cost (local Ollama).
+
+providers:
+  - id: ollama:chat:qwen3:4b-instruct-fast
+    label: ollama-judge
+    config:
+      temperature: 0
+
+prompts:
+  - |
+    You are classifying a message for a coding assistant's router. Reply
+    with EXACTLY one word, either CHAT or BUILD. BUILD means the user is
+    explicitly asking to create/scaffold/build a new project or app.
+    CHAT means anything else (conversation, questions, vague/ambiguous
+    remarks). Do not explain. Do not add punctuation.
+
+    Message: {{prompt}}
+
+defaultTest:
+  assert:
+    - type: javascript
+      value: "output.trim().toUpperCase().includes(context.vars.expected)"
+
+tests:
+  - vars:
+      id: explicit-build-1
+      prompt: "Build me a simple personal portfolio website with an index.html homepage."
+      expected: BUILD
+  - vars:
+      id: explicit-build-2
+      prompt: "Create a new project here and scaffold a basic Express API server."
+      expected: BUILD
+  - vars:
+      id: normal-chat-1
+      prompt: "Hey, how's it going today?"
+      expected: CHAT
+  - vars:
+      id: normal-chat-2
+      prompt: "What's the difference between let and const in JavaScript?"
+      expected: CHAT
+  - vars:
+      id: ambiguous-1
+      prompt: "I don't know, maybe we should look at this later."
+      expected: CHAT
+  - vars:
+      id: ambiguous-2
+      prompt: "Something's off with the thing we talked about."
+      expected: CHAT
