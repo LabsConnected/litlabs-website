@@ -180,7 +180,10 @@ export class CdpBrowser {
     // (pointing at a dead port) or briefly held by a Chrome still shutting
     // down — so don't trust the file alone: poll it and verify the
     // endpoint actually answers /json/version before connecting.
-    const deadline = Date.now() + 15_000;
+    // First-ever Chrome launch on a cold CI runner can take well over
+    // 15s (cold profile, container filesystem). 30s keeps the gate
+    // meaningful without flaking on slow runners.
+    const deadline = Date.now() + 30_000;
     let version: { webSocketDebuggerUrl?: string } | null = null;
     while (Date.now() < deadline) {
       if (stderrWsUrl) {
@@ -204,7 +207,7 @@ export class CdpBrowser {
       const tail = stderrTail.trim();
       await b.close();
       throw new Error(
-        `browser did not open a DevTools endpoint within 15s${tail ? ` — ${tail.split("\n").slice(-3).join(" | ")}` : ""}`,
+        `browser did not open a DevTools endpoint within 30s${tail ? ` — ${tail.split("\n").slice(-3).join(" | ")}` : ""}`,
       );
     }
     try {
