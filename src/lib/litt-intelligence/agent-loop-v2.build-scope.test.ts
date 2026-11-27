@@ -168,17 +168,27 @@ describe("ACC-07 build scope — the approval architecture", () => {
     expect(result.pendingApproval?.buildScopeApproved).toBe(true);
   });
 
-  it("publishing still prompts on its own, scope or not", async () => {
+  // ACC-10 SUPERSEDES the ACC-07 expectation this test used to pin
+  // ("publishing still prompts on its own, scope or not").
+  // Acceptance Run 1 on 4adcdd4c was exactly this shape — a build
+  // resume chaining project.deploy — and Larry's ruling is that a
+  // run whose instruction never asked to deploy must not deploy at
+  // all: no approval card, no execution. The ACC-07 property that
+  // survives is narrower: build scope never COVERS a deploy — when
+  // an instruction does ask to publish, the deploy still prompts on
+  // its own (pinned in agent-loop-v2.deploy.test.ts, ACC-10 case 2).
+  it("publishing is refused in a build run that never asked for it, scope or not (ACC-10)", async () => {
     const { transport } = memoryTransport();
-    vi.mocked(callLLMWithTools).mockResolvedValueOnce(
-      toolCallReply("tc-2", "project.deploy", {}),
-    );
+    vi.mocked(callLLMWithTools)
+      .mockResolvedValueOnce(toolCallReply("tc-2", "project.deploy", {}))
+      .mockResolvedValueOnce(doneReply);
 
     const result = await resumeAgentLoopV2(makeResume({ buildScopeApproved: true }), transport);
 
-    expect(result.pendingApproval).toBeTruthy();
-    expect(result.pendingApproval?.toolId).toBe("project.deploy");
-    expect(result.pendingApproval?.grantsBuildScope).toBeFalsy();
+    expect(result.pendingApproval).toBeUndefined();
+    const refusal = result.toolCalls.find((t) => t.toolId === "project.deploy");
+    expect(refusal?.success).toBe(false);
+    expect(refusal?.summary).toMatch(/did not ask to deploy/i);
   });
 
   it("without a granted scope, the next in-scope call gates again — as a scope ask", async () => {
