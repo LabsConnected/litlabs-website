@@ -184,8 +184,9 @@ export class CdpBrowser {
     // CI containers routinely deny user namespaces (Chrome's sandbox
     // needs them) and ship a tiny /dev/shm that crashes the renderer.
     // --no-sandbox stays opt-in outside CI: LITT_BROWSER_NO_SANDBOX=1 or
-    // any CI environment. --disable-dev-shm-usage is harmless everywhere.
-    const noSandbox = process.env.LITT_BROWSER_NO_SANDBOX === "1" || Boolean(process.env.CI);
+    // a real CI environment (CI === "true" exactly — "false"/"0" must not
+    // trip it). --disable-dev-shm-usage is harmless everywhere.
+    const noSandbox = process.env.LITT_BROWSER_NO_SANDBOX === "1" || process.env.CI === "true";
     const args = [
       "--remote-debugging-port=0",
       `--user-data-dir=${b.profileDir}`,
