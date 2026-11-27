@@ -2966,6 +2966,57 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
     );
     expect(result.failedHonestly).toContain("3 steps");
   });
+
+  it("an approved build resume states the remaining work once before the first model step", async () => {
+    // Acceptance run 45930737200 iter 4: post-approval the model fetched
+    // four images and never wrote — the zero-write guard stopped it.
+    // The resume now injects a one-time continuation nudge when the
+    // build capability guard is armed and nothing has deployed yet.
+    vi.mocked(callLLMWithTools).mockResolvedValueOnce({
+      text: "",
+      toolCalls: [{ toolId: "files.read", toolCallId: "tc-r1", inputs: { projectId: "p-test", path: "index.html" } }],
+      finishReason: "tool_calls",
+      model: "test",
+    }).mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "test" });
+
+    const result = await trackedResume(approvedWriteResume(), writeTransport);
+
+    const firstCallMessages = vi.mocked(callLLMWithTools).mock.calls[0][1] as Array<{
+      role: string;
+      content: string;
+    }>;
+    const nudges = firstCallMessages.filter(
+      (m) => m.role === "user" && m.content.includes("has not deployed yet"),
+    );
+    expect(nudges).toHaveLength(1);
+    expect(result.failedHonestly).toBeUndefined();
+  });
+
+  it("a resume without the build guard gets no continuation nudge", async () => {
+    vi.mocked(callLLMWithTools).mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "test" });
+
+    await trackedResume(
+      approvedWriteResume({
+        config: {
+          systemPrompt: "You are LiTT.",
+          userId: "u-test",
+          executionMode: "act",
+          enableBuildFix: false,
+          isStaticWorkspace: true,
+          executionRequested: true,
+        },
+      }),
+      writeTransport,
+    );
+
+    const firstCallMessages = vi.mocked(callLLMWithTools).mock.calls[0][1] as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(
+      firstCallMessages.some((m) => m.role === "user" && m.content.includes("has not deployed yet")),
+    ).toBe(false);
+  });
 });
 
 describe("runAgentLoopV2 — bounded read-loop recovery (golden follow-up incident 2026-11-05)", () => {

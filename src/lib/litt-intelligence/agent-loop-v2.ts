@@ -5649,6 +5649,34 @@ async function resumeAgentLoopV2Inner(
     }
   }
 
+  // Resumed-build continuation nudge: an approved build resume can leave
+  // a small model re-gathering assets (image.stock / web.search) instead
+  // of returning to the page, so the zero-write guard stops the run
+  // mid-build (staging acceptance run 45930737200 iter 4 — four successful
+  // image.stock calls, zero file writes, guard fired at step 6). When the
+  // build capability guard is armed this resume IS a build, and while no
+  // deployment has completed the remaining work is files + deploy — state
+  // it once up front so the continuation drives there instead of
+  // wandering. The guard itself is unchanged.
+  if (
+    resume.decision === "approved" &&
+    cfg.buildCapabilityGuard != null &&
+    !completedDeployment &&
+    !cancelled &&
+    !failedHonestly &&
+    // pausedMessages carry loop-injected messages forward across
+    // approval cycles — don't stack a second copy on the next resume.
+    !llmMessages.some(
+      (m) => m.role === "user" && typeof m.content === "string" && m.content.includes("has not deployed yet"),
+    )
+  ) {
+    llmMessages.push({
+      role: "user",
+      content:
+        "The build is not finished — it has not deployed yet. Continue now: finish writing the project files, then run the deploy step. Do not end your turn having only fetched assets or searched.",
+    });
+  }
+
   // Route honesty: record the resumed run's first route plan too —
   // a resume is a fresh observability record for the continuation.
   const recordRoutePlan = makeRoutePlanRecorder(localProgress);
