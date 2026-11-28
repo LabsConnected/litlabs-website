@@ -32,6 +32,7 @@ export interface ToolHandlerResult {
 export type ToolHandler = (
   inputs: Record<string, unknown>,
   transport: WorkspaceTransport,
+  executionContext?: { signal?: AbortSignal },
 ) => Promise<ToolHandlerResult>;
 
 // ─── File Tools ───────────────────────────────────────────────────

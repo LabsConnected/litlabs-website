@@ -19,6 +19,15 @@ import { webSearch as coreWebSearch, safeFetch as coreSafeFetch, weatherForecast
 export interface ToolExecutionContext {
   actionRunId?: string;
   /**
+   * The run's abort signal, threaded down from the agent loop so a
+   * handler that awaits long operations can observe cancellation
+   * while it works (and refuse to start further mutations once it has
+   * fired). Optional and back-compatible: handlers that ignore it keep
+   * working unchanged — the registry's execution deadline and the
+   * pre-dispatch guard enforce cancellation around them.
+   */
+  signal?: AbortSignal;
+  /**
    * Trusted server execution context — the ActionRun identity plus the
    * authenticated tenant identity. Flows DOWN from the orchestrator;
    * model-controlled inputs never establish it.
@@ -35,7 +44,11 @@ type ToolHandler = (
 ) => Promise<unknown>;
 
 type V2Module = typeof import("./tool-handlers-v2");
-type V2Handler = (inputs: Record<string, unknown>, transport: WorkspaceTransport) => Promise<unknown>;
+type V2Handler = (
+  inputs: Record<string, unknown>,
+  transport: WorkspaceTransport,
+  executionContext?: ToolExecutionContext,
+) => Promise<unknown>;
 
 /**
  * Thrown when a tool handler exceeds its declared `timeoutMs`.
@@ -112,6 +125,70 @@ function withExecutionDeadline<T>(
 }
 
 /**
+ * The minimal structural shape of a spawned child process that
+ * killChildOnAbort relies on: a pid (to signal the process group),
+ * kill() for direct signals, and once("exit") to disarm the wiring
+ * when the child ends on its own. Declared structurally so this
+ * module needs no child_process import — a real ChildProcess
+ * satisfies the shape as-is.
+ */
+export interface AbortKillableChild {
+  readonly pid?: number | undefined;
+  kill(signal?: NodeJS.Signals | number): boolean;
+  once(event: "exit", listener: () => void): unknown;
+}
+
+/**
+ * Wire a child process a handler spawned in-process to the run's abort
+ * signal: on abort, terminate the child — SIGTERM first, escalating to
+ * SIGKILL after a short grace period, via the process group where the
+ * platform supports it (POSIX, negative pid) so a spawned tree dies
+ * with its root. This is the standard wiring for any handler that owns
+ * a real child process; Studio's workspace handlers currently spawn
+ * none (they ride the WorkspaceTransport to the terminal service), so
+ * this helper is exercised by its own tests and available to any
+ * handler that ever does spawn one.
+ */
+export function killChildOnAbort(child: AbortKillableChild, signal?: AbortSignal): void {
+  if (!signal) return;
+  let escalation: ReturnType<typeof setTimeout> | undefined;
+  const terminate = () => {
+    const pid = child.pid;
+    if (pid && process.platform !== "win32") {
+      try {
+        process.kill(-pid, "SIGTERM");
+      } catch {
+        try { child.kill("SIGTERM"); } catch { /* already gone */ }
+      }
+    } else {
+      try { child.kill("SIGTERM"); } catch { /* already gone */ }
+    }
+    escalation = setTimeout(() => {
+      const p = child.pid;
+      if (p && process.platform !== "win32") {
+        try {
+          process.kill(-p, "SIGKILL");
+        } catch {
+          try { child.kill("SIGKILL"); } catch { /* already gone */ }
+        }
+      } else {
+        try { child.kill("SIGKILL"); } catch { /* already gone */ }
+      }
+    }, 250);
+    (escalation as { unref?: () => void }).unref?.();
+  };
+  if (signal.aborted) {
+    terminate();
+    return;
+  }
+  signal.addEventListener("abort", terminate, { once: true });
+  child.once("exit", () => {
+    signal.removeEventListener("abort", terminate);
+    if (escalation) clearTimeout(escalation);
+  });
+}
+
+/**
  * Workspace-scoped tools MUST execute through the WorkspaceTransport
  * (authenticated, workspace-rooted terminal-server endpoints). They must
  * never fall back to the web service's own filesystem — process.cwd() on
@@ -136,11 +213,11 @@ function workspaceTool(id: string, load: (mod: V2Module) => V2Handler): () => Pr
   workspaceToolIds.add(id);
   return async () => {
     const handler = load(await import("./tool-handlers-v2"));
-    return (inputs, transport) => {
+    return (inputs, transport, executionContext) => {
       if (!transport) {
         throw new Error("This tool requires an active project workspace");
       }
-      return handler(inputs, transport as WorkspaceTransport);
+      return handler(inputs, transport as WorkspaceTransport, executionContext);
     };
   };
 }
@@ -772,6 +849,19 @@ class ToolRegistry {
       }
     }
 
+    // Cancellation guard: a mutating tool is never DISPATCHED once the
+    // run's abort signal has fired. The refusal is returned as a normal
+    // recorded tool failure (the loop logs it like any other), never a
+    // silent skip — and it happens before validation, any handler, any
+    // transport call, or any action-runtime start record, so a
+    // cancelled run cannot start new mutations through this layer.
+    if (!tool.readOnly && options.signal?.aborted) {
+      return {
+        ok: false,
+        error: `Tool "${id}" was not dispatched: the run was aborted — cancelled before this mutation started`,
+      };
+    }
+
     // Validate inputs
     const validationError = this.validateInputs(id, inputs);
     if (validationError) {
@@ -897,6 +987,7 @@ class ToolRegistry {
               actionRunId: explicitActionRunId ?? undefined,
               actionContext,
               userId: actionContext?.userId ?? inputUserId ?? undefined,
+              signal: options.signal,
             }),
           options.transport,
           { handlerTimeoutMs: timeoutMs, signal: options.signal },
