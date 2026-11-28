@@ -142,7 +142,10 @@ export async function enrichStaticSiteVisuals(
         if (e.type === "file") {
           fileSet.add(p);
           if (/\.html?$/i.test(e.name)) htmlFiles.push(p);
-        } else if (e.type === "directory") {
+        } else if (e.type === "directory" || e.type === "folder") {
+          // Terminal /ws-files labels directories "folder" — accepting
+          // only "directory" skipped every subdirectory (same fix as
+          // verifyStaticSiteAssetReferences in agent-loop-v2).
           await collect(p, p, depth + 1);
         }
       }

@@ -197,7 +197,10 @@ export async function findAssetReferences(
         const p = prefix ? `${prefix}/${e.name}` : e.name;
         if (e.type === "file") {
           if (/\.(html?|css)$/i.test(e.name)) files.push(p);
-        } else if (e.type === "directory") {
+        } else if (e.type === "directory" || e.type === "folder") {
+          // Terminal /ws-files labels directories "folder" — without
+          // this the reference scan never descends and the approval
+          // card under-reports dependents in subdirectories.
           await collect(p, p, depth + 1);
         }
       }

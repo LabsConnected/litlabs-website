@@ -112,7 +112,10 @@ function makeTransport() {
         const rest = k.slice(prefix.length);
         if (!rest) continue;
         const seg = rest.split("/")[0];
-        entries.set(seg, rest.includes("/") ? "directory" : "file");
+        // The real terminal server labels directories "folder" — the
+        // mock must match production or the recursion bug it guards
+        // against stays invisible (staging acceptance 2026-11-28).
+        entries.set(seg, rest.includes("/") ? "folder" : "file");
       }
       return { entries: [...entries].map(([name, type]) => ({ name, type })) };
     }),
