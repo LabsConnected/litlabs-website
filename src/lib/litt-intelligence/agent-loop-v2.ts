@@ -485,6 +485,18 @@ export interface AgentLoopResult {
   workspaceChange?: WorkspaceChangeEvidence;
   cancelled: boolean;
   cancelReason?: string;
+  /**
+   * Cancellation honesty: set when the run was cancelled while a
+   * MUTATING tool call was in flight and the execution layer had to
+   * abandon its await — the underlying work (a WorkspaceTransport call
+   * to the terminal service, which carries its own timeout) could not
+   * be confirmed stopped, so the run must not claim it stopped cleanly.
+   * The closing text carries the matching plain-language note whenever
+   * this is set. Absent when cancellation caught the run between calls
+   * or during read-only work — i.e. everything started is known to be
+   * finished, and "fully stopped" is the truth.
+   */
+  cleanupPending?: boolean;
   events: ProgressEvent[];
   /** Set when the loop ended because every model call failed (provider outage, billing, etc.) — sanitized, no secrets */
   modelFailed?: string;
@@ -3000,6 +3012,30 @@ function bounceRejectedToolCall(
 export const WRITE_RECOVERY_ATTEMPT_LIMIT = 2;
 export const WRITE_RECOVERY_BOUNCE_BUDGET = 8;
 
+/**
+ * Plain-language closing note appended whenever a cancelled run could
+ * not confirm that a mutation already in flight actually stopped
+ * (AgentLoopResult.cleanupPending). Never claim a clean stop the
+ * execution layer cannot prove.
+ */
+export const CLEANUP_PENDING_NOTE =
+  "Stopped — a change was already in progress when the stop arrived and could not be confirmed stopped. Check the workspace before continuing.";
+
+/**
+ * True when a tool result's error is the execution layer cutting the
+ * call off (the registry deadline's abort or timeout rejection) rather
+ * than the handler answering. Combined with an aborted run signal and
+ * a mutating tool, this is the cleanup-pending signature: the handler
+ * was abandoned mid-flight, so its work is unconfirmed.
+ */
+function isExecutionCutoffError(error: string | undefined | null): boolean {
+  // The deadline's abort rejection is exactly `Tool "<id>" was aborted`
+  // (end of string) — the registry's pre-dispatch refusal also contains
+  // "was aborted" mid-sentence but means the mutation never started,
+  // so it must NOT match here.
+  return !!error && (error.endsWith("was aborted") || error.includes("timed out after"));
+}
+
 /** The path a write-recovery counter is keyed on. */
 function writeRecoveryPath(
   inputs: Record<string, unknown> | undefined,
@@ -3847,6 +3883,7 @@ async function runAgentLoopV2Inner(
   let stepsUsed = 0;
   let cancelled = false;
   let cancelReason: string | undefined;
+  let cleanupPending = false;
   let modelFailed: string | undefined;
   let modelFailureText: string | undefined;
   let failedHonestly: string | undefined;
@@ -4880,6 +4917,13 @@ async function runAgentLoopV2Inner(
         };
       }
 
+      // Cancellation honesty: the abort fired while this MUTATING call
+      // was in flight and the execution layer cut it off — the work
+      // behind it is unconfirmed, so the run cannot claim a clean stop.
+      if (!toolDef.readOnly && cfg.signal?.aborted && !result.success && isExecutionCutoffError(result.error)) {
+        cleanupPending = true;
+      }
+
       const toolDuration = Date.now() - toolStartTime;
 
       // Record for loop detection
@@ -5565,6 +5609,13 @@ async function runAgentLoopV2Inner(
     settlement.outcome === "completed" && checksNote
       ? `${finalTextWithContrastNote}\n\n${checksNote}`
       : finalTextWithContrastNote;
+  // Cancellation honesty: a cancelled run whose in-flight mutation
+  // could not be confirmed stopped says so in its closing text —
+  // never a clean-stop claim the execution layer cannot prove.
+  const finalTextWithCleanupNote =
+    cancelled && cleanupPending
+      ? `${finalTextWithChecksNote}\n\n${CLEANUP_PENDING_NOTE}`
+      : finalTextWithChecksNote;
   // Round 14: "finished" is emitted BEFORE the after-run checkpoint,
   // and the checkpoint is time-bounded — settlement must never wait
   // on a sandbox transport operation (createAfterRunCheckpointBounded).
@@ -5618,7 +5669,7 @@ async function runAgentLoopV2Inner(
   }
 
   return {
-    finalText: finalTextWithChecksNote,
+    finalText: finalTextWithCleanupNote,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -5628,6 +5679,7 @@ async function runAgentLoopV2Inner(
     workspaceChange,
     cancelled,
     cancelReason,
+    cleanupPending: cleanupPending || undefined,
     events,
     modelFailed,
     modelFailureText,
@@ -6011,6 +6063,8 @@ export interface DeferredToolBatchState {
   hasInterveningMutation: boolean;
   cancelled: boolean;
   cancelReason?: string;
+  /** Cancellation honesty (see AgentLoopResult.cleanupPending), accumulated inside the batch and merged back by the resume path. */
+  cleanupPending?: boolean;
   checkpoint?: { checkpointId: string; label: string; gitSha: string };
   /** The run's first pre-mutation checkpoint — the whole-run diff baseline. */
   baselineCheckpoint?: { checkpointId: string; label: string; gitSha: string };
@@ -6535,6 +6589,14 @@ export async function executeDeferredToolCalls(
       result = { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: err instanceof Error ? err.message : String(err) };
     }
 
+    // Cancellation honesty: an abort that cut off a mutating deferred
+    // execution leaves its completion unconfirmed (merged back by the
+    // resume path like the other batch state).
+    const deferredRunAborted = ctx.signal !== undefined && ctx.signal.aborted;
+    if (!toolDef.readOnly && deferredRunAborted && !result.success && isExecutionCutoffError(result.error)) {
+      state.cleanupPending = true;
+    }
+
     ctx.toolCallRecords.push({ toolId: toolCall.toolId, inputsHash, resultHash: hashResult(result.result), step: ctx.stepsUsed, success: mutationSucceeded(result), mutating: !toolDef.readOnly });
 
     if (!toolDef.readOnly) {
@@ -6862,6 +6924,7 @@ async function resumeAgentLoopV2Inner(
   let stepsUsed = resume.stepsUsedBeforePause;
   let cancelled = false;
   let cancelReason: string | undefined;
+  let cleanupPending = false;
   let modelFailed: string | undefined;
   let modelFailureText: string | undefined;
   let failedHonestly: string | undefined;
@@ -7002,6 +7065,12 @@ async function resumeAgentLoopV2Inner(
     // A resumed call is one that required approval, so treat an unknown
     // tool as mutating rather than silently crediting a read-only step.
     const resumedReadOnly = availableTools.find((t) => t.id === resume.toolId)?.readOnly ?? false;
+    // Cancellation honesty (frozen approved call): same rule as the
+    // live loops — an abort that cut off a mutating execution leaves
+    // its completion unconfirmed.
+    if (!resumedReadOnly && cfg.signal?.aborted && !result.success && isExecutionCutoffError(result.error)) {
+      cleanupPending = true;
+    }
     // Read-back verification of the approved mutation — the same
     // persisted-truth check as the live loop, and the only channel that
     // proves anything on a gitless (static) workspace.
@@ -7211,6 +7280,7 @@ async function resumeAgentLoopV2Inner(
     hasInterveningMutation = deferredState.hasInterveningMutation;
     cancelled = deferredState.cancelled;
     cancelReason = deferredState.cancelReason;
+    if (deferredState.cleanupPending) cleanupPending = true;
     checkpoint = deferredState.checkpoint;
     baselineCheckpoint = deferredState.baselineCheckpoint;
     mutationBatchPending = deferredState.mutationBatchPending;
@@ -8142,6 +8212,10 @@ async function resumeAgentLoopV2Inner(
         result = { toolCallId: toolCall.toolCallId, toolId: toolCall.toolId, result: null, success: false, error: err instanceof Error ? err.message : String(err) };
       }
 
+      // Cancellation honesty: same rule as the initial loop.
+      if (!toolDef.readOnly && cfg.signal?.aborted && !result.success && isExecutionCutoffError(result.error)) {
+        cleanupPending = true;
+      }
       toolCallRecords.push({ toolId: toolCall.toolId, inputsHash, resultHash: hashResult(result.result), step: stepsUsed, success: mutationSucceeded(result), mutating: !toolDef.readOnly });
 
       if (!toolDef.readOnly) {
@@ -8751,6 +8825,13 @@ async function resumeAgentLoopV2Inner(
     settlement.outcome === "completed" && checksNote
       ? `${finalTextWithContrastNote}\n\n${checksNote}`
       : finalTextWithContrastNote;
+  // Cancellation honesty: a cancelled run whose in-flight mutation
+  // could not be confirmed stopped says so in its closing text —
+  // never a clean-stop claim the execution layer cannot prove.
+  const finalTextWithCleanupNote =
+    cancelled && cleanupPending
+      ? `${finalTextWithChecksNote}\n\n${CLEANUP_PENDING_NOTE}`
+      : finalTextWithChecksNote;
   // Round 14: "finished" before the bounded after-run checkpoint —
   // identical to the initial loop's tail (see there).
   localProgress.emit({
@@ -8777,7 +8858,7 @@ async function resumeAgentLoopV2Inner(
   );
 
   return {
-    finalText: finalTextWithChecksNote,
+    finalText: finalTextWithCleanupNote,
     stepsUsed,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallLog,
@@ -8787,6 +8868,7 @@ async function resumeAgentLoopV2Inner(
     workspaceChange,
     cancelled,
     cancelReason,
+    cleanupPending: cleanupPending || undefined,
     events,
     modelFailed,
     modelFailureText,
