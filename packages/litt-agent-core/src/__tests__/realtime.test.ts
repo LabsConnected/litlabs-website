@@ -380,6 +380,62 @@ describe("realtime — webSearch", () => {
     assert.equal(res.relatedTopics.length, 0);
   });
 
+  it("falls back to the lite endpoint when instant answers are empty", async () => {
+    // Observed failure: practical queries ("best buy hours") return an
+    // empty Instant Answer and the caller fell through to a tool-less
+    // model refusal. The lite endpoint returns real result snippets.
+    const liteHtml = `
+      <table>
+        <tr><td><a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.bestbuy.com%2Fsite%2Fstore-locator&amp;rut=abc" class='result-link'>Best Buy Store Locator</a></td></tr>
+        <tr><td class='result-snippet'>Find stores and view store hours, directions, and events.</td></tr>
+        <tr><td><a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fhours&amp;rut=def" class='result-link'>Hours Page</a></td></tr>
+        <tr><td class='result-snippet'>Store hours and locations.</td></tr>
+      </table>`;
+    mockFetch((url) => {
+      if (url.includes("lite.duckduckgo.com")) {
+        return Promise.resolve(new Response(liteHtml, { status: 200, headers: { "content-type": "text/html" } }));
+      }
+      return Promise.resolve(makeJsonResponse({
+        AbstractText: "", AbstractSource: "", AbstractURL: "", Answer: "", RelatedTopics: [],
+      }));
+    });
+    const res = await webSearch("best buy hours", { dnsResolver: publicResolver() });
+    assert.equal(res.empty, false);
+    assert.equal(res.via, "lite");
+    assert.equal(res.results.length, 2);
+    assert.equal(res.results[0].title, "Best Buy Store Locator");
+    assert.equal(res.results[0].url, "https://www.bestbuy.com/site/store-locator");
+    assert.match(res.results[0].snippet ?? "", /store hours/i);
+  });
+
+  it("stays truthfully empty when the lite fallback also fails", async () => {
+    mockFetch((url) => {
+      if (url.includes("lite.duckduckgo.com")) {
+        return Promise.reject(new Error("connection reset"));
+      }
+      return Promise.resolve(makeJsonResponse({
+        AbstractText: "", AbstractSource: "", AbstractURL: "", Answer: "", RelatedTopics: [],
+      }));
+    });
+    const res = await webSearch("unanswerable xyzzy", { dnsResolver: publicResolver() });
+    assert.equal(res.empty, true);
+    assert.equal(res.via, "none");
+    assert.equal(res.results.length, 0);
+  });
+
+  it("does not call the lite endpoint when an instant answer exists", async () => {
+    const fn = mockFetch((url) => {
+      assert.ok(!url.includes("lite.duckduckgo.com"), "lite endpoint must not be fetched");
+      return Promise.resolve(makeJsonResponse({
+        AbstractText: "Has an answer", AbstractSource: "S", AbstractURL: "", Answer: "", RelatedTopics: [],
+      }));
+    });
+    const res = await webSearch("answerable", { dnsResolver: publicResolver() });
+    assert.equal(res.via, "instant");
+    assert.equal(res.results.length, 0);
+    assert.equal(fn.mock.callCount(), 1);
+  });
+
   it("rejects an empty query", async () => {
     await assert.rejects(() => webSearch(""), SafeFetchError);
     await assert.rejects(() => webSearch("   "), SafeFetchError);

@@ -3,9 +3,9 @@
  */
 
 import { execFileSync, spawnSync, type SpawnSyncOptionsWithStringEncoding } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, resolve, dirname, basename } from "node:path";
-import { fileURLToPath } from "node:url";
+import { getCliPackageDir as getCliPackageDirFromMeta } from "./build-metadata.js";
 
 // ANSI colors (no dependency needed — use raw codes)
 export const c = {
@@ -157,15 +157,34 @@ export interface ProjectInfo {
  *      for shell wrappers that can't easily rewrite argv).
  *   3. `process.cwd()` — the default when neither override is set.
  *
- * The resolved path is normalized to absolute. A non-existent override
- * is ignored (falls back to process.cwd()) so a stale env var can never
- * break startup.
+ * The resolved path is normalized to absolute. An explicitly supplied
+ * override that does not exist (or is not a directory) is a hard error:
+ * LiTT must never silently fall back to an unrelated directory when the
+ * caller named a workspace. Only the no-override case defaults to
+ * process.cwd().
  */
 export function resolveProjectCwd(cwdFlag?: string): string {
   const override = cwdFlag ?? process.env.LITT_CWD;
   if (override) {
     const abs = resolve(override);
-    if (existsSync(abs)) return abs;
+    let exists = false;
+    let isDir = false;
+    let denied = false;
+    try {
+      isDir = statSync(abs).isDirectory();
+      exists = true;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "EACCES" || code === "EPERM") denied = true;
+    }
+    if (isDir) return abs;
+    const source = cwdFlag !== undefined ? "--cwd" : "LITT_CWD";
+    const reason = denied
+      ? "is not accessible"
+      : exists
+        ? "is not a directory"
+        : "does not exist";
+    throw new Error(`${source} path ${reason}: "${override}"`);
   }
   return process.cwd();
 }
@@ -194,9 +213,10 @@ let cliPackageDir: string | null | undefined;
 function getCliPackageDir(): string | null {
   if (cliPackageDir !== undefined) return cliPackageDir;
   try {
-    // dist/lib/utils.js → dist → package root (packages/litt-cli)
-    const here = dirname(fileURLToPath(import.meta.url));
-    cliPackageDir = resolve(here, "..");
+    // Canonical resolver lives in build-metadata.ts — it anchors on the
+    // directory actually named "dist" so bundled (dist/index.js) and
+    // tsc (dist/lib/*.js) layouts both resolve to the package root.
+    cliPackageDir = getCliPackageDirFromMeta();
   } catch {
     cliPackageDir = null;
   }

@@ -26,11 +26,16 @@ import { resolveExecutionTarget, resolveLocalOnly } from "../lib/execution-targe
 import { loadModelPrefs, getDefaultPrefsPath } from "../lib/provider-registry.js";
 import { probeLocalLane } from "../lib/local-lane.js";
 import { REMOTE_LITT_LABEL } from "@litt/models";
+import { collectPathIntegrity } from "../lib/path-integrity.js";
 
 export async function doctorCommand(args: string[]): Promise<number> {
   // Subcommand: litt doctor input — interactive input diagnostic
   if (args[0] === "input") {
     return doctorInputCommand();
+  }
+  // Subcommand: litt doctor --paths — authoritative path/launcher inventory
+  if (args[0] === "--paths") {
+    return doctorPathsCommand(args[1]);
   }
 
   header("LiTT Doctor — System Health Check");
@@ -234,6 +239,8 @@ export async function doctorCommand(args: string[]): Promise<number> {
     if (buildCheck.rebuildCommand) {
       console.log(`${c.dim}  Rebuild: ${buildCheck.rebuildCommand}${c.reset}`);
     }
+  } else if (buildCheck.status === "dirty-build" || buildCheck.status === "unbundled") {
+    fail(buildCheck.message);
   } else if (buildCheck.status === "no-build-meta") {
     warn("No build metadata (dist/.build-meta.json) — run a build first");
   } else if (buildCheck.status === "no-source-sha") {
@@ -402,6 +409,52 @@ export async function probeToolVersions(env: WhichEnv = {}): Promise<ToolVersion
     tryCommandOutputAsync("yarn", ["--version"], env),
   ]);
   return { git, pnpm, npm, yarn };
+}
+
+// ─── litt doctor --paths ─────────────────────────────────────────────
+
+/**
+ * Authoritative path/launcher inventory — answers "which executable,
+ * which build, which workspace, which storage is LiTT actually using".
+ * Composes the existing resolvers in lib/path-integrity.ts; does not
+ * introduce a second path-resolution mechanism.
+ */
+function doctorPathsCommand(cwdFlag?: string): number {
+  const report = collectPathIntegrity(cwdFlag);
+
+  header("LiTT Path Integrity");
+
+  console.log(`${label("CLI executable:")} ${value(report.entrypoint ?? "(unknown)")}`);
+  console.log(`${label("Package dir:")} ${value(report.packageDir ?? "(unknown)")}`);
+  console.log(`${label("Launcher target:")} ${value(report.launcherTarget ?? "(not found)")}`);
+  if (report.build.worktree) {
+    console.log(`${label("Source worktree:")} ${value(report.build.worktree.root)} ${c.dim}(${report.build.worktree.linked ? "linked" : "primary"}, ${report.build.worktree.branch ?? "detached"})${c.reset}`);
+  }
+  console.log(`${label("Build SHA:")} ${value(report.build.check.sourceSha?.slice(0, 8) ?? "—")} ${c.dim}${report.build.check.status}${c.reset}`);
+  console.log("");
+
+  console.log(`${label("Starting cwd:")} ${value(report.startingCwd)}`);
+  console.log(`${label("Workspace root:")} ${value(report.project.rootDir)}`);
+  console.log(`${label("Git branch:")} ${value(report.project.gitBranch ?? "(not a git repo)")}`);
+  if (report.project.isSelfInstall) {
+    console.log(`${c.yellow}  ! Self-install guard tripped — would otherwise inspect LiTT's own runtime copy${c.reset}`);
+  }
+  console.log("");
+
+  console.log(`${label("Runtime storage:")} ${value(report.stateHome)}`);
+  console.log(`${label("Config file:")} ${value(report.configPath)}`);
+  console.log(`${label("Model endpoint:")} ${value(report.modelEndpoint)} ${c.dim}(${report.modelEndpointSource})${c.reset}`);
+  console.log("");
+
+  for (const check of report.checks) {
+    const msg = `${check.name}: ${check.message}`;
+    if (check.status === "pass") ok(msg);
+    else if (check.status === "warn") warn(msg);
+    else if (check.status === "fail") fail(msg);
+    else console.log(`${c.dim}  — ${msg}${c.reset}`);
+  }
+
+  return report.checks.some((chk) => chk.status === "fail") ? 1 : 0;
 }
 
 // ─── litt doctor input ───────────────────────────────────────────────

@@ -144,6 +144,7 @@ export interface ToolContext {
    * handlers that spawn work should forward it to cancellable APIs.
    */
   signal?: AbortSignal | null;
+  onStream?: (chunk: StreamChunk) => void;
 }
 
 export interface ToolMetadata {

@@ -33,8 +33,10 @@ const FENCE_OPENER_RE = /```(?:tool(?:_call|_result)?|json)[ \t]*/i;
 const BARE_TOOL_JSON_RE = /(^|\n)[ \t]*\{[ \t]*"(?:tool|name|command|type)"/;
 /** Bare protocol word at the start of a line (no fences). */
 const BARE_PROTOCOL_LINE_RE = /(^|\n)[ \t]*(?:tool_call|tool_result)[ \t]*\r?\n/;
-/** Longest opener + slack — text withheld pending a cross-delta opener. */
-const KEEP_TAIL = 32;
+const MID_LINE_TOOL_JSON_RE = /\n[ \t]*\{[ \t]*"(?:tool|name|command|type)"/;
+const MID_LINE_PROTOCOL_RE = /\n[ \t]*(?:tool_call|tool_result)[ \t]*\r?\n/;
+const PARTIAL_FENCE_RE = /`{1,2}$|```(?:t|to|too|j|js|jso)?$/i;
+const TOOL_KEYS = ['"tool"', '"name"', '"command"', '"type"'];
 /** Keep 3 chars so a closing ``` split across deltas is still caught. */
 const CLOSE_TAIL = 3;
 
@@ -65,6 +67,24 @@ export function createToolCallStreamFilter(): ToolCallStreamFilter {
   let carry = "";
   let inFence = false;
   let jsonDepth = 0;
+  let inString = false;
+  let escaped = false;
+  let lineStart = true;
+
+  function discardToolJson() {
+    let i = 0;
+    while (i < carry.length) {
+      const ch = carry[i++];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+      } else if (ch === '"') inString = true;
+      else if (ch === "{") jsonDepth++;
+      else if (ch === "}" && --jsonDepth === 0) break;
+    }
+    carry = carry.slice(i);
+  }
 
   function next(delta: string): string {
     carry += delta;
@@ -81,27 +101,18 @@ export function createToolCallStreamFilter(): ToolCallStreamFilter {
         }
         carry = carry.slice(close + 3);
         inFence = false;
+        lineStart = true;
         continue;
       }
 
       if (jsonDepth > 0) {
-        // Inside a bare JSON tool object — track brace balance and drop
-        // everything until the object closes (depth returns to 0).
-        let i = 0;
-        while (i < carry.length) {
-          const ch = carry[i];
-          if (ch === "{") jsonDepth++;
-          else if (ch === "}") jsonDepth--;
-          i++;
-          if (jsonDepth === 0) break;
-        }
-        carry = carry.slice(i);
+        discardToolJson();
         continue;
       }
 
       const fenceIdx = carry.search(FENCE_OPENER_RE);
-      const jsonIdx = carry.search(BARE_TOOL_JSON_RE);
-      const protoIdx = carry.search(BARE_PROTOCOL_LINE_RE);
+      const jsonIdx = carry.search(lineStart ? BARE_TOOL_JSON_RE : MID_LINE_TOOL_JSON_RE);
+      const protoIdx = carry.search(lineStart ? BARE_PROTOCOL_LINE_RE : MID_LINE_PROTOCOL_RE);
 
       // Earliest trigger wins. Prefer the fence opener.
       let start = -1;
@@ -120,13 +131,26 @@ export function createToolCallStreamFilter(): ToolCallStreamFilter {
       }
 
       if (start === -1 || kind === null) {
-        // No trigger — emit everything except a bounded tail (a fence
-        // opener or bare-JSON opener could be split across delta
-        // boundaries).
-        if (carry.length > KEEP_TAIL) {
-          out += carry.slice(0, carry.length - KEEP_TAIL);
-          carry = carry.slice(-KEEP_TAIL);
+        // Only defer a suffix that can still become a protocol opener.
+        // Holding ordinary prose makes short replies appear all at once.
+        let boundary = carry.search(PARTIAL_FENCE_RE);
+        if (boundary === -1) boundary = carry.length;
+        const lastNewline = carry.lastIndexOf("\n");
+        const lineOffset = lastNewline + 1;
+        if (lastNewline >= 0 || lineStart) {
+          const tail = carry.slice(lineOffset).replace(/^[ \t]+/, "");
+          const pendingJson = tail.startsWith("{")
+            && TOOL_KEYS.some((key) => key.startsWith(tail.slice(1).trimStart()));
+          const pendingName = ["tool_call", "tool_result"].some((name) =>
+            name.startsWith(tail.toLowerCase()) || tail.toLowerCase().trimEnd() === name,
+          );
+          if (tail && (pendingJson || pendingName)) boundary = Math.min(boundary, lineOffset);
         }
+        const visible = carry.slice(0, boundary);
+        const nl = visible.lastIndexOf("\n");
+        lineStart = (nl >= 0 || lineStart) && /^[ \t]*$/.test(visible.slice(nl + 1));
+        out += visible;
+        carry = carry.slice(boundary);
         break;
       }
 
@@ -134,9 +158,10 @@ export function createToolCallStreamFilter(): ToolCallStreamFilter {
       // starts at a newline (or ^) — skip that newline so the protocol
       // content itself is suppressed. For fence triggers the match
       // starts AT the backticks — emit up to them.
-      const lineStartOffset = kind === "fence" ? start : (start === 0 ? 0 : start + 1);
+      const lineStartOffset = kind !== "fence" && carry[start] === "\n" ? start + 1 : start;
       out += carry.slice(0, lineStartOffset);
       carry = carry.slice(lineStartOffset);
+      lineStart = true;
 
       if (kind === "fence") {
         // Consume the opener itself (```tool_call…) so it is not
@@ -145,21 +170,7 @@ export function createToolCallStreamFilter(): ToolCallStreamFilter {
         if (m) carry = carry.slice(m[0].length);
         inFence = true;
       } else if (kind === "json") {
-        // Suppress the bare JSON tool object until its braces balance.
-        // The opener `{` is still in carry — start the depth at 0 and
-        // let the scan count it (an object with nested inputs needs
-        // depth 2 before closing). Handles the object split across
-        // many deltas.
-        jsonDepth = 0;
-        let i = 0;
-        while (i < carry.length) {
-          const ch = carry[i];
-          if (ch === "{") jsonDepth++;
-          else if (ch === "}") jsonDepth--;
-          i++;
-          if (jsonDepth === 0) break;
-        }
-        carry = carry.slice(i);
+        discardToolJson();
       } else {
         // Bare protocol line (tool_call / tool_result) — suppress
         // through the line end.
@@ -178,11 +189,15 @@ export function createToolCallStreamFilter(): ToolCallStreamFilter {
       carry = "";
       inFence = false;
       jsonDepth = 0;
+      inString = false;
+      escaped = false;
+      lineStart = true;
       return "";
     }
     // Emit any withheld tail (it never formed a fence).
     out += carry;
     carry = "";
+    lineStart = true;
     return out;
   }
 

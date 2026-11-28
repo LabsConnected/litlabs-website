@@ -31,6 +31,7 @@ import { getGitState } from "../lib/git-state.js";
 import { launchShellWindow, currentCliCommand } from "../lib/window-launcher.js";
 import { getAuthSession } from "../lib/auth/auth-session.js";
 import { installTerminalTeardown, restoreTerminal } from "../lib/terminal-teardown.js";
+import { perfMark } from "../lib/perf.js";
 
 import type { RuntimeSessionOptions } from "../lib/runtime-session.js";
 
@@ -66,6 +67,7 @@ export async function cockpitCommand(
   _session?: RuntimeSession,
   context?: { mode?: "plan" | "act" | "auto" },
 ): Promise<number> {
+  perfMark("cockpit:entry");
   // Terminal state is process-external: whatever LiTT leaves enabled
   // leaks into the parent shell. installTerminalTeardown() hooks every
   // exit path (normal exit, process.exit, SIGTERM/SIGHUP/SIGBREAK,
@@ -113,6 +115,7 @@ export async function cockpitCommand(
 
   // First-run config bootstrap — creates ~/.litt/config.json if missing
   ensureConfig();
+  perfMark("cockpit:config");
 
   // Auto-detect project root by walking upward from the resolved cwd.
   // Resolution: --cwd flag > LITT_CWD env > process.cwd(). A launcher
@@ -128,6 +131,7 @@ export async function cockpitCommand(
   // contract Studio will consume.
   const startCwd = resolveProjectCwd();
   const initialDetect = detectProject(startCwd);
+  perfMark("cockpit:detectProject");
 
   if (initialDetect.isSelfInstall && initialDetect.hasPackageJson) {
     // Self-install detected but hasPackageJson is true only when the
@@ -150,6 +154,7 @@ export async function cockpitCommand(
     // Surface which project LiTT attached to (provenance transparency).
     console.error(`${c.dim}LiTT attached to: ${activeProjectDisplay(resolved.active)}${c.reset}`);
   }
+  perfMark("cockpit:project-resolved");
 
   // Use the detected root consistently across the entire chain:
   //   detected root → RuntimeSession.cwd → ExecutionGateway projectId
@@ -175,6 +180,7 @@ export async function cockpitCommand(
     }),
   );
   session.installSigintHandler();
+  perfMark("cockpit:session-created");
 
   // ─── Startup recovery ───
   // Load any persisted active mission from disk. This is the automatic
@@ -182,6 +188,7 @@ export async function cockpitCommand(
   // verifying, blocked) are restored; terminal missions (complete,
   // failed, cancelled) are NOT restored.
   const recovery = await session.startup();
+  perfMark("cockpit:session-startup");
   if (recovery.recovered && recovery.mission) {
     // The mission:restored event was already emitted by loadWithRecovery.
     // The SessionEventBridge will project it to the cockpit UI.
@@ -215,6 +222,7 @@ export async function cockpitCommand(
   //   - "unresolved" when no provider is available or no model configured
   const modelState = buildModelState();
   const model = modelDisplayLabel(modelState);
+  perfMark("cockpit:model-state");
 
   // If a command was provided as arg, run it through the gateway then exit
   if (args.length > 0) {
@@ -243,6 +251,7 @@ export async function cockpitCommand(
   const gitState = getGitState(projectRoot);
   const gitModified = gitState.changed;
   const gitUntracked = gitState.untracked;
+  perfMark("cockpit:git-state");
 
   // ─── Auth state for header display ──────────────────────────────
   // The auth gate in index.ts may have allowed this cockpit to launch
@@ -270,6 +279,7 @@ export async function cockpitCommand(
   // launch without auth when the execution target is LOCAL (the default).
   const authSessionForCheck = getAuthSession();
   const actuallySignedIn = await authSessionForCheck.isSignedIn().catch(() => false);
+  perfMark("cockpit:auth-checked");
 
   // Surface a one-time notice when signed out so the user knows which
   // features are available and which require sign-in.
@@ -291,6 +301,7 @@ export async function cockpitCommand(
   // the background fetch resolves. The client connection also runs in
   // the background (above) and useEventBridge handles the "connecting"
   // and "offline" states.
+  perfMark("cockpit:pre-render");
   const { waitUntilExit, rerender } = render(
     React.createElement(CockpitErrorBoundary, null,
       React.createElement(CockpitApp, {

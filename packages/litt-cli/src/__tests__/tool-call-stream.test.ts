@@ -85,8 +85,17 @@ describe("createToolCallStreamFilter", () => {
   it("handles an empty delta without crashing", () => {
     const filter = createToolCallStreamFilter();
     expect(filter.next("")).toBe("");
-    expect(filter.next("hello")).toBe("");
-    expect(filter.flush()).toBe("hello");
+    expect(filter.next("hello")).toBe("hello");
+    expect(filter.flush()).toBe("");
+  });
+
+  it("displays short native deltas immediately while still withholding split protocol openers", () => {
+    const filter = createToolCallStreamFilter();
+    expect(filter.next("The")).toBe("The");
+    expect(filter.next(" branch\n")).toBe(" branch\n");
+    expect(filter.next('{"to')).toBe("");
+    expect(filter.next('ol":"project.status"}')).toBe("");
+    expect(filter.next("Done")).toBe("Done");
   });
 
   // ─── DOGFOOD REGRESSIONS: bare JSON tool objects split across deltas ─
@@ -107,6 +116,11 @@ describe("createToolCallStreamFilter", () => {
     expect(out).not.toContain('"inputs"');
     expect(out).not.toContain('"tool"');
     expect(out).toContain("The branch is main.");
+  });
+
+  it("suppresses braces inside quoted tool arguments across fragments", () => {
+    const filter = createToolCallStreamFilter();
+    expect(feed(filter, ['{"tool":"project.run","inputs":{"value":"}\\"', 'private"} }\nFinal'])).toBe("\nFinal");
   });
 
   it("REGRESSION: the exact observed fragment never appears", () => {

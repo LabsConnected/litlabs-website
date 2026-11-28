@@ -48,7 +48,7 @@ export type {
 export { NodeShellExecutor, createShellExecutor } from "./shell.js";
 
 // Project tools
-export type { ProjectStatusResult } from "./project.js";
+export type { ProjectStatusResult, FindFilesArgs } from "./project.js";
 export {
   detectProjectRoot,
   resolveProjectContext,
@@ -61,6 +61,8 @@ export {
   readFile,
   writeFile,
   searchFiles,
+  findFilesByName,
+  namePatternToRegex,
   inspectPackageJson,
   isSafePath,
   resolveSandboxedPath,

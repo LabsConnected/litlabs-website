@@ -86,6 +86,24 @@ describe("session-store", () => {
     expect(listSessions()).toHaveLength(2);
   });
 
+  it("keeps identical opening prompts separate when they belong to different workspaces", () => {
+    const a = saveSession({ ...base, messages: messages(2) });
+    const b = saveSession({ ...base, cwd: `${base.cwd}-other`, messages: messages(3) });
+    expect(b.id).not.toBe(a.id);
+    expect(loadSession(a.id)?.messages).toHaveLength(2);
+  });
+
+  it("updates a resumed session by id after another conversation was saved", () => {
+    const a = saveSession({ ...base, messages: messages(2) });
+    const b = saveSession({ ...base, id: "separate-conversation", messages: messages(3) });
+    expect(b.id).toBe("separate-conversation");
+    const resumed = saveSession({ ...base, id: a.id, summary: "New summary", messages: messages(4) });
+    expect(resumed.id).toBe(a.id);
+    expect(resumed.createdAt).toBe(a.createdAt);
+    expect(listSessions()).toHaveLength(2);
+    expect(loadSession(b.id)?.messages).toHaveLength(3);
+  });
+
   it("bounds saved messages to the last 30", () => {
     const saved = saveSession({ ...base, messages: messages(50) });
     expect(saved.messages).toHaveLength(30);

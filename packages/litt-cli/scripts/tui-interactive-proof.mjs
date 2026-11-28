@@ -19,6 +19,7 @@
  *   node scripts/tui-interactive-proof.mjs
  */
 import { createRequire } from "node:module";
+import { execSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -209,23 +210,27 @@ async function main() {
   //    transcript overflows the region with per-message fit. This exercises
   //    the anchor-based SCROLL MODEL (PgUp/PgDn page the anchor). A single
   //    giant output would instead hit the documented natural-flow fallback.
-  let newestHash = null;
-  for (let i = 0; i < 12; i++) {
-    child.write(`/local git log --oneline -1`);
+  //
+  //    Each seed uses `git rev-parse HEAD~N` so every message carries a
+  //    DISTINCT commit hash — identical outputs would make scroll movement
+  //    undetectable on screen (the viewport would show byte-identical
+  //    older messages). Expected hashes are computed directly from git so
+  //    the assertions compare against ground truth, not screen guesses.
+  const SEEDS = 12;
+  const expectedHashes = [];
+  for (let i = 0; i < SEEDS; i++) {
+    expectedHashes.push(
+      execSync(`git rev-parse HEAD~${i}`, { cwd: repoRoot, encoding: "utf8" }).trim().slice(0, 7),
+    );
+  }
+  const newestHash = expectedHashes[SEEDS - 1];
+  for (let i = 0; i < SEEDS; i++) {
+    child.write(`/local git rev-parse HEAD~${i}`);
     await sleep(250);
     child.write("\r");
-    await waitFor(`seed ${i + 1} output visible`, (t) => t.includes("exit 0"), 200);
-    if (i === 0) {
-      // Newest hash = first hash below the first "exit 0" marker row.
-      const rows = screen.rowsText();
-      const idx = rows.findIndex((r) => r.includes("exit 0"));
-      for (let j = idx; j < rows.length; j++) {
-        const m = (rows[j] ?? "").match(HASH_RE);
-        if (m) { newestHash = m[0]; break; }
-      }
-    }
+    await waitFor(`seed ${i + 1} output visible`, (t) => t.includes(expectedHashes[i]), 200);
   }
-  check("Signed-out local tool missions run from TUI (/local git log)", !!newestHash, `newest=${newestHash}`);
+  check("Signed-out local tool missions run from TUI (/local git rev-parse)", !!newestHash, `newest=${newestHash}`);
   await sleep(1000);
   const liveFrame = screen.rowsText();
   const liveHashes = visibleHashes(liveFrame);
@@ -254,25 +259,38 @@ async function main() {
   const anchorBeforeNew = firstVisibleHash(up2Frame);
   log(`up2 first-visible hash=${anchorBeforeNew}`);
 
-  // 5. New tool output while scrolled — must NOT yank the viewport to live
-  child.write("/local litt --version");
+  // 5. New submission while scrolled — the cockpit's documented contract
+  //    (controller.submit → resetTranscriptScroll) is that a NEW TURN
+  //    returns the transcript to LIVE so the user sees the response.
+  //    "Streaming output does not yank a scrolled viewport" applies to an
+  //    already-running turn and is covered by the transcript-scroll unit
+  //    tests — a fresh submission intentionally re-anchors to live.
+  child.write("/local git log --oneline -1");
   await sleep(250);
   child.write("\r");
-  await waitFor("extra output visible", (t) => (t.match(/exit 0/g) ?? []).length >= 13, 400);
-  const noYankFrame = screen.rowsText();
-  const anchorAfterNew = firstVisibleHash(noYankFrame);
-  const stillScrolled = anchorAfterNew === anchorBeforeNew && !visibleHashes(noYankFrame).includes(newestHash);
-  check("New output while scrolled does NOT yank to live", stillScrolled,
-    `anchorBefore=${anchorBeforeNew} anchorAfter=${anchorAfterNew}`);
-  log(`no-yank first-visible hash=${anchorAfterNew}`);
+  const baseline = (outputTail.match(/git log --oneline -1/g) ?? []).length;
+  const done = await waitFor("extra mission completed", () =>
+    (outputTail.match(/git log --oneline -1 — exit 0/g) ?? []).length > baseline, 200);
+  check("Extra mission while scrolled completed", done);
+  await sleep(600); // let the post-completion render settle
+  const afterNewFrame = screen.rowsText();
+  check("New submission returns transcript to live (newest visible)",
+    done && visibleHashes(afterNewFrame).includes(newestHash),
+    `newest=${newestHash}`);
 
-  // 6. PgDn — moves back toward live
+  // 6. Scroll up again, then PgDn — moves back toward live
+  child.write("\x1b[5~");
+  await sleep(500);
+  const reUpFrame = screen.rowsText();
+  check("PgUp scrolls away from live again",
+    !visibleHashes(reUpFrame).includes(newestHash),
+    `first6=${JSON.stringify(visibleHashes(reUpFrame).slice(0, 6))}`);
   child.write("\x1b[6~");
   await sleep(500);
   const dn1Frame = screen.rowsText();
   const dn1Hashes = visibleHashes(dn1Frame);
   check("PgDn moves toward live",
-    JSON.stringify(dn1Hashes) !== JSON.stringify(visibleHashes(noYankFrame)),
+    JSON.stringify(dn1Hashes) !== JSON.stringify(visibleHashes(reUpFrame)),
     `first6=${JSON.stringify(dn1Hashes.slice(0, 6))}`);
 
   // 7. Ctrl+End — return to live (newest visible again)

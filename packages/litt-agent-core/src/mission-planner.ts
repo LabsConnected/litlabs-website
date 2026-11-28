@@ -99,6 +99,8 @@ export interface PlanMissionOptions {
    * read-only mission and would guarantee a verification failure.
    */
   mutationRequested?: boolean;
+  /** External abort (Esc) — aborts the planner's model stream mid-round. */
+  abortSignal?: AbortSignal | null;
 }
 
 export interface PlanMissionResult {
@@ -633,7 +635,7 @@ export async function planMission(
         if (event.type === "delta") {
           deltaText += event.text;
         }
-      });
+      }, options.abortSignal ?? undefined);
       // The streamed deltas only carry prose — native tool_call blocks
       // live in the provider's canonical ModelResult.content. A planner
       // model that called a tool instead of answering still produces a

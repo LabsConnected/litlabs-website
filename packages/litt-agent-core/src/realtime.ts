@@ -597,6 +597,13 @@ export interface WebSearchResult {
   abstractUrl: string | null;
   /** Related topics (capped). */
   relatedTopics: Array<{ text: string; url?: string }>;
+  /**
+   * Lite-endpoint result hits — populated only when Instant Answers
+   * returned nothing. Real parsed titles/snippets/URLs; never invented.
+   */
+  results: Array<{ title: string; url: string | null; snippet: string | null }>;
+  /** Which endpoint produced data: instant API, lite fallback, or neither. */
+  via: "instant" | "lite" | "none";
   /** True when no instant answer was found (truthful empty state). */
   empty: boolean;
 }
@@ -669,9 +676,83 @@ export async function webSearch(
   const abstract = ddg.AbstractText && ddg.AbstractText.length > 0 ? ddg.AbstractText : null;
   const abstractSource = ddg.AbstractSource && ddg.AbstractSource.length > 0 ? ddg.AbstractSource : null;
   const abstractUrl = ddg.AbstractURL && ddg.AbstractURL.length > 0 ? ddg.AbstractURL : null;
-  const empty = !answer && !abstract && relatedTopics.length === 0;
+  let empty = !answer && !abstract && relatedTopics.length === 0;
 
-  return { query: q, answer, abstract, abstractSource, abstractUrl, relatedTopics, empty };
+  // Fallback: the Instant Answer API is encyclopedic — practical queries
+  // (business hours, prices, current events) reliably return empty and the
+  // caller falls through to a tool-less model that refuses (observed live:
+  // "best buy hours" → generic refusal, a confirmed user-facing failure).
+  // The keyless lite HTML endpoint returns real result snippets for the
+  // same query; use it so the lane can report actual findings instead of
+  // nothing.
+  let results: WebSearchResult["results"] = [];
+  let via: WebSearchResult["via"] = empty ? "none" : "instant";
+  if (empty) {
+    try {
+      results = await liteDuckDuckGo(q, opts);
+      if (results.length > 0) {
+        via = "lite";
+        empty = false;
+      }
+    } catch {
+      // Lite is best-effort — a failure leaves the truthful empty state.
+    }
+  }
+
+  return { query: q, answer, abstract, abstractSource, abstractUrl, relatedTopics, results, via, empty };
+}
+
+/** Minimal HTML entity decoding for lite-endpoint text. */
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;|&#39;|&apos;/g, "'")
+    .replace(/&#x2F;/g, "/");
+}
+
+/**
+ * DuckDuckGo lite HTML endpoint — real web result titles, snippets, and
+ * destination URLs for queries the Instant Answer API cannot cover.
+ * Parses the stable `result-link`/`result-snippet` markup; returns at
+ * most `max` hits. Throws on network failure so the caller can decide
+ * whether to treat the whole search as failed (it currently swallows
+ * it — the instant-answer empty state remains truthful).
+ */
+async function liteDuckDuckGo(
+  q: string,
+  opts: { dnsResolver?: DnsResolver } = {},
+  max = 6,
+): Promise<WebSearchResult["results"]> {
+  const url = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(q)}`;
+  const res = await safeFetch(url, {
+    timeoutMs: 12_000,
+    acceptContentTypes: ["text/html"],
+    headers: { "User-Agent": "LiTT-CLI/0.1 (+https://litlabs.net)" },
+    dnsResolver: opts.dnsResolver,
+  });
+  if (!res.ok || !res.content) {
+    throw new SafeFetchError(`Lite search failed (status ${res.status})`, "network");
+  }
+  const html = res.content;
+  const titles = [...html.matchAll(/<a[^>]+href=['"]([^'"]+)['"][^>]*class=['"]result-link['"][^>]*>([\s\S]*?)<\/a>/g)]
+    .map((m) => ({ href: decodeEntities(m[1]), title: decodeEntities(m[2].replace(/<[^>]+>/g, "").trim()) }));
+  const snippets = [...html.matchAll(/class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/g)]
+    .map((m) => decodeEntities(m[1].replace(/<[^>]+>/g, "").trim()));
+  return titles.slice(0, max).map((t, i) => {
+    // Result links route through /l/?uddg=<urlencoded> — decode the real
+    // destination; a non-redirect href is used as-is.
+    let url: string | null = null;
+    const uddg = t.href.match(/[?&]uddg=([^&]+)/);
+    if (uddg) {
+      try { url = decodeURIComponent(uddg[1]); } catch { url = null; }
+    } else if (t.href.startsWith("http")) {
+      url = t.href;
+    }
+    return { title: t.title, url, snippet: snippets[i] ?? null };
+  });
 }
 
 // ─── Tool Definitions + Handlers ───────────────────────────────────

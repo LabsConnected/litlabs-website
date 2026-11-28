@@ -604,6 +604,7 @@ export class ExecutionGateway {
         userId: request.identity.userId,
         shell: this._shell,
         signal: request.signal ?? null,
+        onStream: request.onStream,
       };
 
       try {

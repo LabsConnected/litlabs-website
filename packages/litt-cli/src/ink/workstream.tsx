@@ -99,10 +99,10 @@ function WorkstreamRow({ act, width }: { act: WorkstreamActivity; width: number 
         {truncateMid(act.label, maxLabel)}
       </Text>
       {act.subject && act.subject !== act.label ? (
-        <Text dimColor> {truncateMid(act.subject, Math.max(8, width - 40))}</Text>
+        <Text color={COLORS.secondary}> {truncateMid(act.subject, Math.max(8, width - 40))}</Text>
       ) : null}
       {metaText ? (
-        <Text dimColor>  {truncateMid(metaText, Math.max(12, width - maxLabel - 8))}</Text>
+        <Text color={COLORS.secondary}>  {truncateMid(metaText, Math.max(12, width - maxLabel - 8))}</Text>
       ) : null}
     </Box>
   );
@@ -119,7 +119,7 @@ function WorkstreamRow({ act, width }: { act: WorkstreamActivity; width: number 
             {"  "}{truncateMid(line, width - 2)}
           </Text>
         ))}
-        {clipped && <Text dimColor>{"  "}… {act.diff.length - visible.length} more lines</Text>}
+        {clipped && <Text color={COLORS.secondary}>{"  "}… {act.diff.length - visible.length} more lines</Text>}
       </>
     );
   } else if (act.reason && (act.status === "failed" || act.kind === "retry" || act.kind === "warning")) {

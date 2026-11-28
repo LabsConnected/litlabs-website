@@ -780,6 +780,21 @@ export function stripToolCallBlocks(content: string): string {
     }
     if (!removed) break;
   }
+  // Empty fenced blocks carry zero information — "```json\n```" as a
+  // model's entire response is markup residue, not an answer. Strip
+  // them so content checks measure what the user would actually see.
+  // Fences with real content (code, data, examples) are kept verbatim.
+  stripped = stripped.replace(
+    /```[a-zA-Z0-9_+.-]*[ \t]*\r?\n?([\s\S]*?)```/gi,
+    (match, inner: string) => (inner.trim() === "" ? "" : match),
+  );
+  // A trailing UNCLOSED fence opener with nothing after it is the same
+  // residue (a truncated empty fence). Requires a newline after the
+  // opener so a legitimate closing ``` at end-of-content is untouched.
+  stripped = stripped.replace(
+    /```(?:[a-zA-Z0-9_+.-]+[ \t]*)?\r?\n[ \t\r\n]*$/g,
+    "",
+  );
   return stripped.trim();
 }
 
@@ -833,6 +848,28 @@ function suggestToolName(toolId: string, toolDefs: ToolDefinition[]): string | n
   // Prefer the shortest id (most specific canonical name) for display.
   candidates.sort((a, b) => a.id.length - b.id.length);
   return candidates.slice(0, 3).map((t) => t.id).join(", ");
+}
+
+/**
+ * Separator-tolerant tool-id canonicalization for weak local models.
+ * Small models routinely emit "project_diff" or "project-diff" for the
+ * canonical "project.diff" — the id is right, only the namespace
+ * separator is wrong. When the emitted id is not an exact match but
+ * its separator-stripped form matches EXACTLY ONE registered id, the
+ * canonical id is substituted; anything else is returned unchanged so
+ * the unknown-tool path still reports it honestly.
+ *
+ * Deliberately conservative: never fuzzy-matches substrings (that is
+ * suggestToolName's job, for the error message only), never resolves
+ * ambiguity, and never invents an id that was not emitted.
+ */
+function canonicalizeToolId(toolId: string, toolDefs: ToolDefinition[]): string {
+  if (toolDefs.some((t) => t.id === toolId)) return toolId;
+  const squash = (s: string) => s.toLowerCase().replace(/[._\-/\s]+/g, "");
+  const want = squash(toolId);
+  if (!want) return toolId;
+  const matches = toolDefs.filter((t) => squash(t.id) === want);
+  return matches.length === 1 ? matches[0].id : toolId;
 }
 
 /**
@@ -1430,6 +1467,7 @@ export async function runAgentLoop(
           },
           runId: `agent_${tcId}`,
           toolCallId: tcId,
+          signal: options.abortSignal ?? undefined,
           onStream: options.onToolStream as ((chunk: { stream: "stdout" | "stderr"; text: string; ts: number }) => void) | undefined,
         });
         res = gwResult.result;
@@ -1627,6 +1665,21 @@ export async function runAgentLoop(
   const MAX_UNKNOWN_TOOL_RETRIES = 3;
   let unknownToolRetries = 0;
 
+  // ─── Stagnation guard ────────────────────────────────────────────
+  // Count consecutive rounds that produced NO new successful tool
+  // evidence — every executed call either failed or repeated a
+  // tool+inputs signature that already succeeded earlier in this run.
+  // Small local models can fall into re-verification loops (navigate →
+  // snapshot → screenshot → repeat) that burn the entire round budget
+  // without adding information. After STALE_EVIDENCE_NUDGE_AT stale
+  // rounds we inject a one-time instruction to answer from the evidence
+  // already collected; the round budget and truthful max_rounds summary
+  // still bound the run — nothing is auto-completed.
+  const STALE_EVIDENCE_NUDGE_AT = 3;
+  const seenSuccessKeys = new Set<string>();
+  let staleEvidenceRounds = 0;
+  let staleEvidenceNudged = false;
+
   // ─── Mutation completion tracking ────────────────────────────────
   // When the user explicitly requests an edit/mutation, the run cannot
   // report success unless observable mutation evidence exists. We track
@@ -1774,6 +1827,8 @@ export async function runAgentLoop(
         termination,
         escalations: escalationEvents.length ? escalationEvents : undefined,
       };
+    } finally {
+      options.abortSignal?.removeEventListener("abort", abortFromRun);
     }
 
     // Accumulate usage
@@ -1857,7 +1912,10 @@ export async function runAgentLoop(
     // answer silently discarded: the round is dispatched as a tool call
     // and never returns its content, so the prose only survives as
     // internal model context, never reaching the caller/UI.
-    const rawToolCalls = parseToolCalls(modelContent);
+    const rawToolCalls = parseToolCalls(modelContent).map((c) => {
+      const canonical = canonicalizeToolId(c.toolId, toolDefs);
+      return canonical === c.toolId ? c : { ...c, toolId: canonical };
+    });
     let allToolCalls = filterRedundantToolCalls(rawToolCalls, toolCalls);
     if (allToolCalls.length === 0 && rawToolCalls.length > 0 && !stripToolCallBlocks(modelContent).trim()) {
       // Every call in this turn was a redundant repeat AND there is no
@@ -1881,6 +1939,44 @@ export async function runAgentLoop(
 
       const hasSuccessfulToolEvidence = toolCalls.some((tc) => tc.result.success);
       const cleanContent = stripToolCallBlocks(modelContent);
+
+      // A response that strips down to nothing user-visible — an empty
+      // reply, or only protocol/markup residue such as an empty
+      // ```json fence — is NOT an answer. The raw modelContent check
+      // above cannot see this: the markup keeps modelContent non-empty
+      // while cleanContent (what the user actually gets) is blank.
+      // Treat it exactly like an empty model response: retry with an
+      // explicit instruction, then fail honestly — never report a
+      // markup-only turn as COMPLETE.
+      if (!cleanContent.trim()) {
+        if (missionId && escalation) {
+          escalation.recordFailure(missionId, "content", "empty visible response");
+        }
+        if (round >= maxRounds - 1) {
+          return {
+            content:
+              "LiTT's model returned no visible answer text — only formatting " +
+              "markup. The turn was not completed and no success is being claimed.",
+            toolCalls,
+            rounds,
+            durationMs: Date.now() - startTime,
+            usage: { total_tokens: totalTokens },
+            termination: "error",
+            escalations: escalationEvents.length ? escalationEvents : undefined,
+          };
+        }
+        messages.push({ role: "assistant", content: modelContent });
+        messages.push({
+          role: "user",
+          content:
+            "Your previous response contained no visible answer — only formatting " +
+            "markup such as an empty code fence. Retry now with plain-language text: " +
+            "either call an available tool using a valid tool_call block, or return " +
+            "a real final answer in normal prose. Do not emit empty code fences or " +
+            "raw protocol markup as your answer.",
+        });
+        continue;
+      }
 
       if (requiresProjectEvidence && !hasSuccessfulToolEvidence) {
 
@@ -2495,6 +2591,26 @@ export async function runAgentLoop(
       recordToolOutcome(call, entry!, execResults[i]);
     }
 
+    // ─── Stagnation accounting ──────────────────────────────────────
+    // A round counts as stale when it produced no successful call with
+    // a signature not already seen. Successful signatures are recorded
+    // so exact repeats (which filterRedundantToolCalls may re-dispatch
+    // in the no-prose fallback) still count as stale, not new evidence.
+    {
+      let roundHadNewEvidence = false;
+      for (let i = 0; i < execResults.length; i++) {
+        const { call } = callsToExecute[i];
+        const result = execResults[i].result;
+        if (!result.success) continue;
+        const key = `${call.toolId}::${JSON.stringify(call.inputs)}`;
+        if (!seenSuccessKeys.has(key)) {
+          seenSuccessKeys.add(key);
+          roundHadNewEvidence = true;
+        }
+      }
+      staleEvidenceRounds = roundHadNewEvidence ? 0 : staleEvidenceRounds + 1;
+    }
+
     // ─── Mid-round timeout check ────────────────────────────────────
     // Check the total timeout AFTER tool execution too, so a long-running
     // tool call (e.g. project.check taking 20s) doesn't let the loop run
@@ -2519,12 +2635,23 @@ export async function runAgentLoop(
     // conversation. For parallel execution, all results are combined
     // into a single user message so the model sees all evidence at once.
     messages.push({ role: "assistant", content: modelContent });
-    messages.push({
-      role: "user",
-      content: execResults
-        .map(({ result }, i) => renderToolResult(callsToExecute[i].entry!, result))
-        .join("\n\n"),
-    });
+    const toolResultContent = execResults
+      .map(({ result }, i) => renderToolResult(callsToExecute[i].entry!, result))
+      .join("\n\n");
+    if (staleEvidenceRounds >= STALE_EVIDENCE_NUDGE_AT && !staleEvidenceNudged) {
+      staleEvidenceNudged = true;
+      messages.push({
+        role: "user",
+        content:
+          toolResultContent +
+          `\n\nNOTE: your last ${staleEvidenceRounds} rounds produced no new successful ` +
+          `tool evidence — the calls either failed or repeated results you already have. ` +
+          `Do not keep re-running the same inspections. Give your final answer now from ` +
+          `the evidence above, or state plainly what is still missing and why.`,
+      });
+    } else {
+      messages.push({ role: "user", content: toolResultContent });
+    }
   }
 
   if (rounds >= maxRounds && termination === "complete") {

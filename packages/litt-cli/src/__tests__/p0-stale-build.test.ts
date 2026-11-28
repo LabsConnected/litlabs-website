@@ -15,12 +15,15 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 import {
   getSourceSha,
   readBuildMeta,
   writeBuildMeta,
   checkStaleBuild,
+  checkBundledEntry,
+  getCliPackageDir,
 } from "../lib/build-metadata.js";
 
 const tmpDir = path.join(os.tmpdir(), `litt-p0-build-${Date.now()}`);
@@ -135,6 +138,83 @@ describe("P0-9: Stale Build Detection", () => {
       expect(check.status).toBe("no-source-sha");
       expect(check.stale).toBe(false);
       try { fs.rmSync(nonGit, { recursive: true, force: true }); } catch { /* ignore */ }
+    });
+  });
+
+  // ─── Bundle-pipeline statuses (Phase 3–8 bundle integration) ────
+  describe("bundle-aware stale checks", () => {
+    it("reports dirty-build when build metadata records a dirty tree", () => {
+      const sha = getSourceSha(tmpDir);
+      if (!sha) return;
+      const distDir = path.join(tmpDir, "dist");
+      fs.mkdirSync(distDir, { recursive: true });
+      writeBuildMeta(sha, "0.1.0", distDir, true);
+      const check = checkStaleBuild(tmpDir);
+      expect(check.stale).toBe(true);
+      expect(check.status).toBe("dirty-build");
+      expect(check.message).toContain("uncommitted changes");
+    });
+
+    it("reports unbundled when .bundled sha mismatches dist/index.js", () => {
+      const sha = getSourceSha(tmpDir);
+      if (!sha) return;
+      const distDir = path.join(tmpDir, "dist");
+      fs.mkdirSync(distDir, { recursive: true });
+      writeBuildMeta(sha, "0.1.0", distDir, false);
+      fs.writeFileSync(path.join(distDir, "index.js"), "console.log('x');\n");
+      // Marker records a different sha — entry was overwritten post-bundle.
+      fs.writeFileSync(path.join(distDir, ".bundled"), "0".repeat(64));
+      const check = checkStaleBuild(tmpDir);
+      expect(check.stale).toBe(true);
+      expect(check.status).toBe("unbundled");
+    });
+
+    it("fresh when .bundled sha matches dist/index.js", () => {
+      const sha = getSourceSha(tmpDir);
+      if (!sha) return;
+      const distDir = path.join(tmpDir, "dist");
+      fs.mkdirSync(distDir, { recursive: true });
+      writeBuildMeta(sha, "0.1.0", distDir, false);
+      const entry = "console.log('bundled');\n";
+      fs.writeFileSync(path.join(distDir, "index.js"), entry);
+      const digest = createHash("sha256").update(entry).digest("hex");
+      fs.writeFileSync(path.join(distDir, ".bundled"), digest);
+      const check = checkStaleBuild(tmpDir);
+      expect(check.stale).toBe(false);
+      expect(["fresh", "no-launcher"]).toContain(check.status);
+    });
+
+    it("checkBundledEntry reports match/mismatch/no-marker/no-entry", () => {
+      const distDir = path.join(tmpDir, "dist-bundled");
+      fs.mkdirSync(distDir, { recursive: true });
+      // no-entry: marker exists but index.js does not
+      fs.writeFileSync(path.join(distDir, ".bundled"), "abc");
+      expect(checkBundledEntry(distDir)).toBe("no-entry");
+      // mismatch
+      fs.writeFileSync(path.join(distDir, "index.js"), "x");
+      expect(checkBundledEntry(distDir)).toBe("mismatch");
+      // match
+      const digest = createHash("sha256").update("x").digest("hex");
+      fs.writeFileSync(path.join(distDir, ".bundled"), digest);
+      expect(checkBundledEntry(distDir)).toBe("match");
+      // no-marker
+      const bare = path.join(tmpDir, "dist-bare");
+      fs.mkdirSync(bare, { recursive: true });
+      fs.writeFileSync(path.join(bare, "index.js"), "x");
+      expect(checkBundledEntry(bare)).toBe("no-marker");
+    });
+  });
+
+  // ─── Bundled-layout package dir resolution ───────────────────────
+  // Under esbuild the entry is dist/index.js; a fixed "../.." from
+  // dist/lib overshoots to packages/ — the walk must anchor on "dist".
+  describe("getCliPackageDir (bundled layout)", () => {
+    it("resolves the litt-cli package root, not packages/ or dist/", () => {
+      const dir = getCliPackageDir();
+      expect(dir).not.toBeNull();
+      expect(fs.existsSync(path.join(dir!, "package.json"))).toBe(true);
+      expect(path.basename(dir!)).not.toBe("dist");
+      expect(path.basename(dir!)).not.toBe("packages");
     });
   });
 });

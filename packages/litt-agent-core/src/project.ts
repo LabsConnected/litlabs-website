@@ -14,7 +14,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import type { ShellExecutor, ProjectContext, ToolResult } from "./types.js";
+import type { ShellExecutor, ProjectContext, ToolContext, ToolResult } from "./types.js";
 import { detectUnsupportedShellSyntax } from "./execution.js";
 
 // ─── Project Detection ────────────────────────────────────────────
@@ -728,11 +728,13 @@ const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
  * surfaced as status="timeout" with a "TIMEOUT after Xms" message —
  * NOT as a misleading "exit 1".
  */
+type ProjectCommandProgress = Pick<ToolContext, "signal" | "onStream">;
+
 export async function runCommand(
   shell: ShellExecutor,
   command: string,
   args: string[],
-  options?: { cwd?: string; timeoutMs?: number; stdin?: string },
+  options?: ProjectCommandProgress & { cwd?: string; timeoutMs?: number; stdin?: string },
 ): Promise<ToolResult> {
   // Reject shell-style invocations BEFORE spawning anything. No shell is
   // ever used here (see execution.ts), so `echo 'x' > file` or a `>`
@@ -754,7 +756,10 @@ export async function runCommand(
   const cwd = options?.cwd ?? shell.cwd;
   const timeoutMs = options?.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
 
-  const result = await shell.execute({ command, args, cwd, timeoutMs, stdin: options?.stdin });
+  const result = await shell.execute({
+    command, args, cwd, timeoutMs, stdin: options?.stdin,
+    signal: options?.signal ?? undefined, onStream: options?.onStream,
+  });
 
   // Surface timeout as TIMEOUT, not misleadingly as "exit 1".
   // The shell executor sets status="timeout" and exitCode=-1 when the
@@ -764,7 +769,9 @@ export async function runCommand(
     ? `${command} ${args.join(" ")} — exit 0 (${result.durationMs}ms)`
     : result.status === "timeout"
       ? `${command} ${args.join(" ")} — TIMEOUT after ${timeoutMs}ms (${result.durationMs}ms)`
-      : `${command} ${args.join(" ")} — exit ${result.exitCode} (${result.durationMs}ms)`;
+      : result.status === "cancelled"
+        ? `${command} ${args.join(" ")} — cancelled (${result.durationMs}ms)`
+        : `${command} ${args.join(" ")} — exit ${result.exitCode} (${result.durationMs}ms)`;
 
   return {
     status: result.status,
@@ -798,7 +805,7 @@ export async function runScript(
   shell: ShellExecutor,
   scriptName: string,
   cwd?: string,
-  options?: { timeoutMs?: number },
+  options?: ProjectCommandProgress & { timeoutMs?: number },
 ): Promise<ToolResult> {
   const root = cwd ?? shell.cwd;
   const pkgPath = path.join(root, "package.json");
@@ -829,11 +836,7 @@ export async function runScript(
   const hasYarn = fs.existsSync(path.join(root, "yarn.lock"));
   const pm = hasPnpm ? "pnpm" : hasYarn ? "yarn" : "npm";
 
-  const runOpts: { cwd: string; timeoutMs?: number } = { cwd: root };
-  if (options?.timeoutMs !== undefined) {
-    runOpts.timeoutMs = options.timeoutMs;
-  }
-  return runCommand(shell, pm, ["run", scriptName], runOpts);
+  return runCommand(shell, pm, ["run", scriptName], { ...options, cwd: root });
 }
 
 /**
@@ -848,6 +851,7 @@ export async function runScript(
 export async function runTypecheck(
   shell: ShellExecutor,
   cwd?: string,
+  progress?: ProjectCommandProgress,
 ): Promise<ToolResult> {
   const root = cwd ?? shell.cwd;
   const pkgPath = path.join(root, "package.json");
@@ -856,13 +860,13 @@ export async function runTypecheck(
     try {
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
       if (pkg.scripts?.typecheck) {
-        return runScript(shell, "typecheck", root, { timeoutMs: VERIFY_TIMEOUTS.typecheck });
+        return runScript(shell, "typecheck", root, { ...progress, timeoutMs: VERIFY_TIMEOUTS.typecheck });
       }
     } catch { /* fall through to tsc */ }
   }
 
   // Fallback: run tsc --noEmit directly
-  return runCommand(shell, "npx", ["tsc", "--noEmit"], { cwd: root, timeoutMs: VERIFY_TIMEOUTS.typecheck });
+  return runCommand(shell, "npx", ["tsc", "--noEmit"], { ...progress, cwd: root, timeoutMs: VERIFY_TIMEOUTS.typecheck });
 }
 
 /**
@@ -875,8 +879,9 @@ export async function runTypecheck(
 export async function runTest(
   shell: ShellExecutor,
   cwd?: string,
+  progress?: ProjectCommandProgress,
 ): Promise<ToolResult> {
-  return runScript(shell, "test", cwd ?? shell.cwd, { timeoutMs: VERIFY_TIMEOUTS.test });
+  return runScript(shell, "test", cwd ?? shell.cwd, { ...progress, timeoutMs: VERIFY_TIMEOUTS.test });
 }
 
 /**
@@ -890,8 +895,9 @@ export async function runTest(
 export async function runBuild(
   shell: ShellExecutor,
   cwd?: string,
+  progress?: ProjectCommandProgress,
 ): Promise<ToolResult> {
-  return runScript(shell, "build", cwd ?? shell.cwd, { timeoutMs: VERIFY_TIMEOUTS.build });
+  return runScript(shell, "build", cwd ?? shell.cwd, { ...progress, timeoutMs: VERIFY_TIMEOUTS.build });
 }
 
 // ─── Path Safety ──────────────────────────────────────────────────
@@ -993,4 +999,187 @@ export function resolveSandboxedPath(
   }
 
   return { ok: true, resolvedPath };
+}
+
+// ─── Authorized filesystem search ─────────────────────────────────
+
+/**
+ * Roots a filesystem search may NEVER walk — system and credential
+ * territory. Searching outside the project sandbox is authorized by the
+ * caller naming an explicit scope; these locations stay denied
+ * regardless (spec: "exclude sensitive and system directories unless
+ * separately authorized" — there is no separate authorization channel
+ * yet, so they are hard-denied).
+ */
+const BLOCKED_SEARCH_ROOT_PATTERNS: readonly RegExp[] = [
+  /^[a-z]:[/\\]windows\b/i,
+  /^[a-z]:[/\\]program files/i,
+  /^[a-z]:[/\\]programdata\b/i,
+  /^[a-z]:[/\\]\$recycle\.bin/i,
+  /^[a-z]:[/\\]system volume information/i,
+  /^[a-z]:[/\\]recovery\b/i,
+  /(^|[/\\])\.ssh\b/i,
+  /(^|[/\\])\.aws\b/i,
+  /(^|[/\\])\.gnupg\b/i,
+  /(^|[/\\])appdata[/\\]roaming[/\\]npm[/\\]cache\b/i,
+  /(^|[/\\])credentials\b/i,
+  /[/\\]documents and settings\b/i,
+];
+
+/**
+ * Directory names always skipped INSIDE an authorized search — noise
+ * and enormous trees that make a name search stall without value.
+ */
+const SEARCH_SKIP_DIRS = new Set([
+  ".git", "node_modules", "$recycle.bin", "system volume information",
+  ".pnpm-store", ".next", ".turbo", ".cache", "dist", "build",
+  "__pycache__", ".venv", "venv",
+  // Credential territory — skipped even inside an authorized root: a
+  // broad user-profile search must never surface key material paths.
+  ".ssh", ".aws", ".gnupg", ".azure", ".config\\gcloud",
+]);
+
+/**
+ * Credential filenames excluded from results anywhere in a walk — the
+ * search reports names, and even the existence of key material is not
+ * ours to enumerate under a general filesystem request.
+ */
+const SEARCH_SKIP_FILES = /^(?:id_rsa|id_dsa|id_ecdsa|id_ed25519|credentials(?:\.json)?|\.npmrc|\.htpasswd|secrets?\.(?:json|ya?ml|toml)|\.env(?:\.|$))/i;
+
+/** Convert a user filename pattern to a case-insensitive regex. */
+export function namePatternToRegex(pattern: string): RegExp {
+  if (/[*?]/.test(pattern)) {
+    const body = pattern
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+      .replace(/\*/g, ".*")
+      .replace(/\?/g, ".");
+    return new RegExp(`^${body}$`, "i");
+  }
+  return new RegExp(`^${pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i");
+}
+
+export interface FindFilesArgs {
+  /** Search root. "." or empty = project sandbox; absolute = explicit authorized scope. */
+  path: string;
+  /** Filename or glob to match against basenames (files and dirs). */
+  name: string;
+  maxResults?: number;
+  maxDepth?: number;
+  timeoutMs?: number;
+  /** Abort the walk at the next directory boundary (Esc/cancel). */
+  signal?: AbortSignal;
+}
+
+/**
+ * Recursive filename search with honest scope semantics.
+ *
+ *   - "." / "" resolves through resolveSandboxedPath — identical sandbox
+ *     rules as list_files (no absolute, no "..", realpath containment).
+ *   - An ABSOLUTE root is an explicitly user-named scope (the dispatcher
+ *     only emits it when the user typed that location). It is still
+ *     hard-denied when it names a system/credential root, and the walk
+ *     never descends into BLOCKED_PATH_PATTERNS or SEARCH_SKIP_DIRS.
+ *
+ * The walker is plain fs.readdir — no shell, no junction/symlink
+ * following — with caps on depth, results, and wall time. An exhausted
+ * deadline reports what it actually found plus `truncated: true` rather
+ * than pretending the tree was empty.
+ */
+export async function findFilesByName(
+  shell: ShellExecutor,
+  args: FindFilesArgs,
+): Promise<ToolResult> {
+  const name = typeof args.name === "string" ? args.name.trim() : "";
+  if (!name) {
+    return { status: "failed", success: false, message: "Missing required arg: name", data: {} };
+  }
+  const rawRoot = typeof args.path === "string" && args.path.trim() ? args.path.trim() : ".";
+
+  let root: string;
+  if (!path.isAbsolute(rawRoot) || rawRoot === ".") {
+    const resolved = resolveSandboxedPath(shell.cwd, rawRoot);
+    if (!resolved.ok) {
+      return { status: "failed", success: false, message: `Blocked: ${resolved.reason}`, data: {} };
+    }
+    root = resolved.resolvedPath;
+  } else {
+    // Explicit authorized scope — normalize Windows separators and apply
+    // the hard blocklist before touching the filesystem.
+    const normalized = path.resolve(rawRoot);
+    if (BLOCKED_SEARCH_ROOT_PATTERNS.some((re) => re.test(normalized))) {
+      return {
+        status: "failed",
+        success: false,
+        message: `Denied: ${normalized} is a system or sensitive location and requires separate authorization.`,
+        data: { denied: true, root: normalized },
+      };
+    }
+    root = normalized;
+  }
+
+  if (!fs.existsSync(root)) {
+    return { status: "failed", success: false, message: `Directory not found: ${root}`, data: { root } };
+  }
+
+  const matcher = namePatternToRegex(name);
+  const maxResults = Math.min(Math.max(1, args.maxResults ?? 100), 500);
+  const maxDepth = Math.min(Math.max(1, args.maxDepth ?? 10), 25);
+  const deadline = Date.now() + Math.min(args.timeoutMs ?? 20_000, 60_000);
+  const signal = args.signal;
+  const matches: string[] = [];
+  let truncated = false;
+  let cancelled = false;
+  let dirsScanned = 0;
+
+  // Async-batched: one await per directory keeps the event loop live —
+  // cockpit input (Esc) and the deadline can interpose mid-walk instead
+  // of the search blocking the process for its full duration.
+  const walk = async (dir: string, depth: number): Promise<boolean> => {
+    if (Date.now() > deadline || matches.length >= maxResults) return false;
+    if (signal?.aborted) { cancelled = true; return false; }
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch {
+      return true; // unreadable dir — skip, keep walking siblings
+    }
+    dirsScanned++;
+    for (const entry of entries) {
+      if (matches.length >= maxResults || Date.now() > deadline) return false;
+      if (signal?.aborted) { cancelled = true; return false; }
+      const full = path.join(dir, entry.name);
+      if (entry.isSymbolicLink()) continue; // never follow — no sandbox escape
+      if (entry.isDirectory()) {
+        const lower = entry.name.toLowerCase();
+        if (SEARCH_SKIP_DIRS.has(lower)) continue;
+        if (matcher.test(entry.name)) matches.push(full + path.sep);
+        if (depth < maxDepth && !(await walk(full, depth + 1))) return false;
+      } else if (entry.isFile() && matcher.test(entry.name) && !SEARCH_SKIP_FILES.test(entry.name)) {
+        matches.push(full);
+      }
+    }
+    return true;
+  };
+
+  const completed = await walk(root, 0);
+  if (!cancelled) truncated = !completed;
+
+  return {
+    status: cancelled ? "failed" : "success",
+    success: !cancelled,
+    message: cancelled
+      ? `Search cancelled — ${matches.length} partial match${matches.length === 1 ? "" : "es"} for "${name}" under ${root}`
+      : matches.length === 0
+        ? `No matches for "${name}" under ${root}${truncated ? " (search cut short)" : ""}`
+        : `${matches.length} match${matches.length === 1 ? "" : "es"} for "${name}" under ${root}${truncated ? ` (truncated at ${maxResults} results or time limit)` : ""}`,
+    data: {
+      root,
+      query: name,
+      matches,
+      count: matches.length,
+      truncated,
+      cancelled,
+      dirsScanned,
+    },
+  };
 }

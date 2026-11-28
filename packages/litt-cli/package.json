@@ -36,7 +36,8 @@
     "scripts"
   ],
   "scripts": {
-    "build": "tsc && node scripts/write-build-meta.mjs",
+    "build": "tsc && node scripts/bundle.mjs && node scripts/write-build-meta.mjs",
+    "bundle": "node scripts/bundle.mjs",
     "dev": "tsc --watch",
     "lint": "eslint src --ext .ts",
     "test": "vitest run",
@@ -53,10 +54,12 @@
     "ink-text-input": "^6.0.0",
     "react": "19.2.8",
     "socket.io-client": "4.8.3",
+    "yoga-layout": "3.2.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "esbuild": "0.28.1",
     "typescript": "^5.6.0",
     "vitest": "^2.0.0"
   },

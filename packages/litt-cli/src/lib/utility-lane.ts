@@ -136,10 +136,21 @@ const TIME_SIGNAL =
   /\b(?:what(?:'s| is)? the (?:current )?time|what time is it|current time|time right now)\b/i;
 const TIME_IN = /\btime\b[^.?!]*\bin\s+([a-z][a-z .'\-/]{1,40})/i;
 
+// Temporal qualifiers a business-hours question may carry. "tomorrow"
+// and weekday names must be included — "is best buy open tomorrow" was
+// observed falling through to a tool-less model that refused instead of
+// running a real search (P0).
+const HOURS_TEMPORAL =
+  "(?:now|today|tonight|tomorrow|right now|this (?:morning|afternoon|evening|weekend)|on\\s+\\w+|(?:mon|tues|wednes|thurs|fri|satur|sun)day)";
+
 const BUSINESS_HOURS_PATTERNS: RegExp[] = [
   /\bwhat time does\s+(.+?)\s+(?:open|close)\b/i,
   /\bwhen does\s+(.+?)\s+(?:open|close)\b/i,
-  /\bis\s+(.+?)\s+open\s+(?:now|today|right now)\b/i,
+  new RegExp(`\\bis\\s+(.+?)\\s+open\\s+${HOURS_TEMPORAL}\\b`, "i"),
+  new RegExp(`\\bis\\s+(.+?)\\s+closed\\s+${HOURS_TEMPORAL}\\b`, "i"),
+  // "…best buy is open tomorrow?" — subject before "is" (statement order)
+  new RegExp(`\\b(.+?)\\s+is\\s+open\\s+${HOURS_TEMPORAL}\\b`, "i"),
+  new RegExp(`\\b(.+?)\\s+is\\s+closed\\s+${HOURS_TEMPORAL}\\b`, "i"),
   /\b(?:opening|business|store)\s+hours\s+(?:of|for|at)\s+(.+)$/i,
   /\bwhat are\s+(.+?)(?:'s)?\s+hours\b/i,
   /\bhours\s+(?:of|for)\s+(.+)$/i,
@@ -232,6 +243,11 @@ function cleanSubject(raw: string | undefined): string {
   if (!raw) return "";
   const cleaned = raw
     .trim()
+    // Strip conversational wrappers a statement-order pattern may capture —
+    // "see if best buy is open tomorrow" captures "can you see if best buy".
+    .replace(/^(?:can you|could you|would you|please|do you know|tell me)\s+/i, "")
+    .replace(/^(?:see|check|find out|know)\s+(?:if|whether)\s+/i, "")
+    .replace(/^(?:if|whether)\s+/i, "")
     .replace(/^(?:the|a|an|my)\s+/i, "")
     .replace(/[?.!,]+$/, "")
     .trim();
@@ -542,14 +558,31 @@ async function executeSearch(
   const answer = typeof result.data.answer === "string" ? result.data.answer : null;
   const abstract = typeof result.data.abstract === "string" ? result.data.abstract : null;
   const body = answer || abstract;
-  if (!body) return UNSATISFIED("search returned no instant answer", toolsUsed);
+  if (body) {
+    const source = typeof result.data.abstractSource === "string" ? result.data.abstractSource : null;
+    const url = typeof result.data.abstractUrl === "string" ? result.data.abstractUrl : null;
+    const attribution = source ? `Source: ${source}${url ? ` — ${url}` : ""}` : null;
+    return {
+      satisfied: true,
+      text: attribution ? `${body}\n${attribution}` : body,
+      toolsUsed,
+    };
+  }
 
-  const source = typeof result.data.abstractSource === "string" ? result.data.abstractSource : null;
-  const url = typeof result.data.abstractUrl === "string" ? result.data.abstractUrl : null;
-  const attribution = source ? `Source: ${source}${url ? ` — ${url}` : ""}` : null;
-  return {
-    satisfied: true,
-    text: attribution ? `${body}\n${attribution}` : body,
-    toolsUsed,
-  };
+  // Lite-endpoint fallback hits — real result titles/snippets/URLs the
+  // Instant Answer API couldn't cover (e.g. business hours). Render the
+  // top hits verbatim with their sources; never paraphrase into a claim.
+  const hits = Array.isArray(result.data.results)
+    ? (result.data.results as Array<{ title?: string; url?: string | null; snippet?: string | null }>)
+        .filter((h) => typeof h.title === "string" && h.title.length > 0)
+        .slice(0, 3)
+    : [];
+  if (hits.length === 0) return UNSATISFIED("search returned no results", toolsUsed);
+  const lines = [`Top results for "${query}":`];
+  for (const h of hits) {
+    lines.push(`• ${h.title}`);
+    if (h.snippet) lines.push(`  ${h.snippet}`);
+    if (h.url) lines.push(`  ${h.url}`);
+  }
+  return { satisfied: true, text: lines.join("\n"), toolsUsed };
 }
