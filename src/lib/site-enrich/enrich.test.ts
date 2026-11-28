@@ -65,7 +65,9 @@ function makeTransport(files: Record<string, string>): FakeTransport {
         if (dir && !k.startsWith(prefix)) continue;
         const rest = k.slice(prefix.length);
         const seg = rest.split("/")[0];
-        names.set(seg, rest.includes("/") ? "directory" : "file");
+        // Terminal /ws-files emits "folder" for directories — match the
+        // production label so the collect recursion is actually tested.
+        names.set(seg, rest.includes("/") ? "folder" : "file");
       }
       if (!dir) names.delete(""); // root
       return { entries: [...names].map(([name, type]) => ({ name, type })) };

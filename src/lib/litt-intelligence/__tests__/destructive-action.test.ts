@@ -73,7 +73,9 @@ function makeTransport(initialFiles: Record<string, string> = {}) {
     fileOpsReachable: true,
     listFiles: vi.fn(async (dir: string) => {
       const prefix = dir ? `${dir}/` : "";
-      const entries: { name: string; type: "file" | "directory" }[] = [];
+      // Terminal /ws-files emits "folder" for directories — match the
+      // production label so the reference scan's recursion is tested.
+      const entries: { name: string; type: "file" | "directory" | "folder" }[] = [];
       const seen = new Set<string>();
       for (const key of files.keys()) {
         if (!key.startsWith(prefix)) continue;
@@ -81,7 +83,7 @@ function makeTransport(initialFiles: Record<string, string> = {}) {
         const [head, ...tail] = rest.split("/");
         if (seen.has(head)) continue;
         seen.add(head);
-        entries.push({ name: head, type: tail.length > 0 ? "directory" : "file" });
+        entries.push({ name: head, type: tail.length > 0 ? "folder" : "file" });
       }
       return { entries };
     }),
