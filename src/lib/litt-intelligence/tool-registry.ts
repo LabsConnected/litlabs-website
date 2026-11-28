@@ -9,7 +9,6 @@
  * They can never bypass the permission and approval system.
  */
 
-import type { ChildProcess } from "child_process";
 import type { LiTTToolDefinition, ApprovalPolicy } from "./types";
 import type { WorkspaceTransport } from "./workspace-transport";
 import type { ActionExecutionContext } from "@/lib/action-runtime";
@@ -126,6 +125,20 @@ function withExecutionDeadline<T>(
 }
 
 /**
+ * The minimal structural shape of a spawned child process that
+ * killChildOnAbort relies on: a pid (to signal the process group),
+ * kill() for direct signals, and once("exit") to disarm the wiring
+ * when the child ends on its own. Declared structurally so this
+ * module needs no child_process import — a real ChildProcess
+ * satisfies the shape as-is.
+ */
+export interface AbortKillableChild {
+  readonly pid?: number | undefined;
+  kill(signal?: NodeJS.Signals | number): boolean;
+  once(event: "exit", listener: () => void): unknown;
+}
+
+/**
  * Wire a child process a handler spawned in-process to the run's abort
  * signal: on abort, terminate the child — SIGTERM first, escalating to
  * SIGKILL after a short grace period, via the process group where the
@@ -136,7 +149,7 @@ function withExecutionDeadline<T>(
  * this helper is exercised by its own tests and available to any
  * handler that ever does spawn one.
  */
-export function killChildOnAbort(child: ChildProcess, signal?: AbortSignal): void {
+export function killChildOnAbort(child: AbortKillableChild, signal?: AbortSignal): void {
   if (!signal) return;
   let escalation: ReturnType<typeof setTimeout> | undefined;
   const terminate = () => {
