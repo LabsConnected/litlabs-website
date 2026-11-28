@@ -22,6 +22,13 @@ process.env.AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY ?? "test-a
 // Pin the test-env default; individual tests override with vi.stubEnv.
 process.env.ENRICH_TOTAL_TIMEOUT_MS = process.env.ENRICH_TOTAL_TIMEOUT_MS ?? "3000";
 
+// Deploy verification budget: production retries over ~15s (bounded
+// backoff while a fresh deployment becomes servable), but publish-path
+// tests exercise the full retry ladder on purpose — pin near-zero
+// delays so the ladder completes inside the test timeout. Individual
+// tests override with vi.stubEnv.
+process.env.LITT_DEPLOY_VERIFY_DELAYS_MS = process.env.LITT_DEPLOY_VERIFY_DELAYS_MS ?? "1,1,1,1";
+
 class MemoryStorage implements Storage {
   private values = new Map<string, string>();
 

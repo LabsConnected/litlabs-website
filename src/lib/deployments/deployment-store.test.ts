@@ -245,6 +245,50 @@ describe("readPublishedFile — public serving read path", () => {
     expect(calls.find((c) => c.table === FILES)).toBeUndefined();
   });
 
+  it("serves a deploying deployment ONLY to its own verification token", async () => {
+    // Publication integrity: the deploy service verifies a deployment
+    // BEFORE marking it ready. The one gate that opens early is the
+    // deployment's own per-publish token — no token, a wrong token,
+    // or any other status serves nothing.
+    const deployingRow = { ...readyRow, status: "deploying", verification_token: "tok-123" };
+    handler = (table) => {
+      if (table === DEPLOYMENTS) return { data: deployingRow, error: null };
+      if (table === FILES) return { data: { content: "<h1>Ember</h1>", content_type: "text/html" }, error: null };
+      return { data: null, error: null };
+    };
+    expect(await readPublishedFile("dep-1", "index.html")).toBeNull();
+    expect(await readPublishedFile("dep-1", "index.html", { verificationToken: "tok-other" })).toBeNull();
+    expect(await readPublishedFile("dep-1", "index.html", { verificationToken: "" })).toBeNull();
+    expect(calls.find((c) => c.table === FILES)).toBeUndefined();
+
+    const file = await readPublishedFile("dep-1", "index.html", { verificationToken: "tok-123" });
+    expect(file).toEqual({ content: "<h1>Ember</h1>", contentType: "text/html" });
+  });
+
+  it("never serves a failed or building deployment, even with a token", async () => {
+    for (const status of ["failed", "building", "unpublished"]) {
+      handler = (table) =>
+        table === DEPLOYMENTS
+          ? { data: { ...readyRow, status, verification_token: "tok-123" }, error: null }
+          : { data: null, error: null };
+      expect(
+        await readPublishedFile("dep-1", "index.html", { verificationToken: "tok-123" }),
+      ).toBeNull();
+    }
+    expect(calls.find((c) => c.table === FILES)).toBeUndefined();
+  });
+
+  it("finds the newest failed deployment by project + content hash", async () => {
+    handler = () => ({ data: { ...readyRow, status: "failed" }, error: null });
+    const found = await supabaseDeploymentStore.findFailedByContentHash?.("proj-A", "sha-1");
+    expect(found?.status).toBe("failed");
+    const lookup = calls.find((c) => c.table === DEPLOYMENTS);
+    expect(lookup?.filters).toContainEqual(["project_id", "proj-A"]);
+    expect(lookup?.filters).toContainEqual(["content_hash", "sha-1"]);
+    expect(lookup?.filters).toContainEqual(["status", "failed"]);
+    expectOnlyV1Tables();
+  });
+
   it("returns null for a missing deployment", async () => {
     expect(await readPublishedFile("dep-missing", "index.html")).toBeNull();
     expect(calls.find((c) => c.table === FILES)).toBeUndefined();

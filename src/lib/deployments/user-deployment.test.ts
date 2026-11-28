@@ -343,6 +343,40 @@ describe("describeDeploymentFailure", () => {
     expect(describeDeploymentFailure(new Error("fetch failed")).retryable).toBe(true);
     expect(describeDeploymentFailure(new Error("index.html is required")).retryable).toBe(false);
   });
+
+  it("classifies the hosting provider's 'Not Authorized' as authorization, never unknown", () => {
+    // The 2026-11-04 failed publishes recorded error_class "unknown" for
+    // an infrastructure credential refusal — an authorization failure
+    // that will repeat identically until the credential changes.
+    const described = describeDeploymentFailure(
+      new Error("Hosting infrastructure error: Not Authorized."),
+    );
+    expect(described.errorClass).toBe("authorization");
+    expect(described.retryable).toBe(false);
+  });
+
+  it("classifies verification-window unreachability as temporary 'unavailable', never unknown", () => {
+    // The 2026-09-13 publishes: the artifact was fully stored, but the
+    // single immediate verification fetch got a 404 and the failure was
+    // recorded as permanent "unknown". A not-reachable verification
+    // outcome is temporary unavailability — retryable, and a different
+    // fact from a permanently broken artifact.
+    for (const status of [404, 503]) {
+      const described = describeDeploymentFailure(
+        new Error(
+          `Deployment verification failed: https://example.test/sites/dep_1/ is not reachable (HTTP ${status}).`,
+        ),
+      );
+      expect(described.errorClass).toBe("unavailable");
+      expect(described.retryable).toBe(true);
+    }
+  });
+
+  it("classifies any 5xx as transport, not just 502/503/504", () => {
+    const described = describeDeploymentFailure(new Error("upstream answered HTTP 500"));
+    expect(described.errorClass).toBe("transport");
+    expect(described.retryable).toBe(true);
+  });
 });
 
 /* ── Local-asset integrity (2026-09-17 acceptance P0) ───────────────── */

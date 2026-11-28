@@ -123,6 +123,7 @@ export function stationActionToToolDefinition(action: StationAction): LiTTToolDe
     idempotent: !action.mutating,
     readOnly: !action.mutating,
     enabled: true,
+    validationHint: action.validationHint,
   };
 }
 

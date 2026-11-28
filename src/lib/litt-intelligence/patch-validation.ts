@@ -317,6 +317,46 @@ export async function buildPatchRecoveryMessage(
 }
 
 /**
+ * The files.write counterpart of buildPatchRecoveryMessage: re-read
+ * the target after a rejected write and give the model the exact
+ * current content, so the recovery is a patch derived from disk truth
+ * (or a deliberate declared overwrite) instead of a blind second
+ * regeneration. This is an internal tool-result instruction, not chat
+ * output.
+ */
+export async function buildFilesWriteRecoveryMessage(
+  inputs: FilesWriteInputs,
+  transport: WorkspaceTransport,
+  validationError: string,
+  attempt: number,
+): Promise<string> {
+  const path = typeof inputs.path === "string" ? inputs.path : "the requested file";
+  try {
+    const { content } = await transport.readFile(path);
+    const bounded = content.length > 16_000
+      ? `${content.slice(0, 16_000)}\n[content truncated; use files.read before retrying]`
+      : content;
+    return (
+      `${validationError}\n\n` +
+      `SAFE WRITE RECOVERY ATTEMPT ${attempt}: The file was re-read from disk. ` +
+      `Do not repeat the rejected write. Either use apply_patch with search text copied exactly from ` +
+      `CURRENT FILE CONTENT below, or use files.write with the complete corrected contents ` +
+      `(declare "allowOverwrite": true only if replacing the whole page is the intent). ` +
+      `Use a SHORT search string (5-15 words or one tag) that appears exactly once — long search strings ` +
+      `are easy to mistype.\n\n` +
+      `CURRENT FILE CONTENT (${path}):\n${bounded}`
+    );
+  } catch (readError) {
+    return (
+      `${validationError}\n\n` +
+      `SAFE WRITE RECOVERY ATTEMPT ${attempt}: A fresh read of ${path} failed ` +
+      `(${readError instanceof Error ? readError.message : String(readError)}). ` +
+      `Do not guess or repeat the write; no mutation was executed.`
+    );
+  }
+}
+
+/**
  * Validate apply_patch inputs before they reach the approval gate.
  *
  * Returns a model-facing error message when the patch is provably

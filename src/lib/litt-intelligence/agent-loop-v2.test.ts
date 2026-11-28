@@ -2811,6 +2811,19 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
     listFiles: vi.fn(async () => ({ entries: [{ name: "index.html", type: "file" }] })),
   } as unknown as WorkspaceTransport;
 
+  // P0 F2: pre-approval write validation runs on resume now (parity
+  // with the initial segment), so a follow-up write to a path the
+  // transport reports as an existing page bounces at the overwrite
+  // gate instead of reaching its approval pause — writeTransport
+  // reports "<html/>" for EVERY path. Tests whose scenario is a
+  // write to a NEW page use this variant: only index.html exists.
+  const writeTransportNewPages = {
+    ...writeTransport,
+    readFile: vi.fn(async (path: string) =>
+      path === "index.html" ? { content: "<html/>", size: 7 } : { content: "", size: 0 },
+    ),
+  } as unknown as WorkspaceTransport;
+
   function approvedWriteResume(extra?: Partial<ResumeInput>): ResumeInput {
     return {
       pausedMessages: [{ role: "user", content: "Build a site" }],
@@ -2843,7 +2856,7 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
       finishReason: "tool_calls",
       model: "test",
     });
-    const result = await trackedResume(approvedWriteResume(), writeTransport);
+    const result = await trackedResume(approvedWriteResume(), writeTransportNewPages);
     expect(result.pendingApproval?.toolId).toBe("files.write");
     expect(result.pendingApproval?.zeroWriteStepsAtPause).toBe(0);
   });
@@ -2917,7 +2930,7 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
       .mockResolvedValueOnce(second)
       .mockResolvedValueOnce(third)
       .mockResolvedValueOnce({ text: "Done.", toolCalls: [], finishReason: "stop", model: "test" });
-    const r1 = await trackedResume(approvedWriteResume(), writeTransport);
+    const r1 = await trackedResume(approvedWriteResume(), writeTransportNewPages);
     expect(r1.pendingApproval?.toolId).toBe("files.write");
     const r2 = await trackedResume(
       approvedWriteResume({
@@ -2928,7 +2941,7 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
         priorToolCalls: r1.pendingApproval!.priorToolCalls,
         zeroWriteStepsAtPause: r1.pendingApproval!.zeroWriteStepsAtPause,
       }),
-      writeTransport,
+      writeTransportNewPages,
     );
     expect(r2.pendingApproval?.toolId).toBe("files.write");
     expect(r2.pendingApproval?.zeroWriteStepsAtPause).toBe(0);
@@ -2941,7 +2954,7 @@ describe("resumeAgentLoopV2 — stall-guard approval accounting", () => {
         priorToolCalls: r2.pendingApproval!.priorToolCalls,
         zeroWriteStepsAtPause: r2.pendingApproval!.zeroWriteStepsAtPause,
       }),
-      writeTransport,
+      writeTransportNewPages,
     );
     expect(r3.finalText).toBe("Done.");
     expect(r3.failedHonestly).toBeUndefined();
