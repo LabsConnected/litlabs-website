@@ -43,7 +43,13 @@ async function listDir(
   });
   if (!resp.ok) throw new Error(`list failed (${resp.status})`);
   const data = (await resp.json()) as { entries?: WsEntry[] };
-  return Array.isArray(data.entries) ? data.entries : [];
+  // The terminal server's /ws-files labels directories "folder"; the walk
+  // below keys on "directory" (same divergence deploy-service.ts handles).
+  // Normalize at the boundary or no subdirectory is ever descended.
+  return (Array.isArray(data.entries) ? data.entries : []).map((e) => ({
+    ...e,
+    type: e.type === "folder" ? "directory" : e.type,
+  }));
 }
 
 async function readTextFile(

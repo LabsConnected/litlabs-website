@@ -2614,7 +2614,14 @@ async function verifyStaticSiteAssetReferences(
           fileSet.add(p);
           if (/\.html?$/i.test(e.name)) htmlFiles.push(p);
           else if (/\.css$/i.test(e.name)) cssFiles.push(p);
-        } else if (e.type === "directory") {
+        } else if (e.type === "directory" || e.type === "folder") {
+          // Workspace transports disagree on the directory label —
+          // the terminal server's /ws-files emits "folder" (same
+          // divergence deploy-service.ts already handles). Accepting
+          // only "directory" silently skipped EVERY subdirectory, so
+          // all nested assets were condemned as missing (staging
+          // acceptance 2026-11-28: two golden runs failed settlement
+          // on assets that existed and shipped in the deployment).
           await collect(p, p, depth + 1);
         }
       }
