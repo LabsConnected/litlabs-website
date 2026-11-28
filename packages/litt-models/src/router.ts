@@ -303,7 +303,7 @@ export function routeModel(
   if (mode === "pinned" && options.pinnedModelId) {
     const pinned = registry.getById(options.pinnedModelId);
     if (pinned && registry.isRoutable(pinned) && isAllowed(pinned)) {
-      return buildResult(registry, pinned, `Pinned: ${pinned.displayName}`, classifyTask(input), null, "pinned");
+      return buildResult(registry, pinned, `Pinned: ${pinned.displayName}`, input.taskKind ?? classifyTask(input), null, "pinned");
     }
     // Not routable or filtered out
     if (strict && isAllowed(pinned)) {
@@ -313,7 +313,7 @@ export function routeModel(
       throw new Error(reason);
     }
     // Non-strict or filtered: fall through to AUTO with a fallback reason
-    const taskKind = classifyTask(input);
+    const taskKind = input.taskKind ?? classifyTask(input);
     const { model, reason } = selectForTask(registry, taskKind, candidatePool.length > 0 ? candidatePool : available);
     const fbReason = pinned && !isAllowed(pinned)
       ? `Pinned ${pinned.displayName} is not a local model → LOCAL AUTO fallback`
@@ -333,7 +333,7 @@ export function routeModel(
         : `ASK model ${options.askChoice} is not in the catalog`;
       throw new Error(reason);
     }
-    const taskKind = classifyTask(input);
+    const taskKind = input.taskKind ?? classifyTask(input);
     const { model, reason } = selectForTask(registry, taskKind, candidatePool.length > 0 ? candidatePool : available);
     const fbReason = choice && !isAllowed(choice)
       ? `ASK ${choice.displayName} is not a local model → LOCAL AUTO fallback`
@@ -344,7 +344,9 @@ export function routeModel(
   }
 
   // AUTO (or fallback from a non-routable pin/ask)
-  const taskKind = classifyTask(input);
+  // An upstream classifier may supply taskKind on the input; the
+  // heuristic classifyTask() remains the default when it does not.
+  const taskKind = input.taskKind ?? classifyTask(input);
 
   // Budget preference: cheapest capable model (verified-online preferred)
   if (preference === "budget") {

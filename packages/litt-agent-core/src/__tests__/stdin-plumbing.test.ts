@@ -44,6 +44,67 @@ describe("stdin plumbing — ShellExecutor", () => {
   });
 });
 
+const WIN = process.platform === "win32";
+// resolveCommand probes process.env.PATH (not the per-call env option), so
+// forcing the cmd-builtin branch means stripping GNU dirs off PATH itself.
+function withoutGnuOnPath<T>(fn: () => Promise<T>): Promise<T> {
+  const saved = process.env.PATH;
+  process.env.PATH = "C:\\Windows\\System32";
+  return fn().finally(() => { process.env.PATH = saved; });
+}
+
+describe("Windows prompt-prone builtins — no stdin-pipe hangs", { skip: !WIN }, () => {
+  it("bare `date` completes promptly — never waits on the cmd prompt", async () => {
+    const shell = createShellExecutor(TMP);
+    const res = await shell.execute({ command: "date", args: [], timeoutMs: 10_000 });
+    assert.notEqual(res.status, "timeout", "bare `date` hung on the interactive prompt");
+    assert.equal(res.status, "success");
+    assert.match(res.stdout, /\d{4}/); // GNU or `date /t` output — a real date either way
+  });
+
+  it("bare `date` via the cmd fallback prints the date (`/t` injected, exit 0)", async () => {
+    const shell = createShellExecutor(TMP);
+    const res = await withoutGnuOnPath(() =>
+      shell.execute({ command: "date", args: [], timeoutMs: 10_000 }));
+    assert.equal(res.status, "success"); // /t prints and exits — no prompt abort
+    assert.match(res.stdout, /\d{4}/);
+  });
+
+  it("`date +%Y` never hangs: GNU date prints the year, cmd fallback aborts honestly", async () => {
+    const shell = createShellExecutor(TMP);
+    const gnu = await shell.execute({ command: "date", args: ["+%Y"], timeoutMs: 10_000 });
+    assert.notEqual(gnu.status, "timeout");
+    if (gnu.status === "success") {
+      assert.match(gnu.stdout, /^\d{4}/); // Git coreutils date.exe understood +%Y
+    }
+    // cmd fallback (no GNU on PATH): invalid arg → prompt → stdin EOF → honest abort
+    const cmd = await withoutGnuOnPath(() =>
+      shell.execute({ command: "date", args: ["+%Y"], timeoutMs: 10_000 }));
+    assert.notEqual(cmd.status, "timeout", "cmd `date +%Y` hung instead of aborting");
+    assert.notEqual(cmd.status, "success"); // cmd can't parse +%Y — must fail, not fake it
+  });
+
+  it("bare `time` completes promptly", async () => {
+    const shell = createShellExecutor(TMP);
+    const res = await shell.execute({ command: "time", args: [], timeoutMs: 10_000 });
+    assert.notEqual(res.status, "timeout");
+    assert.equal(res.status, "success");
+  });
+
+  it("`pause` gets stdin EOF — returns instead of waiting for a keypress", async () => {
+    const shell = createShellExecutor(TMP);
+    const res = await shell.execute({ command: "pause", args: [], timeoutMs: 10_000 });
+    assert.notEqual(res.status, "timeout", "`pause` waited for input that can never arrive");
+  });
+
+  it("explicit stdin still reaches the child (regression guard)", async () => {
+    const shell = createShellExecutor(TMP);
+    const res = await shell.execute({ command: "findstr", args: ["^"], stdin: "stdin-alive\n" });
+    assert.equal(res.status, "success");
+    assert.match(res.stdout, /stdin-alive/);
+  });
+});
+
 describe("stdin plumbing — runCommand", () => {
   it("forwards stdin through the security pipeline", async () => {
     if (process.platform === "win32") return;

@@ -8,14 +8,16 @@
  *   - Telemetry stores no secrets
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   determineRoutingClass,
   profilePreference,
+  profileToTaskKind,
   recordLatency,
   getAverageLatency,
   getLatencyHistory,
 } from "../lib/latency-routing.js";
+import { ModelRuntime } from "../lib/model-runtime.js";
 
 describe("determineRoutingClass", () => {
   it("maps chat intent to CHAT_FAST", () => {
@@ -113,5 +115,77 @@ describe("latency telemetry", () => {
     expect(keys).not.toContain("prompt");
     expect(keys).not.toContain("apiKey");
     expect(keys).not.toContain("messages");
+  });
+});
+
+describe("profileToTaskKind", () => {
+  it("maps fast → fast task kind", () => {
+    expect(profileToTaskKind("fast")).toBe("fast");
+  });
+
+  it("maps smart → coding task kind", () => {
+    expect(profileToTaskKind("smart")).toBe("coding");
+  });
+
+  it("maps long → reasoning task kind", () => {
+    expect(profileToTaskKind("long")).toBe("reasoning");
+  });
+});
+
+// ─── Wired routing: profileHint flows through ModelRuntime.route ───
+// The hint reaches routeModel() as RoutingInput.taskKind, steering AUTO
+// selection the same way classifyTask() heuristics do — while pinned
+// (FIXED) selections are still honored exactly.
+describe("ModelRuntime.route profileHint (wired)", () => {
+  const ENV_KEYS = ["OPENROUTER_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY"] as const;
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
+    // A routable catalog requires a credential — OpenRouter serves the
+    // LiTT-tier models used by AUTO selection.
+    process.env.OPENROUTER_API_KEY = "test-key";
+  });
+
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      if (savedEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = savedEnv[key];
+    }
+  });
+
+  it("hint 'long' steers AUTO to the same pick as a heuristic reasoning message", () => {
+    const runtime = new ModelRuntime();
+    const message = "refactor the authentication architecture across every service";
+    const hinted = runtime.route("auto", null, message, "long");
+    const heuristic = runtime.route("auto", null, message);
+    // Heuristic classifies this message as reasoning already, so the
+    // explicit hint must agree — different picks would mean the hint
+    // bypassed (not steered) the router.
+    expect(hinted.id).toBe(heuristic.id);
+    expect(hinted.id).not.toBe(runtime.route("auto", null, "hi", "fast").id);
+  });
+
+  it("hint 'fast' steers AUTO away from a coding-bucket pick", () => {
+    const runtime = new ModelRuntime();
+    // Without a hint this message classifies as coding → balanced tier.
+    const unhinted = runtime.route("auto", null, "fix the build script and edit the file");
+    const hinted = runtime.route("auto", null, "fix the build script and edit the file", "fast");
+    expect(hinted.id).not.toBe(unhinted.id);
+  });
+
+  it("FIXED pinned selection is preserved regardless of hint", () => {
+    const runtime = new ModelRuntime();
+    const routable = runtime.route("auto", null, "hello");
+    const pinned = runtime.route("fixed", routable.id, "refactor the entire architecture", "long");
+    expect(pinned.id).toBe(routable.id);
+    expect(pinned.appliedPolicy).toBe("pinned");
+  });
+
+  it("no hint preserves heuristic AUTO behavior", () => {
+    const runtime = new ModelRuntime();
+    const plain = runtime.route("auto", null, "hey");
+    const nullHint = runtime.route("auto", null, "hey", null);
+    expect(plain.id).toBe(nullHint.id);
   });
 });

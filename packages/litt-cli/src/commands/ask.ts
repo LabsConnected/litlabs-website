@@ -25,7 +25,9 @@ import {
   type StreamChunk,
 } from "@litt/agent-core";
 import { createRuntimeSession } from "../lib/runtime-session.js";
+import { BROWSER_TOOL_ENTRIES } from "../lib/browser/tools.js";
 import { createToolCallStreamFilter } from "../lib/tool-call-stream.js";
+import { createAskOutput, parseAskArgs } from "../lib/ask-output.js";
 import { hasAnyProviderKey, resolveProviderAdapter, providerLabel, resolveIdleStallMs } from "../lib/model-provider.js";
 import { ModelRuntime } from "../lib/model-runtime.js";
 import { probeLocalLane } from "../lib/local-lane.js";
@@ -56,16 +58,23 @@ export function isExactAnswerPrompt(question: string): boolean {
 }
 
 export async function askCommand(args: string[], session?: RuntimeSession): Promise<number> {
-  const question = args.join(" ").trim();
+  const { question, format, conflict } = parseAskArgs(args);
+  const output = createAskOutput(format);
+  const problem = (message: string) => {
+    if (output.structured) console.error(message);
+    else fail(message);
+    return output.finish(1, "error", { message });
+  };
 
+  if (conflict) return problem("Choose either --json or --jsonl.");
   if (!question) {
-    fail("Please provide a question. Example: litt ask \"How do I fix the build?\"");
-    return 1;
+    return problem("Please provide a question. Example: litt ask \"How do I fix the build?\"");
   }
 
-  let project = detectProject();
+  let project = detectProject(process.env.LITT_CWD);
 
   if (!project.hasPackageJson) {
+    if (output.structured) return problem("No package.json found. Set --cwd to the project root.");
     // Recover via the canonical resolution pipeline instead of dying.
     const resolved = await resolveActiveProject();
     if (!resolved) {
@@ -75,7 +84,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     project = resolved.project;
   }
 
-  header("LiTT Ask");
+  if (!output.structured) header("LiTT Ask");
 
   // A credential-less Ollama daemon is a real provider lane. Only drop to
   // heuristic analysis when neither hosted/BYOK credentials nor a proven
@@ -90,9 +99,9 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
 
   if (!providerConfigured && !localLane?.available) {
     if (selectedModel) {
-      fail(`Cannot serve selected model "${selectedModel}": ${localLane?.reason ?? "no provider available"}`);
-      return 1;
+      return problem(`Cannot serve selected model "${selectedModel}": ${localLane?.reason ?? "no provider available"}`);
     }
+    if (output.structured) return problem("No provider API key and no reachable local model.");
     warn("No provider API key and no local model available — using local heuristic analysis (no agent loop).");
     console.log(`${c.dim}Run 'litt login' for managed keys, configure a BYOK provider, or start Ollama with a local model.${c.reset}\n`);
     return heuristicAnalysis(question, project);
@@ -102,7 +111,6 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   // Use the detected project root (walks upward from cwd)
   const projectRoot = project.rootDir;
   const sess = session ?? createRuntimeSession({ cwd: projectRoot, mode: "act" });
-  sess.installSigintHandler();
 
   // The effective mode comes from the session, which carries the --mode
   // flag (index.ts builds it from dispatch). It is never hardcoded here:
@@ -115,7 +123,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   // Non-interactive: the loop declares headless interaction and the
   // gateway's policy layer denies approval-required actions (fail closed).
   // The old unconditional auto-approval is removed.
-  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  const interactive = !output.structured && Boolean(process.stdin.isTTY && process.stdout.isTTY);
   const approvalBridge = new ApprovalBridge();
   let closeApprovalPrompt: (() => void) | null = null;
   if (interactive) {
@@ -129,7 +137,10 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   // lets weak local models invoke expensive checks for a prompt that cannot
   // use their results (observed: `Reply with exactly...` -> project.check).
   const directAnswerOnly = isExactAnswerPrompt(question);
-  const tools = new ToolRegistry(undefined, { includeDefaults: !directAnswerOnly });
+  const tools = new ToolRegistry(
+    directAnswerOnly ? {} : BROWSER_TOOL_ENTRIES,
+    { includeDefaults: !directAnswerOnly },
+  );
   const gateway = new ExecutionGateway({
     tools,
     shell,
@@ -140,6 +151,17 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   });
 
   let inFlightModel: { cancel?: () => void } | null = null;
+  const abort = new AbortController();
+  let interrupted = false;
+  const interrupt = () => {
+    interrupted = true;
+    abort.abort();
+    approvalBridge.cancel();
+  };
+  const cancelled = () => {
+    if (!output.structured) console.error("Agent cancelled.");
+    return output.finish(130, "cancelled");
+  };
   const askBody = async (): Promise<number> => {
   try {
     // Resolve auth + REMOTE state so the model knows who it's acting for
@@ -148,6 +170,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     // reachable?" — it would guess or say "unable to determine."
     const authSession = getAuthSession();
     const authState = await authSession.getAuthState();
+    abort.signal.throwIfAborted();
     const remoteUrl = getTerminalUrl();
 
     // Route through the same ModelRuntime as the TUI — picks the best
@@ -171,6 +194,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     const localOnly = resolveLocalOnly();
     const modelRuntime = new ModelRuntime(authState.signedIn && !hasLocalKey);
     await modelRuntime.refresh();
+    abort.signal.throwIfAborted();
 
     // Determine whether the local daemon must serve this request.
     // When executionTarget=local (LITT_LOCAL_MODE=1, --local, or default),
@@ -203,6 +227,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       routingMode = selectedId ? "fixed" : "auto";
       routed = modelRuntime.route(routingMode, selectedId, question);
     }
+    abort.signal.throwIfAborted();
     const model = resolveProviderAdapter(routed, {
       tools: tools.list(),
       routingMode,
@@ -210,10 +235,18 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
     });
     inFlightModel = model as { cancel?: () => void };
 
-    console.log(`${c.dim}Provider: ${providerLabel(model.providerId)} | Model: ${model.configuredModel}${c.reset}`);
-    console.log(`${c.cyan}▶${c.reset} Asking: ${c.bold}${question}${c.reset}\n`);
+    output.event("run.started", { provider: model.providerId, model: model.configuredModel });
+    if (!output.structured) {
+      console.log(`${c.dim}Provider: ${providerLabel(model.providerId)} | Model: ${model.configuredModel}${c.reset}`);
+      console.log(`${c.cyan}▶${c.reset} Asking: ${c.bold}${question}${c.reset}\n`);
+    }
 
     const toolCallFilter = createToolCallStreamFilter();
+    const writeDelta = (text: string) => {
+      if (!text || abort.signal.aborted) return;
+      if (output.structured) output.event("model.delta", { text });
+      else process.stdout.write(text);
+    };
 
     const result = await runAgentLoop(question, {
       model,
@@ -223,6 +256,7 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       cwd: projectRoot,
       userId: "cli-user",
       mode,
+      abortSignal: abort.signal,
       // Non-interactive runs declare headless interaction so the gateway's
       // policy layer denies approval-required actions (fail closed).
       interaction: interactive ? "interactive" : "headless",
@@ -245,10 +279,19 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
           // Suppress tool_call/json protocol markup — never dump model
           // protocol internals to the user-facing transcript.
           const visible = toolCallFilter.next(event.text);
-          if (visible) process.stdout.write(visible);
+          writeDelta(visible);
+        } else if (event.type === "done") {
+          writeDelta(toolCallFilter.flush());
+          output.event("model.done", { model: event.model, usage: event.usage, timing: event.timing });
+        } else if (event.type === "meta") {
+          output.event("model.started", { provider: event.provider, model: event.model });
         }
       },
       onToolStream: (chunk: StreamChunk) => {
+        if (output.structured) {
+          output.event("tool.output", { stream: chunk.stream, text: chunk.text });
+          return;
+        }
         if (chunk.stream === "stdout") {
           process.stdout.write(`${c.gray}${chunk.text}${c.reset}`);
         } else {
@@ -259,6 +302,10 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
         // Lifecycle events — could render in cockpit
         if (event.subtype === "agent_tool_call") {
           const toolId = (event.data as { toolId?: string }).toolId ?? "unknown";
+          if (output.structured) {
+            output.event("tool.requested", { toolId, toolCallId: event.toolCallId });
+            return;
+          }
           console.log(`\n${c.blue}○${c.reset} Tool call: ${c.bold}${toolId}${c.reset}`);
         } else if (event.subtype === "agent_tool_result") {
           const data = event.data as {
@@ -266,7 +313,12 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
             status?: string;
             success?: boolean;
             message?: string;
+            durationMs?: number;
           };
+          if (output.structured) {
+            output.event("tool.result", { ...data, toolCallId: event.toolCallId });
+            return;
+          }
           const icon = data.success ? `${c.green}✓${c.reset}` : `${c.red}✗${c.reset}`;
           console.log(
             `${icon} ${data.toolId ?? "Tool"}: ${data.message ?? data.status ?? "No details"}`,
@@ -275,7 +327,23 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       },
       });
     const streamTail = toolCallFilter.flush();
-    if (streamTail) process.stdout.write(streamTail);
+    writeDelta(streamTail);
+
+    const exitCode = interrupted || result.termination === "cancelled" ? 130 : result.termination === "complete" ? 0 : 1;
+    if (output.structured) {
+      return output.finish(exitCode, interrupted ? "cancelled" : result.termination, {
+        content: result.content,
+        rounds: result.rounds,
+        durationMs: result.durationMs,
+        usage: result.usage,
+        provider: model.providerId,
+        model: model.activeModel || model.configuredModel,
+        toolCalls: result.toolCalls.map(({ toolId, toolCallId, result: tool, durationMs }) => ({
+          toolId, toolCallId, durationMs, status: tool.status, success: tool.success, message: tool.message,
+          exitCode: typeof tool.data?.exitCode === "number" ? tool.data.exitCode : undefined,
+        })),
+      });
+    }
 
     const completionLabel = result.termination === "complete"
       ? `${c.green}■${c.reset} Agent completed`
@@ -305,12 +373,10 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
       console.log(`${c.dim}Reason: ${result.content}${c.reset}`);
     }
 
-    return result.termination === "complete" ? 0 : 1;
+    return exitCode;
   } catch (err) {
-    fail(`Agent error: ${err instanceof Error ? err.message : String(err)}`);
-    return 1;
-  } finally {
-    closeApprovalPrompt?.();
+    if (interrupted) return cancelled();
+    return problem(`Agent error: ${err instanceof Error ? err.message : String(err)}`);
   }
   };
 
@@ -321,7 +387,20 @@ export async function askCommand(args: string[], session?: RuntimeSession): Prom
   const deadlineMs = Number(process.env.LITT_ASK_TIMEOUT_MS) > 0
     ? Number(process.env.LITT_ASK_TIMEOUT_MS)
     : 120000;
-  return withAskDeadline(askBody(), deadlineMs, () => inFlightModel?.cancel?.());
+  process.on("SIGINT", interrupt);
+  try {
+    return await withAskDeadline(askBody(), deadlineMs, () => {
+      abort.abort();
+      inFlightModel?.cancel?.();
+    });
+  } catch (err) {
+    await shell.cancel();
+    if (interrupted) return cancelled();
+    return problem(err instanceof Error ? err.message : String(err));
+  } finally {
+    process.off("SIGINT", interrupt);
+    closeApprovalPrompt?.();
+  }
 }
 
 // ─── Hard ask deadline ─────────────────────────────────────────────

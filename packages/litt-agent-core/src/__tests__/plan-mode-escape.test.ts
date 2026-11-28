@@ -384,18 +384,28 @@ describe("PLAN escape — runCommand enforces end to end", () => {
     execFileSync("git", ["init", "-q"], { cwd: ws });
     fs.writeFileSync(path.join(ws, "in.txt"), "b\na\n");
     const shell = createShellExecutor(ws);
-    const cmds: Array<[string, string[]]> = [
+    const cases: Array<[string, string[]]> = [
       ["git", ["status"]],
       ["git", ["-C", ws, "status"]],
-      ["env", ["FOO=1"]],
-      ["env", ["FOO=1", "git", "status"]],
-      // Windows System32 find.exe shadows Git's Unix find and rejects -name;
-      // it is a different tool, so only assert Unix-find behavior elsewhere.
-      ...(process.platform === "win32" ? [] : ([["find", [".", "-name", "*.ts"]]] as Array<[string, string[]]>)),
-      ["sort", ["in.txt"]],
-      ["date", ["+%Y"]],
+      // `env`, GNU `find`, and GNU `sort` don't exist (or behave
+      // differently: find.exe is a text finder) on Windows. Their
+      // classification coverage lives in the assertReadOnly cases above;
+      // this exec check only runs binaries every dev platform provides.
+      // `where` is a real Windows builtin read-only command.
+      ...(process.platform === "win32"
+        ? [["where", ["node"]] as [string, string[]]]
+        : [
+            ["env", ["FOO=1"]] as [string, string[]],
+            ["env", ["FOO=1", "git", "status"]] as [string, string[]],
+            ["find", [".", "-name", "*.ts"]] as [string, string[]],
+            ["sort", ["in.txt"]] as [string, string[]],
+          ]),
+      // `date +%Y` is a GNU-ism: on Windows the shell resolver routes `date`
+      // through cmd.exe, whose DATE builtin prompts for input and hangs.
+      // node --version is a read-only command that exists on every platform.
+      ["node", ["--version"]],
     ];
-    for (const [cmd, args] of cmds) {
+    for (const [cmd, args] of cases) {
       const res = await runCommandSecure(shell, cmd, args, {
         mode: "plan",
         cwd: ws,

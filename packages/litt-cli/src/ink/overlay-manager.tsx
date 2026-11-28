@@ -51,20 +51,81 @@ interface OverlayKeyboardContextValue {
 
 const OverlayKeyboardContext = createContext<OverlayKeyboardContextValue | null>(null);
 
+/**
+ * Installs the Esc watchdog on the raw stdin stream — wraps read() so
+ * every chunk Ink's parser consumes is filtered first, and polls for
+ * bytes stranded while the 'readable' listener is detached. Returns a
+ * teardown that restores the original read() and stops the poll.
+ *
+ * Only active while isBusy() is true — idle Esc must keep flowing to
+ * the parser so the composer's own useInput can clear the draft.
+ */
+function installEscWatchdog(
+  stdin: NodeJS.ReadStream,
+  isBusy: () => boolean,
+  dispatchEsc: () => void,
+): () => void {
+  const rw = stdin as unknown as { read(size?: number): unknown; unshift(c: unknown): void };
+  const origRead = rw.read.bind(stdin);
+  let inFilter = false;
+  const splitEsc = (chunk: unknown): unknown => {
+    const s = typeof chunk === "string" ? chunk : (chunk as Buffer).toString("utf8");
+    if (!isBusy()) return chunk;
+    if (s === "\x1b") {
+      dispatchEsc();
+      return origRead() ?? null;
+    }
+    if (s.length > 2 && s.charCodeAt(0) === 0x1b
+      && s[1] !== "[" && s[1] !== "O" && s[1] !== "\x1b") {
+      inFilter = true;
+      try { dispatchEsc(); } finally { inFilter = false; }
+      return s.slice(1);
+    }
+    return chunk;
+  };
+  rw.read = (size?: number) => {
+    const chunk = origRead(size);
+    if (inFilter || chunk == null) return chunk;
+    return splitEsc(chunk);
+  };
+
+  const poll = setInterval(() => {
+    let chunk: unknown;
+    try { chunk = origRead(); } catch { return; }
+    if (chunk == null) return;
+    try {
+      const rest = splitEsc(chunk);
+      if (rest != null) rw.unshift(rest);
+    } catch { /* ignore */ }
+  }, 100);
+  poll.unref?.();
+  return () => {
+    clearInterval(poll);
+    rw.read = origRead;
+  };
+}
+
 export interface OverlayKeyboardProviderProps {
   children: React.ReactNode;
   /** App-level shortcut handler (F2/K/L/C). Only active when no overlay owns keys. */
   appShortcutHandler: KeyboardHandler;
+  /** While true, a leading \x1b glued to text is treated as Esc + that text. */
+  busyRef?: React.MutableRefObject<boolean>;
 }
 
 export function OverlayKeyboardProvider({
   children,
   appShortcutHandler,
+  busyRef,
 }: OverlayKeyboardProviderProps): React.ReactElement {
   // useStdin returns PublicProps which doesn't expose internal_eventEmitter,
   // but the actual context value (Props) does. Cast to access it.
   // This is the same EventEmitter that useInput listens to for 'input' events.
-  const { internal_eventEmitter } = useStdin() as unknown as { internal_eventEmitter: EventEmitter };
+  const { stdin, internal_eventEmitter, isRawModeSupported } = useStdin() as unknown as {
+    stdin: NodeJS.ReadStream;
+    internal_eventEmitter: EventEmitter;
+    isRawModeSupported: boolean;
+  };
   // Map of registered handlers, keyed by owner ID
   const handlersRef = useRef<Map<string, KeyboardHandler>>(new Map());
   // Stack of owner IDs — top of stack gets the keys
@@ -93,6 +154,41 @@ export function OverlayKeyboardProvider({
     };
   }, []);
 
+  const ESC_KEY: KeyInfo = {
+    upArrow: false, downArrow: false, leftArrow: false, rightArrow: false,
+    return: false, escape: true, tab: false, backspace: false, delete: false,
+    ctrl: false, meta: false, shift: false,
+    pageUp: false, pageDown: false, home: false, end: false,
+  } as KeyInfo;
+  const dispatchEsc = useCallback(() => {
+    const stack = ownerStackRef.current;
+    const top = stack[stack.length - 1];
+    const handler = top ? handlersRef.current.get(top) : null;
+    (handler ?? appHandlerRef.current)("\x1b", ESC_KEY);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ─── Esc watchdog ───
+  // Ink 7's input parser can silently swallow a lone Esc byte on
+  // Windows/ConPTY: input writes may coalesce so "\x1b" + typed text
+  // reach the parser in one chunk (or while a previous \x1b is held in
+  // `pending`), producing a meta-key — observed live: \x1b+'r' → meta-r,
+  // Esc never fired, 'r' was eaten, "read" became "ead", and a running
+  // mission kept going invisibly past its 45s deadline.
+  //
+  // Two-layer fix, both below the parser:
+  //  1) Wrap stdin.read() — every chunk Ink's parser consumes passes
+  //     this filter first. A leading \x1b glued to text (len > 2 — a
+  //     real Alt+key is exactly 2 bytes) while busy is split into
+  //     Esc + text; a lone \x1b dispatches Escape directly.
+  //  2) A 100ms poll drains bytes that sit unread when the 'readable'
+  //     listener is momentarily detached (raw-mode ref-count dips) —
+  //     anything non-Esc is unshifted back untouched.
+  useEffect(() => {
+    if (!isRawModeSupported || !stdin || typeof stdin.read !== "function") return;
+    return installEscWatchdog(stdin, () => busyRef?.current ?? false, dispatchEsc);
+  }, [stdin, isRawModeSupported, busyRef, dispatchEsc]);
+
   // ─── F2 + scroll key raw listener ───
   // Ink's useInput strips F-key input to '' (nonAlphanumericKeys), and the
   // key object has no f2 field. So we listen to the raw 'input' event from
@@ -119,6 +215,28 @@ export function OverlayKeyboardProvider({
           const hex = Buffer.from(s, "utf8").toString("hex");
           fs.appendFileSync(f, `[${new Date().toISOString()}] RAW input=${JSON.stringify(s)} hex=${hex} topOwner=${topOwner ?? "none"}\n`);
         } catch { /* ignore */ }
+      }
+
+      // Bare Esc — Ink's keypress parser can hold a lone \x1b waiting
+      // for an escape-sequence continuation (observed live: held ~11s,
+      // then merged with the next typed char into meta-r — the Esc
+      // keypress NEVER fired and the running turn kept going). A raw
+      // single-byte \x1b chunk is an unambiguous Escape — dispatch it
+      // now. If useInput also emits escape for the same byte, the app
+      // handler's busy-state guard makes the second dispatch a no-op.
+      if (s === "\x1b") {
+        const escKey = {
+          upArrow: false, downArrow: false, leftArrow: false, rightArrow: false,
+          return: false, escape: true, tab: false, backspace: false, delete: false,
+          ctrl: false, meta: false, shift: false,
+          pageUp: false, pageDown: false, home: false, end: false,
+        } as KeyInfo;
+        if (topOwner) {
+          const handler = handlersRef.current.get(topOwner);
+          if (handler) { handler(s, escKey); return; }
+        }
+        appHandlerRef.current(s, escKey);
+        return;
       }
 
       // F2 — opens Model Center (only when no overlay is active)

@@ -33,6 +33,16 @@ try {
   }).trim();
 } catch { /* not a git repo or git missing */ }
 
+// Detect a dirty tree: HEAD SHA alone can't describe uncommitted builds.
+let dirty = false;
+try {
+  dirty = execSync("git status --porcelain", {
+    cwd: pkgRoot,
+    encoding: "utf8",
+    timeout: 5000,
+  }).trim().length > 0;
+} catch { /* ignore */ }
+
 // Write the build metadata
 if (!existsSync(distDir)) {
   mkdirSync(distDir, { recursive: true });
@@ -43,6 +53,7 @@ const meta = {
   builtAt: new Date().toISOString(),
   version,
   nodeVersion: process.version,
+  ...(dirty ? { dirty } : {}),
 };
 
 writeFileSync(join(distDir, ".build-meta.json"), JSON.stringify(meta, null, 2), "utf8");

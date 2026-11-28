@@ -57,7 +57,37 @@ const WINDOWS_BUILTINS = new Set([
   // command fails cleanly instead of hanging until the timeout.
 ]);
 
-function resolveCommand(command: string): { command: string; args: string[]; useShell: boolean } {
+/**
+ * Builtins whose cmd.exe form prompts on stdin when run bare (or with args
+ * it can't parse): `date`/`time` ask for a new value, `pause` waits for a
+ * keypress, `label` asks for a volume label. On a non-interactive executor
+ * an open stdin pipe means an infinite wait. When a real executable exists
+ * on PATH — Git's coreutils ship date.exe/time.exe which accept GNU args
+ * like +%Y and never prompt — it wins over the cmd builtin. Otherwise the
+ * command still runs under cmd, but with the stdin pipe closed by the
+ * caller so the prompt aborts instead of hanging.
+ */
+const PROMPT_PRONE_BUILTINS = new Set(["date", "time", "pause", "label"]);
+
+/** Search PATH for name + a spawnable extension. .exe runs directly;
+ *  .cmd/.bat need shell:true. Returns null when nothing resolves. */
+function findOnPath(command: string): { command: string; args: string[]; useShell: boolean } | null {
+  const pathDirs = (process.env.PATH ?? "").split(";").filter(Boolean);
+  for (const dir of pathDirs) {
+    for (const ext of WINDOWS_EXTS) {
+      const candidate = path.join(dir, command + ext);
+      if (fs.existsSync(candidate)) {
+        if (ext === ".exe") {
+          return { command: candidate, args: [], useShell: false };
+        }
+        return { command: candidate, args: [], useShell: true };
+      }
+    }
+  }
+  return null;
+}
+
+function resolveCommand(command: string, args: string[]): { command: string; args: string[]; useShell: boolean } {
   if (process.platform !== "win32") {
     return { command, args: [], useShell: false };
   }
@@ -68,6 +98,21 @@ function resolveCommand(command: string): { command: string; args: string[]; use
   }
 
   const lowerCommand = command.toLowerCase();
+
+  // Prompt-prone builtins: prefer a real PATH executable (GNU coreutils)
+  // over the cmd builtin — GNU date handles `+%Y` and never prompts.
+  if (PROMPT_PRONE_BUILTINS.has(lowerCommand)) {
+    const exe = findOnPath(command);
+    if (exe) return exe;
+    // No real binary → cmd builtin. Bare `date`/`time` would prompt for a
+    // new value; `/t` is the canonical print-only form (exit 0). Argued
+    // forms keep verbatim args — valid args run, invalid ones get stdin
+    // EOF and abort honestly instead of hanging.
+    if ((lowerCommand === "date" || lowerCommand === "time") && args.length === 0) {
+      return { command, args: ["/t"], useShell: true };
+    }
+    return { command, args: [], useShell: true };
+  }
 
   // Windows shell builtins (echo, dir, set, cd, etc.) — must use shell:true
   // so cmd.exe interprets them. There's no echo.exe to spawn.
@@ -83,19 +128,8 @@ function resolveCommand(command: string): { command: string; args: string[]; use
   }
 
   // Search PATH for the .cmd version
-  const pathDirs = (process.env.PATH ?? "").split(";").filter(Boolean);
-  for (const dir of pathDirs) {
-    for (const ext of WINDOWS_EXTS) {
-      const candidate = path.join(dir, command + ext);
-      if (fs.existsSync(candidate)) {
-        if (ext === ".exe") {
-          return { command: candidate, args: [], useShell: false };
-        }
-        // .cmd and .bat need shell:true to execute
-        return { command: candidate, args: [], useShell: true };
-      }
-    }
-  }
+  const found = findOnPath(command);
+  if (found) return found;
 
   // Fallback: use shell:true with the original command
   return { command, args: [], useShell: true };
@@ -311,7 +345,7 @@ export class NodeShellExecutor implements ShellExecutor {
     const mergedEnv = buildChildEnv(process.env, [this._env, env]);
 
     // Resolve the actual executable path (handles Windows .CMD shims)
-    const resolved = resolveCommand(command);
+    const resolved = resolveCommand(command, args);
 
     // Lets the catch path release the tracking slot if anything throws
     // between spawn and the settle await — otherwise a dead entry would
@@ -359,13 +393,14 @@ export class NodeShellExecutor implements ShellExecutor {
 
       // Pipe explicit stdin to the child, then EOF. Without this, commands
       // that read stdin (e.g. `git commit --file=-`) block forever.
-      if (stdin !== undefined) {
-        try {
-          child.stdin?.write(stdin);
-          child.stdin?.end();
-        } catch {
-          // If stdin is unavailable the child sees EOF; don't fail the spawn.
-        }
+      // ALWAYS end the pipe even with no payload: an open stdin pipe keeps
+      // interactive commands (cmd builtins like `date`, `pause`, `set /p`)
+      // waiting forever; on EOF they abort or continue instead of hanging.
+      try {
+        if (stdin !== undefined) child.stdin?.write(stdin);
+        child.stdin?.end();
+      } catch {
+        // If stdin is unavailable the child sees EOF; don't fail the spawn.
       }
 
       let stdout = "";

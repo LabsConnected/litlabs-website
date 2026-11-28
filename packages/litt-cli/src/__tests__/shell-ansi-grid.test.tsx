@@ -30,6 +30,7 @@ import { render } from "ink";
 import { describe, it, expect } from "vitest";
 import { LiTTShell } from "../ink/shell/shell.js";
 import type { LiTTShellProps } from "../ink/shell/shell.js";
+import { WorkstreamStore } from "../ink/workstream-store.js";
 import type { ActivityEntry, ChatMessage, MissionState } from "../ink/cockpit-store.js";
 
 // ─── ANSI grid emulator (cursor moves, erases, plain text) ──────────
@@ -361,6 +362,86 @@ describe("shell ANSI-grid regression", () => {
       }
     });
   }
+
+  /**
+   * P0 closeout — the resize matrix above only resizes across SETTLED
+   * frames. Larry's shell must also survive a resize landing while tools
+   * are still running: live workstream rows, a RUNNING holo, and the
+   * busy footer all reflow without collisions, without losing the
+   * composer, and without the running activity row getting shredded.
+   */
+  it("resize while tools are running keeps the running frame clean", async () => {
+    const ws = new WorkstreamStore();
+    ws.setObjective("run the build and show the output");
+    ws.begin("inspect", "READ", "Inspect repository baseline");
+    ws.begin("command", "RUN", "Running command");
+    // Second activity intentionally left running — the dock is live.
+
+    const runningProps = defaultProps({
+      messages: [
+        msg({ id: "u1", role: "user", content: "run the build and show the output" }),
+      ],
+      activityLog: [
+        { id: "e1", ts: t, type: "tool.started", text: "Running command", semantic: "working" },
+      ] as ActivityEntry[],
+      holoState: "RUNNING",
+      isProcessing: true,
+      busySince: t - 8_000,
+      missionState: {
+        text: "run the build and show the output", runId: "run_rz", state: "RUNNING",
+        startedAt: t - 8_000, endedAt: null, filesTouched: [], commandsExecuted: [],
+        testResults: null, typecheckPassed: null, buildPassed: null, runtimeProven: false,
+        baselineGitFiles: [], missionDeltaFiles: [], readOnly: false,
+        toolsUsed: ["run_command"],
+      } satisfies MissionState,
+      workstream: ws.snapshot(),
+    });
+
+    const out = makeStdout(120, 30);
+    const inst = render(
+      React.createElement(LiTTShell, runningProps),
+      { stdout: out, stdin: makeStdin(), exitOnCtrlC: false, patchConsole: false, interactive: true },
+    );
+    try {
+      await waitForBytes(() => out.bytes, "Running command");
+      await new Promise((r) => setTimeout(r, 150));
+      assertCleanFrame(emulate(out.bytes), 120, {
+        footer: ["Act"],
+        body: ["Running command"],
+      });
+      out.reset();
+
+      // Shrink mid-run — the 80x24 wrap is the historical garble case.
+      out.resize(80, 24);
+      await new Promise((r) => setTimeout(r, 300));
+      assertCleanFrame(emulate(out.bytes), 80, {
+        footer: ["Act"],
+        body: ["Running command"],
+      });
+      out.reset();
+
+      // Grow mid-run.
+      out.resize(150, 40);
+      await new Promise((r) => setTimeout(r, 300));
+      assertCleanFrame(emulate(out.bytes), 150, {
+        footer: ["Act"],
+        body: ["Running command"],
+      });
+      out.reset();
+
+      // Shrink back mid-run — settle consistency after repeated resizes.
+      out.resize(120, 30);
+      await new Promise((r) => setTimeout(r, 300));
+      inst.unmount();
+      await new Promise((r) => setTimeout(r, 100));
+      assertCleanFrame(emulate(out.bytes), 120, {
+        footer: ["Act"],
+        body: ["Running command"],
+      });
+    } finally {
+      inst.unmount();
+    }
+  });
 
   it("resize smaller → larger → smaller keeps every phase clean", async () => {
     const out = makeStdout(80, 24);

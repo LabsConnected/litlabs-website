@@ -60,6 +60,12 @@ import {
 import { ModelRuntime, routingReason, routingModeLabel, type RoutedModel } from "../lib/model-runtime.js";
 import { TelemetryStore, loadModelPrefs, getDefaultPrefsPath } from "../lib/provider-registry.js";
 import { classifyIntent } from "../lib/intent.js";
+import {
+  determineRoutingClass,
+  profilePreference,
+  recordLatency,
+  type RoutingClass,
+} from "../lib/latency-routing.js";
 import { matchLocalFastPath } from "../lib/local-fast-lane.js";
 import {
   matchMachineLane,
@@ -69,7 +75,7 @@ import {
   type MachineCommandResult,
 } from "../lib/machine-lane.js";
 import { shouldBlockModelPath, CAPABILITY_GATE_MESSAGE, LOCAL_ONLY_GATE_MESSAGE } from "../lib/capability-gate.js";
-import { probeLocalLane, resetLocalLaneCache, type LocalLaneStatus } from "../lib/local-lane.js";
+import { probeLocalLane, resetLocalLaneCache, warmLocalModel, type LocalLaneStatus } from "../lib/local-lane.js";
 import {
   localRoutePolicy,
   resolveLocalModel,
@@ -88,7 +94,7 @@ import {
   formatInspectionForSynthesis,
   readCompletionActivityType,
 } from "../lib/read-lane.js";
-import { matchLocalToolMission, formatLocalToolSummary, type LocalToolResult } from "../lib/local-tool-mission.js";
+import { matchLocalToolMission, matchFilesystemSearch, formatLocalToolSummary, type LocalToolResult } from "../lib/local-tool-mission.js";
 import { shouldSkipPlanning } from "../lib/mission-complexity.js";
 import { PerfTrace } from "../lib/perf-trace.js";
 import { applyBranchRefresh } from "../lib/project-state.js";
@@ -110,7 +116,7 @@ import {
   createDraftPR as safeCreateDraftPR,
   isProtectedBranch,
 } from "../lib/git-workflow.js";
-import { saveSession, summarize, markInterrupted, consumeUnlockedWrite, type SessionSnapshot } from "../lib/session-store.js";
+import { saveSession, summarize, markInterrupted, consumeUnlockedWrite, newSessionId, type SessionSnapshot } from "../lib/session-store.js";
 import type { WorkspaceEntry } from "../lib/workspace-store.js";
 
 /**
@@ -197,6 +203,7 @@ function routeForTarget(
   lane: LocalLaneStatus | null,
   input: string,
   requestedOverride?: string | null,
+  profileHint?: "fast" | "smart" | "long" | null,
 ): RoutedModel {
   const policy = resolveRoutePolicy(store, signedIn);
   if (policy.kind === "local-required") {
@@ -210,7 +217,7 @@ function routeForTarget(
       requestedOverride ?? requestedLocalModel(store.state.selectedModel),
     );
   }
-  return modelRuntime.route(store.state.routingMode, store.state.selectedModel, input);
+  return modelRuntime.route(store.state.routingMode, store.state.selectedModel, input, profileHint);
 }
 
 /** The local-vs-catalog policy for the cockpit's current state. */
@@ -1006,7 +1013,19 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   // ends. Lets Escape (app.tsx) cancel the remote model stream, not
   // just the local tool executor (session.cancel()).
   const currentRemoteModelRef = useRef<RemoteModelProvider | null>(null);
+  // In-flight LOCAL model run (Ollama/LM Studio). runAgentLoop accepts
+  // an abortSignal; Esc aborts this so a streaming local request
+  // actually stops instead of generating unheard behind an IDLE UI
+  // (and blocking the next turn on a busy daemon).
+  const currentLocalAbortRef = useRef<AbortController | null>(null);
+  // Set when Esc/watchdog requests a cancel. The lanes check this when
+  // they create the turn's AbortController — without it, an Esc landing
+  // between submit-accept and controller registration aborts NOTHING
+  // (the ref is still null), the UI resets, and the turn keeps running
+  // invisibly (~48s observed live: cancelled mission continued to COMPLETE).
+  const cancelRequestedRef = useRef(false);
   const cancelRemoteModel = useCallback(() => {
+    cancelRequestedRef.current = true;
     currentRemoteModelRef.current?.cancel();
   }, []);
 
@@ -1058,6 +1077,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   // ─── Session persistence (/resume) ──────────────────────────────
   /** Persist the current shell session (transcript + context). */
   const lastPersistWarnRef = useRef(0);
+  const conversationId = useRef<string | null>(null);
   const persistSession = useCallback(() => {
     // Live transcript from the pure store — store.state.chatTranscript is a
     // render-time snapshot that misses messages appended this turn (this
@@ -1068,6 +1088,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     const firstUser = messages.find((m) => m.role === "user");
     try {
       saveSession({
+      id: conversationId.current ??= newSessionId(),
       project: store.state.project || projectName || "unnamed",
       cwd: session.getCwd(),
       branch: store.state.branch,
@@ -1104,10 +1125,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
   // kill, not written in response to it. This throttled effect persists
   // the transcript as it changes — new user messages, streaming deltas,
   // and finalized assistant replies — independent of any exit path.
-  // saveSession()'s existing same-conversation-merge-in-place logic
-  // (session-store.ts) makes repeated calls for the same turn safe: each
-  // call overwrites that one session record, it never appends a
-  // duplicate.
+  // Repeated writes target the same conversation ID, including after /resume.
   const PERSIST_THROTTLE_MS = Number(process.env.LITT_PERSIST_THROTTLE_MS ?? "") || 1000;
   const lastIncrementalPersistRef = useRef(0);
   useEffect(() => {
@@ -1163,6 +1181,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     }
     const { resolution } = outcome;
     modelRuntime.registerLocalModel(resolution);
+    // Warm the resolved model in the background — keeps it resident so the
+    // first real request skips the ~30s cold load. Fire-and-forget.
+    void warmLocalModel(lane.endpoint, resolution.tag);
     // Ephemeral only — auto-resolution must NOT write model-prefs.json.
     // A persisted REMOTE (cloud) selection stays on disk so /remote can
     // restore it later; the in-memory pick keeps the badge honest and
@@ -1258,6 +1279,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         });
         store.actions.setHoloState("APPROVAL");
         store.actions.setOverlay("none");
+      } else {
+        // Queue drained without a UI decision reaching handleApproval
+        // (bridge.cancel(), or any resolve path that bypassed the prompt).
+        // Never leave a dead approval prompt owning the keyboard.
+        store.actions.clearApproval();
+        if (store.state.holoState === "APPROVAL") {
+          store.actions.setHoloState(store.state.isProcessing ? "RUNNING" : "IDLE");
+        }
       }
     });
   }, [approvalBridge, store]);
@@ -1370,6 +1399,8 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
 
   // ─── /resume + /new ─────────────────────────────────────────────
   const restoreSession = useCallback((snapshot: SessionSnapshot) => {
+    if (conversationId.current && conversationId.current !== snapshot.id) persistSession();
+    conversationId.current = snapshot.id;
     // Transcript — restore the saved conversation exactly once.
     // markInterrupted() turns any message still "streaming" (the
     // process ended before it was finalized) into an explicit error
@@ -1411,9 +1442,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     store.actions.setOverlay("none");
     store.actions.setComposerValue("");
     act(store, `Session restored: ${snapshot.summary}`, "info", "decision", "RESUME");
-  }, [session, store]);
+  }, [session, store, persistSession]);
 
   const newSession = useCallback(() => {
+    persistSession();
+    conversationId.current = null;
     store.actions.clearChatTranscript();
     store.actions.clearMission();
     store.actions.clearToolProgress();
@@ -1422,7 +1455,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     store.actions.setOverlay("none");
     store.actions.setComposerValue("");
     act(store, "New session", "info", "decision", "NEW");
-  }, [store]);
+  }, [store, persistSession]);
 
   // ─── /ship ──────────────────────────────────────────────────────
   const runShipVerify = useCallback(async (): Promise<VerificationResult> => {
@@ -1527,6 +1560,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
 
+    // A cancel pending from a PREVIOUS turn dies here — it targeted the
+    // turn that was running, not this new submission.
+    cancelRequestedRef.current = false;
     // Clear the composer only AFTER this submission is accepted.
     // A rejected/re-entrant submit must never eat the user's draft.
     store.actions.setComposerValue("");
@@ -1545,7 +1581,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
     if (input === "/help") {
-      act(store, "Commands: /new /resume /inspect /plan /act /fix /verify /diff /ship /workspace /branch /files /model /status /doctor /settings /run /route /providers /clear /help /exit", "help", "decision", "HELP");
+      act(store, "Commands: /new /resume /inspect /plan /act /fix /verify /diff /ship /workspace /branch /files /model /status /activity /doctor /settings /run /route /providers /clear /help /exit", "help", "decision", "HELP");
       return;
     }
     // ─── Mode commands — real Plan/Act policy ─────────────────────
@@ -1795,10 +1831,16 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       return;
     }
     if (input === "/activity") {
-      // Show full (untruncated) activity log for debugging.
+      // Scrollable activity history — the full retained feed with
+      // expandable details (PgUp/PgDn, d, Esc). Works during missions.
+      store.actions.setOverlay("activity");
+      return;
+    }
+    if (input === "/activity dump") {
+      // Legacy debug dump: full (untruncated) activity log inline.
       // Filters out tool-call markup that was intentionally excluded
-      // from the normal feed — /activity is for human-readable debug,
-      // not raw model protocol internals.
+      // from the normal feed — /activity dump is for human-readable
+      // debug, not raw model protocol internals.
       const log = store.state.activityLog;
       if (log.length === 0) {
         store.actions.addActivity({ id: `act_${Date.now()}`, ts: Date.now(), type: "info", text: "No activity recorded yet." });
@@ -2358,6 +2400,81 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // executionTarget="remote" means this gate never engages.
     const intent = classifyIntent(input);
     const isMission = opts?.forceMission === true || intent === "mission";
+    // Latency-aware routing class — determined once per turn, steers
+    // AUTO catalog selection via profileHint → taskKind, and labels the
+    // turn's latency telemetry. Explicit FIXED pins still win inside
+    // route(); LOCAL lanes never consult the catalog.
+    const routingClass: RoutingClass = determineRoutingClass(
+      isMission ? "mission" : intent === "read" || opts?.forceRead === true ? "read" : "chat",
+      input,
+    );
+    const profileHint = profilePreference(routingClass);
+
+    // ─── Deterministic local-tool missions — ALL users ──────────────
+    // A mission that decomposes into canonical local tools (git status,
+    // package inspect, file listing, typecheck/lint/build/test,
+    // filesystem search) produces an evidence-grounded summary with NO
+    // model inference. This runs for signed-in and model-available
+    // sessions too, not only when the capability gate blocks the model
+    // path: deterministic routing is the required behavior for
+    // tool-answerable requests — a weak local model can skip tool calls
+    // entirely and still report COMPLETE with no visible evidence (the
+    // observed P0 fake-evidence failure).
+    if (isMission) {
+      // ─── Filesystem search dispatch ────────────────────────────
+      // "find/search <name> in <place>" is decided deterministically
+      // BEFORE the generic local-tool match and long before the model:
+      // execute (real filesystem.search), clarify (broad or untargeted
+      // scope — ask instead of guessing), or refuse (denied location).
+      // A tool-less model must never see these — it only fabricates a
+      // refusal ("can't access the filesystem") or invents paths.
+      const fsMatch = matchFilesystemSearch(input);
+      if (fsMatch) {
+        if (fsMatch.action === "execute") {
+          const fsMissionMatch: import("../lib/local-tool-mission.js").LocalToolMissionMatch = {
+            calls: [fsMatch.call],
+            summary: fsMatch.call.label,
+            goal: input,
+          };
+          const fsPerf = PerfTrace.start("local");
+          await runLocalToolMission(input, fsMissionMatch, session, store, projectRoot, fsPerf);
+          persistSession();
+          return;
+        }
+        // clarify / refuse — a deterministic answer, no model, no mission.
+        store.actions.addChatMessage({
+          role: "user",
+          content: input,
+          ts: Date.now(),
+          status: "complete",
+        });
+        store.actions.addChatMessage({
+          role: "assistant",
+          content: fsMatch.action === "clarify" ? fsMatch.question : fsMatch.reason,
+          ts: Date.now(),
+          status: "complete",
+          servedModel: "filesystem-router",
+        });
+        store.actions.addActivity({
+          id: `act_${Date.now()}_fs_route`,
+          ts: Date.now(),
+          type: "info",
+          tag: "FS-ROUTE",
+          text: fsMatch.action === "clarify"
+            ? "Filesystem search: clarification required (scope/target)"
+            : "Filesystem search: denied location",
+        });
+        persistSession();
+        return;
+      }
+      const localToolMatch = matchLocalToolMission(input);
+      if (localToolMatch) {
+        const localPerf = PerfTrace.start("local");
+        await runLocalToolMission(input, localToolMatch, session, store, projectRoot, localPerf);
+        persistSession();
+        return;
+      }
+    }
 
     // A local model counts as available only after the real Ollama
     // endpoint responds and reports at least one installed model.
@@ -2471,6 +2588,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // build, deploy) are completely untouched. Deliberately placed
     // BEFORE @mention context resolution so a hit skips that work too.
     // See lib/utility-lane.ts for why this exists and how it's scoped.
+    let utilityDeclineContext: string | null = null;
     if (intent === "chat" && !isMission) {
       const utilityMatch = classifyUtilityIntent(input);
       if (utilityMatch) {
@@ -2478,6 +2596,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         const gateway = session.getGateway();
         const cwd = session.getCwd();
         perf.mark("utility_lookup_start");
+        const utilityStartMs = Date.now();
         const lookup = await executeUtilityLookup(utilityMatch, async (toolId, args) => {
           const r = await gateway.execute({
             toolId,
@@ -2490,6 +2609,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         });
         perf.mark("utility_lookup_end");
         if (lookup.satisfied) {
+          recordLatency("utility-lane", routingClass, Date.now() - utilityStartMs, true);
           store.actions.addChatMessage({ role: "user", content: input, ts: Date.now(), status: "complete" });
           store.actions.addChatMessage({ role: "assistant", content: lookup.text, ts: Date.now(), status: "complete", servedModel: "utility-lane" });
           store.actions.addActivity({
@@ -2506,9 +2626,21 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         }
         // Direct path could not satisfy the request (e.g. empty search,
         // unparseable expression) — nothing was rendered; fall through
-        // to the normal chat path below exactly as if no utility match
-        // existed. The wasted lookup attempt is a cheap DuckDuckGo/NWS
-        // call, never an LLM round trip.
+        // to the normal chat path below. When a real tool already ran,
+        // tell the model WHAT was attempted and how it ended — otherwise
+        // the chat model starts context-free, cannot see that a search
+        // already happened, and may repeat the identical dead end (or
+        // claim it never searched). The note is runtime truth, not a
+        // fabricated result.
+        if (lookup.toolsUsed.length > 0) {
+          utilityDeclineContext =
+            `[Runtime note: a direct ${utilityMatch.kind} lookup already ran ` +
+            `${lookup.toolsUsed.join(", ")} for this request and returned: ` +
+            `${lookup.reason ?? "no usable result"}. You may retry web.search with a ` +
+            `different query, use web.fetch on a specific URL, or answer honestly ` +
+            `that the information could not be found — do not claim a lookup ` +
+            `succeeded when it did not.]`;
+        }
       }
     }
 
@@ -2520,7 +2652,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       terminalLog: terminalLog.current,
       errorLog: errorLog.current,
     });
-    const modelInput = opts?.promptOverride ?? contextResult.prompt;
+    const baseModelInput = opts?.promptOverride ?? contextResult.prompt;
+    const modelInput = utilityDeclineContext
+      ? `${baseModelInput}\n\n${utilityDeclineContext}`
+      : baseModelInput;
     // Context (@mentions, terminal/error log) resolved into the model
     // prompt. Shared by CHAT and MISSION — emitted before the path split
     // so neither path's `intent_classified → route` span silently bundles
@@ -2579,6 +2714,11 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // call in this turn (including the catch block) must target
         // THIS id specifically (see ChatTranscriptStore invariant 7).
         let readAssistantMsgId: string | null = null;
+        // Latency telemetry — model id + call start are only populated
+        // once the optional synthesis model call actually fires, so a
+        // tool-only error is never recorded as a model failure.
+        let synthModelId: string | null = null;
+        let synthStartMs = 0;
         try {
           const gateway = session.getGateway();
           const cwd = session.getCwd();
@@ -2621,11 +2761,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             const synthesisPrompt = opts?.forceRead === true
               ? formatInspectionForSynthesis(readResults, inspectFocus)
               : formatReadResultsForSynthesis(input, readResults);
-            const routed = routeForTarget(store, modelRuntime, signedIn, localLane, synthesisPrompt);
+            const routed = routeForTarget(store, modelRuntime, signedIn, localLane, synthesisPrompt, undefined, profileHint);
             store.actions.setActiveModel(routed.label);
             await awaitRemoteReady(store, client, store.state.executionTarget);
             const adapter = resolveModelProvider(store.state.executionTarget, client, routed);
-            if (adapter instanceof RemoteModelProvider) currentRemoteModelRef.current = adapter;
+            if (adapter instanceof RemoteModelProvider) {
+              currentRemoteModelRef.current = adapter;
+              if (cancelRequestedRef.current) adapter.cancel();
+            }
             store.actions.setActiveProvider(adapter.providerId);
             // Start the assistant message for streaming synthesis.
             readAssistantMsgId = store.actions.addChatMessage({
@@ -2636,6 +2779,8 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               servedModel: routed.label,
             });
             let synthesized = "";
+            synthModelId = routed.id;
+            synthStartMs = Date.now();
             const modelResult = await adapter.stream(
               [{ role: "user", content: synthesisPrompt }],
               (event) => {
@@ -2647,6 +2792,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               },
             );
             perf.mark("finalize");
+            recordLatency(routed.id, routingClass, Date.now() - synthStartMs, true);
             store.actions.finalizeAssistantMessage(readAssistantMsgId!, {
               content: synthesized || modelResult.content || "No synthesis produced.",
               status: "complete",
@@ -2688,6 +2834,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           });
         } catch (err) {
           const errText = err instanceof Error ? err.message : String(err);
+          if (synthModelId) {
+            recordLatency(synthModelId, routingClass, Date.now() - synthStartMs, false);
+          }
           perf.mark("finalize");
           if (readAssistantMsgId) {
             store.actions.finalizeAssistantMessage(readAssistantMsgId, {
@@ -2757,6 +2906,18 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // this turn (including the catch block) must target THIS id
         // specifically (see ChatTranscriptStore invariant 7).
         let chatAssistantMsgId: string | null = null;
+        // Latency telemetry — populated at the agent-loop boundary so a
+        // routing/planning failure never records a fake model failure.
+        let chatModelId: string | null = null;
+        let chatStartMs = 0;
+        // Register the turn's AbortController IMMEDIATELY — Esc during
+        // routing/planning must still land: runAgentLoop's round-0
+        // aborted-guard then exits instantly once reached.
+        const turnAbort = new AbortController();
+        currentLocalAbortRef.current = turnAbort;
+        // Esc may already have fired during classification/routing —
+        // honor the pending cancel rather than launching a dead turn.
+        if (cancelRequestedRef.current) turnAbort.abort();
         try {
           // ─── CANONICAL PATH — one brain, one RuntimeStore ───
           // Reuse the session's canonical ExecutionGateway + RuntimeStore.
@@ -2765,20 +2926,21 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           const gateway = session.getGateway();
           const tools = gateway.getTools();
           const agentStore = session.getStore();
-          const routed = routeForTarget(store, modelRuntime, signedIn, localLane, modelInput);
+          const routed = routeForTarget(store, modelRuntime, signedIn, localLane, modelInput, undefined, profileHint);
         perf.mark("route");
           // Routing trace — requested (brain/policy) vs resolved (route()).
           // The brain label is the configured policy identity; the resolved
           // label is what route() actually picked for this input. If they
           // differ, fallbackReason explains why (AUTO selection, escalation,
-          // availability fallback, etc.).
+          // availability fallback, etc.). The routing class suffix shows
+          // which latency-aware lane steered AUTO selection.
           const requestedModel = modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
           store.actions.addActivity({
             id: `act_${Date.now()}_route`,
             ts: Date.now(),
             type: "info",
             tag: "ROUTE",
-            text: `${routed.label}`,
+            text: `${routed.label} · ${routingClass}`,
           });
           // Set the CONFIGURED model label — the actual ACTIVE model is
           // confirmed after streaming sees the runtime response model.
@@ -2810,7 +2972,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           const model = resolveModelProvider(store.state.executionTarget, client, routed, {
             tools: tools.list(),
           });
-          if (model instanceof RemoteModelProvider) currentRemoteModelRef.current = model;
+          if (model instanceof RemoteModelProvider) {
+            currentRemoteModelRef.current = model;
+            if (cancelRequestedRef.current) model.cancel();
+          }
           // Truthful label: this marks the provider adapter being READY,
           // not an outbound request. The actual request fires inside
           // runAgentLoop below; we do not claim provider latency here.
@@ -2853,6 +3018,8 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           const toolCallFilter = createToolCallStreamFilter();
 
           const chatAbort = beginAbort();
+          chatModelId = routed.id;
+          chatStartMs = Date.now();
           const result = await runAgentLoop(modelInput, {
             model, tools, shell: session.getShell(),
             gateway,
@@ -2901,6 +3068,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               }
             },
           });
+          // Canonical latency record — the same durationMs the transcript
+          // shows; model.activeModel reflects any mid-run escalation swap.
+          recordLatency(
+            model.activeModel ?? routed.id,
+            routingClass,
+            result.durationMs,
+            result.termination === "complete",
+          );
           const chatTail = toolCallFilter.flush();
           if (chatTail && chatAssistantMsgId) {
             store.actions.appendAssistantDelta(chatAssistantMsgId, chatTail);
@@ -2931,15 +3106,16 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             });
           }
           const seconds = (result.durationMs / 1000).toFixed(1);
-          // Single concise DONE event — not raw response body. Tagged
-          // DONE (not CHAT) so the live feed keeps the completion marker
-          // while the user-prompt echo stays filtered out.
+          const chatCompleted = result.termination === "complete";
+          // Single concise terminal event — not raw response body. DONE is
+          // claimed ONLY when the loop actually completed; every other
+          // termination reports its real outcome (never DONE-on-failure).
           store.actions.addActivity({
             id: `act_${Date.now()}_done`,
             ts: Date.now(),
-            type: result.termination === "complete" ? "agent.complete" : "agent.stopped",
-            tag: result.termination === "complete" ? "DONE" : "FAIL",
-            text: `LiTT responded · ${seconds}s${chatToolCallCount > 0 ? ` · ${chatToolCallCount} tools` : ""}`,
+            type: chatCompleted ? "agent.complete" : "agent.stopped",
+            tag: chatCompleted ? "DONE" : "FAIL",
+            text: `${chatCompleted ? "LiTT responded" : `LiTT ${result.termination === "cancelled" ? "cancelled" : "did not complete"}`} · ${seconds}s${chatToolCallCount > 0 ? ` · ${chatToolCallCount} tools` : ""}`,
           });
           // CHAT terminal truth: a non-complete termination is a real
           // failure/cancellation, never IDLE-over-a-stale-mission. The
@@ -2952,8 +3128,18 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
               result.termination === "cancelled" ? "CANCELLED" : "FAILED",
             );
           }
+          // Workstream terminal truth: chat turns emit no run.completed
+          // or mission.* lifecycle events, so without this the dock's
+          // overallStatus stays "running" forever after the turn ends.
+          store.actions.workstreamPush((ws) => {
+            if (result.termination === "complete") ws.setComplete();
+            else ws.setFailed();
+          });
         } catch (err) {
           const errText = `Agent error: ${err instanceof Error ? err.message : String(err)}`;
+          if (chatModelId && chatStartMs) {
+            recordLatency(chatModelId, routingClass, Date.now() - chatStartMs, false);
+          }
           store.actions.addActivity({
             id: `act_${Date.now()}_err`,
             ts: Date.now(), type: "error", tag: "ERROR",
@@ -2971,6 +3157,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           }
           store.actions.setHoloState("FAILED");
           store.actions.scheduleIdle(2000);
+          // An exception mid-turn is a failed workstream, not a
+          // perpetually "running" one.
+          store.actions.workstreamPush((ws) => ws.setFailed());
         } finally {
           currentRemoteModelRef.current = null;
           // ONE canonical transition out of a run: every terminal
@@ -3041,6 +3230,15 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
       // this turn (including the catch block) must target THIS id
       // specifically (see ChatTranscriptStore invariant 7).
       let missionAssistantMsgId: string | null = null;
+      // Latency telemetry — populated at the agent-loop boundary so a
+      // routing/planning failure never records a fake model failure.
+      let missionModelId: string | null = null;
+      let missionModelStartMs = 0;
+      const turnAbort = new AbortController();
+      currentLocalAbortRef.current = turnAbort;
+      // Esc may already have fired during classification/routing —
+      // honor the pending cancel rather than launching a dead turn.
+      if (cancelRequestedRef.current) turnAbort.abort();
       try {
         // ─── CANONICAL PATH — one brain, one RuntimeStore ───
         const gateway = session.getGateway();
@@ -3082,16 +3280,19 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         const routed = routeForTarget(
           store, modelRuntime, signedIn, localLane, modelInput,
           resolveMissionLocalModelRequest(localLane, store.state.selectedModel),
+          profileHint,
         );
         perf.mark("route");
         // Routing trace — requested (brain/policy) vs resolved (route()).
+        // The routing class suffix shows which latency-aware lane
+        // steered AUTO selection (same convention as the CHAT path).
         const requestedModel = modelRuntime.brainLabel(store.state.routingMode, store.state.selectedModel);
         store.actions.addActivity({
           id: `act_${Date.now()}_route`,
           ts: Date.now(),
           type: "info",
           tag: "ROUTE",
-          text: `${routed.label}`,
+          text: `${routed.label} · ${routingClass}`,
         });
         // Set the CONFIGURED model label — the actual ACTIVE model is
         // confirmed after streaming sees the runtime response model.
@@ -3116,7 +3317,10 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         const model = resolveModelProvider(store.state.executionTarget, client, routed, {
           tools: tools.list(),
         });
-        if (model instanceof RemoteModelProvider) currentRemoteModelRef.current = model;
+        if (model instanceof RemoteModelProvider) {
+          currentRemoteModelRef.current = model;
+          if (cancelRequestedRef.current) model.cancel();
+        }
         // Truthful label: provider adapter READY, not an outbound request.
         // The actual request fires inside runAgentLoop below.
         perf.mark("provider_ready");
@@ -3229,6 +3433,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             // verification failure (observed: "scan" failed on
             // "Apply approved repairs" having no possible evidence).
             mutationRequested: detectMutationRequest(input),
+            abortSignal: turnAbort.signal,
             projectContext: {
               name: projectName ?? "unnamed",
               root: projectRoot,
@@ -3319,6 +3524,8 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         // request and all tool rounds happen inside runAgentLoop. This
         // separates planning (plan_start → plan_end) from execution.
         perf.mark("agent_loop_start");
+        missionModelId = routed.id;
+        missionModelStartMs = Date.now();
 
         // Cancel during planning must not roll into execution.
         if (missionAbort.aborted) {
@@ -3573,6 +3780,14 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
             }
           },
         });
+        // Canonical latency record — the same durationMs the transcript
+        // shows; model.activeModel reflects any mid-run escalation swap.
+        recordLatency(
+          model.activeModel ?? routed.id,
+          routingClass,
+          result.durationMs,
+          result.termination === "complete",
+        );
         const missionTail = toolCallFilter.flush();
         if (missionTail && missionAssistantMsgId) {
           store.actions.appendAssistantDelta(missionAssistantMsgId, missionTail);
@@ -3608,27 +3823,38 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
           }
         }
 
+        // ─── Cancelled runs settle CANCELLED — never re-verified ───
+        // The operator stopped this run (Esc). It did not complete and
+        // is NOT a failure: the VERIFYING phase and the session.verify()
+        // fallback below must be skipped — otherwise a cancelled mission
+        // still runs the full check suite (observed: a 3s cancel became
+        // ~46s of gate work) and reports a dishonest FAILED instead of
+        // CANCELLED.
+        const userCancelled = result.termination === "cancelled";
+
         // ─── VerificationGate owns completion ───
         // The agent loop already ran the gate (if configured). Use the
         // loop's verification result if available — it contains the
         // repair/revalidation outcome. Only run the gate separately if
         // the loop didn't (e.g. no gate was configured).
-        store.actions.setHoloState("VERIFYING");
-        store.actions.updateMissionState("VERIFYING");
-        store.actions.addActivity({
-          id: `act_${Date.now()}_verify`,
-          ts: Date.now(),
-          type: "info",
-          tag: "VERIFY",
-          text: "Running verification gate",
-        });
+        if (!userCancelled) {
+          store.actions.setHoloState("VERIFYING");
+          store.actions.updateMissionState("VERIFYING");
+          store.actions.addActivity({
+            id: `act_${Date.now()}_verify`,
+            ts: Date.now(),
+            type: "info",
+            tag: "VERIFY",
+            text: "Running verification gate",
+          });
 
-        await agentStore.setMissionVerifying();
+          await agentStore.setMissionVerifying();
+        }
 
         let verificationSummary = "Verification not run";
         let verification: VerificationResult | null = null;
 
-        try {
+        if (!userCancelled) try {
           // Use the loop's verification result if it ran the gate.
           // When the loop terminated WITHOUT running the gate (honest
           // failure report, max rounds) a read-only inspection mission
@@ -3788,6 +4014,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
         const errText = err instanceof MissionPlanningError
           ? err.message
           : `Agent error: ${err instanceof Error ? err.message : String(err)}`;
+        if (missionModelId && missionModelStartMs) {
+          recordLatency(missionModelId, routingClass, Date.now() - missionModelStartMs, false);
+        }
         store.actions.addActivity({
           id: `act_${Date.now()}_err`,
           ts: Date.now(), type: "error", tag: "ERROR",
@@ -3850,7 +4079,7 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     submitRef.current = submit;
   }, [submit]);
 
-  const handleApproval = useCallback(async (approved: boolean) => {
+  const handleApproval = useCallback(async (approved: boolean, scope: "once" | "session" = "once") => {
     const prompt = store.state.approvalPrompt;
     if (!prompt) return;
 
@@ -3879,7 +4108,9 @@ export function useCockpitController({ session, store, approvalBridge, sessionBr
     // Resolve the gateway's pending approval promise.
     // The gateway will then verifyApproval() → VerifiedApproval → continue.
     // The UI only provides the boolean — never the VerifiedApproval itself.
-    approvalBridge.decide(approved);
+    // "session" scope records a command-class grant so identical safe-class
+    // requests stop re-prompting (Approve similar / [⇧a]).
+    approvalBridge.decide(approved, scope);
 
     // Don't set IDLE here — the gateway execution is still in flight.
     // The submit() callback will set the final holo state when

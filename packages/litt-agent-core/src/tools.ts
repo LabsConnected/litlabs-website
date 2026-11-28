@@ -29,6 +29,7 @@ import {
   writeFile,
   searchFiles,
   inspectPackageJson,
+  findFilesByName,
   runTypecheck,
   runTest,
   runBuild,
@@ -116,6 +117,28 @@ const SEARCH_DEF: ToolDefinition = {
       query: { type: "string", description: "Search query" },
     },
     required: ["query"],
+  },
+  readOnly: true,
+};
+
+const FIND_FILES_DEF: ToolDefinition = {
+  id: "filesystem.search",
+  name: "filesystem_search",
+  description:
+    "Recursively search for files and folders BY NAME. path: '.' or " +
+    "empty searches the project sandbox; an absolute path (e.g. " +
+    "\"C:\\LiTT\") searches that explicitly user-authorized location. " +
+    "System and credential directories are always denied. Matches are " +
+    "real paths from an actual directory walk — never fabricated.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "Search root: \".\" for the project, or an explicit absolute path" },
+      name: { type: "string", description: "Filename or glob to match (e.g. \"package.json\", \"*.ts\")" },
+      maxResults: { type: "number", description: "Result cap (default 100, max 500)" },
+      maxDepth: { type: "number", description: "Directory depth cap (default 10, max 25)" },
+    },
+    required: ["name"],
   },
   readOnly: true,
 };
@@ -284,20 +307,29 @@ const searchHandler: ToolHandler = async (ctx, args) => {
   return searchFiles(ctx.shell, query);
 };
 
+const findFilesHandler: ToolHandler = async (ctx, args) => {
+  return findFilesByName(ctx.shell, {
+    path: typeof args.path === "string" ? args.path : ".",
+    name: typeof args.name === "string" ? args.name : "",
+    maxResults: typeof args.maxResults === "number" ? args.maxResults : undefined,
+    maxDepth: typeof args.maxDepth === "number" ? args.maxDepth : undefined,
+  });
+};
+
 const inspectPkgHandler: ToolHandler = async (ctx) => {
   return inspectPackageJson(ctx.shell, ctx.cwd);
 };
 
 const checkHandler: ToolHandler = async (ctx) => {
-  return runTypecheck(ctx.shell, ctx.cwd);
+  return runTypecheck(ctx.shell, ctx.cwd, { signal: ctx.signal, onStream: ctx.onStream });
 };
 
 const testHandler: ToolHandler = async (ctx) => {
-  return runTest(ctx.shell, ctx.cwd);
+  return runTest(ctx.shell, ctx.cwd, { signal: ctx.signal, onStream: ctx.onStream });
 };
 
 const buildHandler: ToolHandler = async (ctx) => {
-  return runBuild(ctx.shell, ctx.cwd);
+  return runBuild(ctx.shell, ctx.cwd, { signal: ctx.signal, onStream: ctx.onStream });
 };
 
 const runHandler: ToolHandler = async (ctx, args) => {
@@ -330,6 +362,7 @@ const ENTRIES: Record<string, ToolEntry> = {
   "project.read_file": { definition: READ_FILE_DEF, handler: readFileHandler, metadata: READ_ONLY_META },
   "project.write_file": { definition: WRITE_FILE_DEF, handler: writeFileHandler, metadata: MUTATING_META },
   "project.search": { definition: SEARCH_DEF, handler: searchHandler, metadata: READ_ONLY_META },
+  "filesystem.search": { definition: FIND_FILES_DEF, handler: findFilesHandler, metadata: READ_ONLY_META },
   "project.inspect_package": { definition: INSPECT_PKG_DEF, handler: inspectPkgHandler, metadata: READ_ONLY_META },
   "project.check": { definition: CHECK_DEF, handler: checkHandler, metadata: READ_ONLY_META },
   "project.test": { definition: TEST_DEF, handler: testHandler, metadata: READ_ONLY_META },

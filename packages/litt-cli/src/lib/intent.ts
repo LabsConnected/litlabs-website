@@ -64,6 +64,17 @@ const MISSION_TRIGGERS = [
  */
 const MISSION_PHRASES: RegExp[] = [
   /\bmake\s+(?:\w+\s+){0,2}changes?\b/,
+  // Filesystem browsing — "list files in C:\", "show me files in
+  // C:\Temp", "what files are on my C drive", "directories under /tmp".
+  // None of "list"/"show"/"what" is safe as a bare MISSION_TRIGGERS word
+  // (far too common in ordinary chat), but "files/folders/directories"
+  // PLUS a location preposition is an unambiguous filesystem request —
+  // this is bounded read-only inspection via real tools (list_dir/glob),
+  // never a project-state READ query, so it must reach the agent loop.
+  /\b(files|folders|directories)\b[\s\S]*\b(in|on|under|inside)\b/,
+  // Bare drive/path mentions without the word "files" — "what's on my
+  // C drive", "what's in C:\", "look at what's on the C drive".
+  /\b(on|in)\s+(my\s+|the\s+)?[a-z]\s*:\\|\b[a-z]\s+drive\b/i,
 ];
 
 /** Escape a string for literal use inside a RegExp. */
@@ -117,6 +128,17 @@ const INFO_PREFIXES = [
   "summarize",
   "describe",
 ];
+
+/**
+ * on/in-a-location filesystem phrasing for the INFO_PREFIXES carve-out —
+ * narrower than MISSION_PHRASES' bare "c drive" noun match, which would
+ * hijack definitional questions ("explain what the c drive is").
+ */
+const INFO_FS_LOCATION = new RegExp(
+  "\\b(?:on|in|inside|under)\\s+(?:my\\s+|the\\s+|a\\s+)?[a-z]\\s*:\\\\" +
+  "|\\b(?:on|in|inside|under)\\s+(?:my\\s+|the\\s+|a\\s+)?[a-z]\\s+drive\\b",
+  "i",
+);
 
 /**
  * Leading politeness/modal wrappers. Stripped before detecting the
@@ -174,14 +196,24 @@ export function classifyIntent(input: string): Intent {
     return "chat";
   }
 
-  // Greetings / casual
+  // Greetings / casual — but ONLY when the rest of the message carries
+  // no action or read signal. A conversational preamble must not hijack
+  // a real request: "nice can you search my c drive" starts with "nice"
+  // but asks for a filesystem search (P0 — observed live: it classified
+  // CHAT, went to a tool-less model, and the model claimed it couldn't
+  // access the filesystem). "ok run the tests" is a mission wearing a
+  // polite opener, not a greeting.
   const casual = [
     "hi", "hello", "hey", "whats up", "what's up", "sup", "yo",
     "thanks", "thank you", "ok", "okay", "cool", "nice", "bye", "goodbye",
     "how are you", "who are you", "what are you", "what can you do",
     "help me", "what do you do",
   ];
-  if (casual.some((c) => lower === c || lower.startsWith(c + " "))) {
+  if (
+    casual.some((c) => lower === c || lower.startsWith(c + " ")) &&
+    !hasMissionSignal(lower) &&
+    !isReadIntent(lower, core)
+  ) {
     return "chat";
   }
 
@@ -195,6 +227,22 @@ export function classifyIntent(input: string): Intent {
   // Informational requests: "explain ...", "what does ... do", etc.
   // These ask for an explanation, not execution.
   if (startsWithAct(core, INFO_PREFIXES)) {
+    // "explain what this project does" asks about THIS project's
+    // identity — tool-answerable via real inspection, not general
+    // knowledge. Without this, the model fabricates an ungrounded
+    // answer from no evidence.
+    if (isProjectExplain(core)) {
+      return "read";
+    }
+    // Filesystem-location questions under an info wrapper are still tool
+    // requests: "what is on my c drive" / "what is in C:\Temp" name a real
+    // location — the model cannot answer them from memory (observed live:
+    // routed CHAT → generic refusal). Only the on/in-location forms fire
+    // here: "explain what the c drive is" is a definition question and
+    // must stay CHAT.
+    if (INFO_FS_LOCATION.test(lower)) {
+      return "mission";
+    }
     // Narrow carve-out: "summarize the changes" / "summarize what
     // changed" ask about THIS project's git state (tool-answerable),
     // not general knowledge — the same CHAT-vs-READ distinction already
@@ -206,6 +254,13 @@ export function classifyIntent(input: string): Intent {
     if (!(core.startsWith("summarize ") && isReadIntent(lower, core))) {
       return "chat";
     }
+  }
+
+  // Project-self-reference explain with a non-info-prefix phrasing —
+  // "walk me through this codebase", "give me an overview of my repo".
+  // Same groundedness requirement: only inspection tools answer it.
+  if (isProjectExplain(core)) {
+    return "read";
   }
 
   // ─── READ intent — bounded read-only project inspection ───
@@ -227,11 +282,15 @@ export function classifyIntent(input: string): Intent {
 
   // Questions (not asking for action) are chat. Info-prefix questions are
   // already handled above; this catches remaining non-action questions
-  // like "is the sky blue?".
+  // like "is the sky blue?". Search/find/locate verbs are excluded the
+  // same way as build/test — "can you find package.json?" ends with "?"
+  // but is a filesystem request, not conversation.
   if (
     lower.endsWith("?") &&
     !lower.includes("fix") && !lower.includes("run") &&
-    !lower.includes("build") && !lower.includes("test")
+    !lower.includes("build") && !lower.includes("test") &&
+    !lower.includes("find") && !lower.includes("search") &&
+    !lower.includes("locate")
   ) {
     return "chat";
   }
@@ -279,12 +338,37 @@ const READ_NOUNS = [
  * so "explain what framework means" stays CHAT (info prefix) and
  * "say the word framework" stays CHAT (speech act).
  */
+/**
+ * A files/folders mention followed by an explicit NON-workspace location
+ * ("files in C:\", "files on my D drive", "files under /tmp", "files in
+ * src/auth"). Those stay MISSION — the location may sit outside the
+ * project sandbox and needs the agent loop's authorization path. A
+ * location that names the workspace itself ("in this directory", "in the
+ * project", "in my workspace", "inside here") is NOT excluded: it means
+ * the workspace root — a bounded project.list_files read.
+ */
+const NON_WORKSPACE_FILE_LOCATION = new RegExp(
+  "\\b(?:files?|folders?|directories|directory)\\b[^.?!]*" +
+  "\\b(?:in|inside|on|under|from)\\s+" +
+  "(?!(?:this|the|my|that|current)\\s+(?:directory|folder|dir|project|repo|repository|workspace|codebase|cwd)\\b|here\\b)",
+  "i",
+);
+
 const READ_PATTERNS: Array<{ test: (lower: string, core: string) => boolean }> = [
   // Git status is a bounded read-only inspection, even when phrased
   // imperatively with "check". Do not promote it to a mission merely
-  // because "check" is also a generic mission trigger.
-  { test: (_l, c) => /^check\s+(the\s+)?(current\s+)?git\s+status\b/.test(c) },
-  { test: (_l, c) => /^show\s+(me\s+)?(the\s+)?(current\s+)?git\s+status\b/.test(c) },
+  // because "check" is also a generic mission trigger. "branch"/"state"
+  // are the same evidence family — "show my current git branch and all
+  // modified files" is a bounded read, not a model-driven mission.
+  { test: (_l, c) => /^check\s+(the\s+|my\s+)?(current\s+)?git\s+(status|branch|state)\b/.test(c) },
+  { test: (_l, c) => /^show\s+(me\s+)?(the\s+|my\s+)?(current\s+)?git\s+(status|branch|state)\b/.test(c) },
+  // Git/working-tree queries that name a read noun without the exact
+  // "git status" phrase — "what branch am i on", "show my branch",
+  // "list modified files". A read verb + a git noun keeps it bounded;
+  // mutation verbs (switch/checkout/merge) are absent by construction.
+  { test: (_l, c) =>
+      /^(?:show|what|get|check|tell me|list)\b[\s\S]*\b(?:branch|git status|modified|uncommitted)\b/.test(c)
+      || /^current branch\b/.test(c) },
   // "what framework is this" / "what package manager does this use"
   { test: (_l, c) => /^what\s+(framework|stack|package manager|package-manager|scripts|dependencies|deps|packages|project name|project type|build tool|bundler|node version|typescript version)\b/.test(c) },
   // "what files changed" / "what changed"
@@ -310,6 +394,32 @@ const READ_PATTERNS: Array<{ test: (lower: string, core: string) => boolean }> =
   // but still requires the leading verb so this stays a narrow git-log
   // template, not a generic "changed" matcher.
   { test: (_l, c) => /^show\b/.test(c) && /\bcommits?\b/.test(c) && /\b(changed|changes)\b/.test(c) },
+  // ─── Workspace file listing — bounded, deterministic, no model ──────
+  // "list 10 files" / "show my project files" / "what files are here" —
+  // bounded read-only workspace queries answerable by project.list_files.
+  // Without these, the request classified as CHAT and went to the model
+  // with NO tools: a slow/weak local model produced no file listing
+  // (the observed >120s stall) or fabricated one. Explicit locations
+  // outside workspace nouns ("files in C:\") stay MISSION via
+  // NON_WORKSPACE_FILE_LOCATION — they may escape the project sandbox.
+  { test: (_l, c) =>
+      /^(?:list|show)\s+(?:me\s+)?(?:the\s+|my\s+|all\s+|some\s+|first\s+|up\s+to\s+|around\s+|about\s+|\d+\s+|project\s+|workspace\s+|repo\s+|repository\s+)*files?\b/.test(c)
+      && !NON_WORKSPACE_FILE_LOCATION.test(c) },
+  { test: (_l, c) =>
+      /^what\s+files?\b/.test(c)
+      && !NON_WORKSPACE_FILE_LOCATION.test(c)
+      && !/\b(?:changed|changes|modified|deleted|created|added|committed|contain(?:s|ing)?|matching|named|called)\b/.test(c) },
+  // "what's inside this directory" / "what is in the project/workspace"
+  { test: (_l, c) =>
+      /^what'?s?\s+(?:inside|in)\s+(?:this|the|my|current)\s+(?:directory|folder|dir|project|repo|repository|workspace|codebase|cwd)\b/.test(c)
+      || /^what\s+is\s+(?:inside|in)\s+(?:this|the|my|current)\s+(?:directory|folder|dir|project|repo|repository|workspace|codebase|cwd)\b/.test(c) },
+  // "go through my files" — bounded workspace browse.
+  { test: (_l, c) => /^go\s+through\s+(?:my\s+|the\s+)?files?\b/.test(c) },
+  // "read package.json" / "cat config.ts" — bounded single-file read
+  // via project.read_file. The token must look like a filename (has an
+  // extension) so "read the logs"/"show me the diff" don't match.
+  { test: (_l, c) =>
+      /^(?:read|cat|print|show)\s+(?:me\s+)?(?:the\s+|my\s+|this\s+|file\s+)?["']?[\w./~-]+\.[a-z0-9]{1,10}["']?\b/i.test(c) },
 ];
 
 /**
@@ -338,4 +448,25 @@ function isReadIntent(lower: string, core: string): boolean {
     }
   }
   return false;
+}
+
+/**
+ * Project-self-reference explanation: the query asks for an explanation
+ * of THIS project's identity/structure ("explain what this project
+ * does", "describe my repo", "walk me through this codebase", "what
+ * does our app do"). Deliberately narrow — requires BOTH an info verb
+ * AND an unambiguous self-reference (this/my/our + project noun) so
+ * "explain the repository pattern" or "what does the app store
+ * globally" stay CHAT/MISSION as before.
+ *
+ * Also requires NO mission signal: "scan this repo and tell me what
+ * needs attention" or "inspect this project ... run typecheck" contain
+ * a self-reference and an info verb in a subordinate clause, but their
+ * primary demand is action — read-only inspection tools cannot answer
+ * them. Those must reach the agent loop, not the READ lane.
+ */
+export function isProjectExplain(core: string): boolean {
+  return /\b(?:this|my|our)\s+(?:project|repo|repository|codebase|code base|workspace|package|app|application|monorepo)\b/.test(core)
+    && /\b(?:explain|describe|summarize|tell me about|tell me what|what does|what is|what do|walk me through|walk through|go through|overview)\b/.test(core)
+    && !hasMissionSignal(core);
 }
